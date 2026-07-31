@@ -38,11 +38,14 @@ private func tempPath(_ n: String) -> String { "/tmp/vibecat-e2e-\(n)-\(getpid()
     #expect(out?.contains("\"permissionDecision\":\"allow\"") == true)
 
     let snapshot = store.snapshot()
-    #expect(snapshot.sessions.count == 1)
     #expect(snapshot.aggregate == .waiting)
-    #expect(snapshot.sessions[0].project == "api")
-    #expect(snapshot.sessions[0].activity == "Bash rm -rf build/")
-    #expect(snapshot.sessions[0].origin.termSession == "w0t1p0:ABC")
+    // #expect is a soft assertion, so indexing after it would trap and take the
+    // whole suite down instead of failing this one test. #require stops here.
+    let session = try #require(snapshot.sessions.first)
+    #expect(snapshot.sessions.count == 1)
+    #expect(session.project == "api")
+    #expect(session.activity == "Bash rm -rf build/")
+    #expect(session.origin.termSession == "w0t1p0:ABC")
 }
 
 @Test func threeSessionsAggregateToTheMostUrgent() async throws {
