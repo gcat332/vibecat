@@ -47,3 +47,31 @@ import Testing
     var buf = Data()
     #expect(WireCodec.splitLines(&buf).isEmpty)
 }
+
+@Test func splitLinesSkipsBlankLines() {
+    var buf = Data("{\"a\":1}\n\n{\"b\":2}\n".utf8)
+    let lines = WireCodec.splitLines(&buf)
+    #expect(lines.count == 2)
+    #expect(String(decoding: lines[0], as: UTF8.self) == "{\"a\":1}")
+    #expect(String(decoding: lines[1], as: UTF8.self) == "{\"b\":2}")
+    #expect(buf.isEmpty)
+}
+
+@Test func splitLinesHandlesASlicedBuffer() {
+    // Data preserves a parent's indices when sliced, so anything assuming
+    // startIndex == 0 breaks here.
+    let parent = Data("XXXX{\"a\":1}\n{\"b\":2}\n".utf8)
+    var buf = Data(parent.dropFirst(4))
+    let lines = WireCodec.splitLines(&buf)
+    #expect(lines.count == 2)
+    #expect(String(decoding: lines[1], as: UTF8.self) == "{\"b\":2}")
+}
+
+@Test func encodeEmitsOneNewlineEvenWithANewlineInsideAStringValue() throws {
+    let e = VibeEvent(id: "a", cli: "claude-code", kind: .failed,
+                      session: "s", cwd: "/tmp", body: "line one\nline two")
+    let data = try WireCodec.encode(e)
+    // JSON escapes the embedded newline, so only the terminator is a raw 0x0A.
+    #expect(data.filter { $0 == UInt8(ascii: "\n") }.count == 1)
+    #expect(try WireCodec.decode(VibeEvent.self, from: data).body == "line one\nline two")
+}
