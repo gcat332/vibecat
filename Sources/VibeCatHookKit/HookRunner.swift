@@ -30,8 +30,12 @@ public struct HookRunner {
             return nil
         }
 
+        // The reply must be for the event we actually sent. This is the last
+        // checkpoint before authorising a destructive command, so a crossed or
+        // stale answer fails open rather than being honoured.
         guard let data = client.sendExpectingReply(line),
-              let reply = try? WireCodec.decode(Reply.self, from: data)
+              let reply = try? WireCodec.decode(Reply.self, from: data),
+              reply.id == event.id
         else { return nil }
 
         return Self.stdout(for: cli, reply: reply)

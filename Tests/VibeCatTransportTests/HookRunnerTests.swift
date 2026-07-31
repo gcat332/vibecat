@@ -80,3 +80,63 @@ private let permissionPayload = Data("""
                             env: [:])
     #expect(runner.run(cli: "claude-code", stdin: stopPayload) == nil)
 }
+
+@Test func aReplyForADifferentEventIsNotHonoured() throws {
+    let path = tempPath("crossed")
+    let server = SocketServer(path: path)
+    try server.start { _ in Reply(id: "a-completely-different-event", choice: "allow") }
+    defer { server.stop() }
+
+    let runner = HookRunner(registry: registry,
+                            client: SocketClient(path: path, deadline: 1.0),
+                            env: [:])
+    #expect(runner.run(cli: "claude-code", stdin: permissionPayload) == nil)
+}
+
+/// Exercises the real binary, not HookRunner — main.swift's argument
+/// handling, stdin read and exit code are otherwise untested.
+private func runHookBinary(arguments: [String],
+                           stdin: String,
+                           env: [String: String] = [:]) throws -> (out: String, code: Int32) {
+    let binary = URL(fileURLWithPath: #filePath)          // …/Tests/VibeCatTransportTests/…
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent(".build/debug/vibecat-hook")
+
+    let process = Process()
+    process.executableURL = binary
+    process.arguments = arguments
+    var environment = ProcessInfo.processInfo.environment
+    for (k, v) in env { environment[k] = v }
+    process.environment = environment
+
+    let inPipe = Pipe(), outPipe = Pipe()
+    process.standardInput = inPipe
+    process.standardOutput = outPipe
+    process.standardError = Pipe()
+
+    try process.run()
+    inPipe.fileHandleForWriting.write(Data(stdin.utf8))
+    inPipe.fileHandleForWriting.closeFile()
+    let out = outPipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    return (String(decoding: out, as: UTF8.self), process.terminationStatus)
+}
+
+@Test func theBinaryAlwaysExitsZeroAndSaysNothingWhenItCannotReport() throws {
+    // Every one of these must leave the calling CLI's turn untouched.
+    let cases: [(String, [String], String)] = [
+        ("no server",      ["claude-code"], #"{"hook_event_name":"Stop","session_id":"s1","cwd":"/tmp"}"#),
+        ("malformed json", ["claude-code"], "not json at all"),
+        ("unknown cli",    ["nope"],        #"{"hook_event_name":"Stop","session_id":"s1","cwd":"/tmp"}"#),
+        ("no argument",    [],              #"{"hook_event_name":"Stop","session_id":"s1","cwd":"/tmp"}"#),
+        ("empty stdin",    ["claude-code"], ""),
+    ]
+    for (label, args, input) in cases {
+        let r = try runHookBinary(arguments: args, stdin: input,
+                                  env: ["VIBECAT_SOCKET": "/tmp/vibecat-absent-\(getpid()).sock"])
+        #expect(r.code == 0, "\(label): exit code")
+        #expect(r.out.isEmpty, "\(label): stdout")
+    }
+}
