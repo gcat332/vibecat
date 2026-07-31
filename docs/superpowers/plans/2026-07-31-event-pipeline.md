@@ -1522,6 +1522,19 @@ public struct SocketClient: Sendable {
     private func connectSocket() -> Int32? {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
+        // A peer that has gone away must not be able to kill us: without this,
+        // write() to a closed peer raises SIGPIPE, whose default disposition
+        // terminates the process. Per-socket rather than signal(SIGPIPE, SIG_IGN),
+        // because the hook runs inside a CLI's process and must not change that
+        // process's global signal disposition.
+        #if canImport(Darwin)
+        var nosigpipe: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe,
+                   socklen_t(MemoryLayout<Int32>.size))
+        #else
+        // Linux has no SO_NOSIGPIPE; the equivalent is MSG_NOSIGNAL on each
+        // send(). Not adopted yet — Linux support is compile-only today.
+        #endif
         guard var addr = try? UnixAddress.make(path) else {
             close(fd)
             return nil
@@ -1611,8 +1624,14 @@ git commit -m "feat(transport): add a fail-open socket client"
   `func start(handler: @escaping @Sendable (VibeEvent) -> Reply?) throws`,
   `func stop()`
 
-The server creates its parent directory, removes any stale socket file, and
-`chmod`s the socket to `0600`.
+The server creates its parent directory **as 0700**, removes any stale socket
+file, narrows the umask across `bind` and `chmod`s the socket to `0600` — review
+measured the file as world-connectable 0755 in the window between `listen` and
+`chmod`, which is long enough for a local process to answer a permission prompt.
+
+It also bounds its reads with an absolute deadline, and sets `SO_NOSIGPIPE` on
+every accepted connection: `SIGPIPE`'s default disposition terminates the
+process, so without it a hook that disconnects mid-write **kills the app**.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1722,12 +1741,17 @@ import Glibc
 /// answers it. Connections are short-lived — a hook sends one event and leaves.
 public final class SocketServer: @unchecked Sendable {
     public let path: String
+    /// A hook writes its event immediately after connecting, so a peer still
+    /// silent after this long is misbehaving. Without it, such a peer parks a
+    /// thread for the lifetime of the app.
+    public let readDeadline: TimeInterval
     private var listenFD: Int32 = -1
     private let lock = NSLock()
     private var running = false
 
-    public init(path: String) {
+    public init(path: String, readDeadline: TimeInterval = 5.0) {
         self.path = path
+        self.readDeadline = Swift.max(0.05, readDeadline)
     }
 
     public func start(handler: @escaping @Sendable (VibeEvent) -> Reply?) throws {
@@ -1738,7 +1762,13 @@ public final class SocketServer: @unchecked Sendable {
         guard fd >= 0 else { throw SocketError.socketFailed(errno) }
 
         var addr = try UnixAddress.make(path)
-        guard UnixAddress.withSockaddr(&addr, { bind(fd, $0, $1) }) == 0 else {
+        // bind() applies the process umask, so the file would briefly exist as
+        // 0755 before the chmod below. Narrow the umask across the bind instead
+        // of racing to fix it afterwards.
+        let previousMask = umask(0o177)
+        let bindResult = UnixAddress.withSockaddr(&addr) { bind(fd, $0, $1) }
+        umask(previousMask)
+        guard bindResult == 0 else {
             let e = errno; close(fd); throw SocketError.bindFailed(e)
         }
         guard listen(fd, 16) == 0 else {
@@ -1748,8 +1778,9 @@ public final class SocketServer: @unchecked Sendable {
 
         lock.lock(); listenFD = fd; running = true; lock.unlock()
 
+        let deadline = readDeadline
         Thread.detachNewThread { [weak self] in
-            self?.acceptLoop(fd: fd, handler: handler)
+            self?.acceptLoop(fd: fd, deadline: deadline, handler: handler)
         }
     }
 
@@ -1769,24 +1800,38 @@ public final class SocketServer: @unchecked Sendable {
 
     private func prepareDirectory() throws {
         let dir = (path as NSString).deletingLastPathComponent
-        try FileManager.default.createDirectory(atPath: dir,
-                                                withIntermediateDirectories: true)
+        // 0700: the socket's containing directory is a second line of defence
+        // behind the socket's own mode.
+        try FileManager.default.createDirectory(
+            atPath: dir,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
     }
 
-    private func acceptLoop(fd: Int32, handler: @escaping @Sendable (VibeEvent) -> Reply?) {
+    private func acceptLoop(fd: Int32, deadline: TimeInterval,
+                            handler: @escaping @Sendable (VibeEvent) -> Reply?) {
         while isRunning {
             let conn = accept(fd, nil, nil)
             if conn < 0 {
                 if isRunning && errno == EINTR { continue }
                 return
             }
-            Thread.detachNewThread { Self.serve(conn: conn, handler: handler) }
+            Thread.detachNewThread { Self.serve(conn: conn, deadline: deadline, handler: handler) }
         }
     }
 
-    private static func serve(conn: Int32, handler: @Sendable (VibeEvent) -> Reply?) {
+    private static func serve(conn: Int32, deadline: TimeInterval,
+                              handler: @Sendable (VibeEvent) -> Reply?) {
         defer { close(conn) }
-        guard let line = readLine(conn),
+        #if canImport(Darwin)
+        var nosigpipe: Int32 = 1
+        setsockopt(conn, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe,
+                   socklen_t(MemoryLayout<Int32>.size))
+        #else
+        // Linux has no SO_NOSIGPIPE; the equivalent is MSG_NOSIGNAL on each
+        // send(). Not adopted yet — Linux support is compile-only today.
+        #endif
+        guard let line = readLine(conn, deadline: deadline),
               let event = try? WireCodec.decode(VibeEvent.self, from: line) else { return }
 
         guard let reply = handler(event), event.wantsReply,
@@ -1804,16 +1849,28 @@ public final class SocketServer: @unchecked Sendable {
         }
     }
 
-    private static func readLine(_ fd: Int32) -> Data? {
+    private static func readLine(_ fd: Int32, deadline: TimeInterval) -> Data? {
+        // Bound each syscall AND the whole loop: SO_RCVTIMEO alone lets a peer
+        // that trickles bytes run indefinitely.
+        var tv = timeval(tv_sec: Int(deadline),
+                         tv_usec: Int32((deadline - floor(deadline)) * 1_000_000))
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        let expiry = Date().addingTimeInterval(deadline)
+
         var buffer = Data()
         var chunk = [UInt8](repeating: 0, count: 4096)
         while true {
+            if Date() >= expiry { return nil }
             let n = read(fd, &chunk, chunk.count)
-            if n <= 0 { return buffer.isEmpty ? nil : buffer }
-            buffer.append(contentsOf: chunk[0..<n])
-            if let idx = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-                return Data(buffer[buffer.startIndex..<idx])
+            if n > 0 {
+                buffer.append(contentsOf: chunk[0..<n])
+                if let idx = buffer.firstIndex(of: UInt8(ascii: "\n")) {
+                    return Data(buffer[buffer.startIndex..<idx])
+                }
+                continue
             }
+            if n < 0 && errno == EINTR { continue }
+            return nil
         }
     }
 }
