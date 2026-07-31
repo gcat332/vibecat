@@ -58,13 +58,17 @@ import Testing
 }
 
 @Test func splitLinesHandlesASlicedBuffer() {
-    // Data preserves a parent's indices when sliced, so anything assuming
-    // startIndex == 0 breaks here.
+    // Data.SubSequence is Data, and a slice keeps its parent's indices.
+    // Anything in splitLines that assumed startIndex == 0 breaks here.
     let parent = Data("XXXX{\"a\":1}\n{\"b\":2}\n".utf8)
-    var buf = Data(parent.dropFirst(4))
+    var buf: Data = parent.dropFirst(4)
+    #expect(buf.startIndex == 4, "precondition: the buffer must be a real slice")
+
     let lines = WireCodec.splitLines(&buf)
     #expect(lines.count == 2)
+    #expect(String(decoding: lines[0], as: UTF8.self) == "{\"a\":1}")
     #expect(String(decoding: lines[1], as: UTF8.self) == "{\"b\":2}")
+    #expect(buf.isEmpty)
 }
 
 @Test func encodeEmitsOneNewlineEvenWithANewlineInsideAStringValue() throws {
