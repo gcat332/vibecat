@@ -2,6 +2,11 @@ import Foundation
 import Testing
 import VibeCatCore
 @testable import VibeCatTransport
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 
 private func tempPath(_ name: String) -> String {
     "/tmp/vibecat-srv-\(name)-\(getpid()).sock"
@@ -56,6 +61,45 @@ private func sampleEvent(wantsReply: Bool) -> VibeEvent {
     let server = SocketServer(path: path)
     try server.start { _ in nil }
     server.stop()
+}
+
+@Test func aSilentPeerDoesNotParkAServerThreadForever() async throws {
+    let path = tempPath("silent-peer")
+    let server = SocketServer(path: path, readDeadline: 0.2)
+    try server.start { _ in nil }
+    defer { server.stop() }
+
+    // Connect and say nothing, holding the connection open.
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    var addr = try UnixAddress.make(path)
+    #expect(UnixAddress.withSockaddr(&addr) { connect(fd, $0, $1) } == 0)
+    defer { close(fd) }
+
+    // The server must give up on its own rather than waiting for us.
+    try await Task.sleep(nanoseconds: 600_000_000)
+    // Still healthy: a well-behaved client is served normally afterwards.
+    let box = Box<VibeEvent?>(nil)
+    server.stop()
+    let live = SocketServer(path: path, readDeadline: 0.2)
+    try live.start { e in box.set(e); return nil }
+    defer { live.stop() }
+    SocketClient(path: path, deadline: 1.0).send(try WireCodec.encode(sampleEvent(wantsReply: false)))
+    try await waitUntil { box.get() != nil }
+    #expect(box.get()?.session == "s1")
+}
+
+@Test func theHandlerRunsEvenWhenTheReplyIsNotWanted() async throws {
+    let path = tempPath("nogate")
+    let server = SocketServer(path: path)
+    let box = Box<VibeEvent?>(nil)
+    // Handler returns a reply, but the event does not want one.
+    try server.start { e in box.set(e); return Reply(id: e.id, choice: "allow") }
+    defer { server.stop() }
+
+    let client = SocketClient(path: path, deadline: 0.5)
+    let raw = client.sendExpectingReply(try WireCodec.encode(sampleEvent(wantsReply: false)))
+    #expect(raw == nil)                      // reply suppressed
+    try await waitUntil { box.get() != nil } // handler still ran
 }
 
 // MARK: - helpers
