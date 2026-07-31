@@ -88,6 +88,38 @@ private func sampleEvent(wantsReply: Bool) -> VibeEvent {
     #expect(box.get()?.session == "s1")
 }
 
+@Test func aTricklingPeerCannotOutlastTheServersReadDeadline() async throws {
+    let path = tempPath("trickle-server")
+    let server = SocketServer(path: path, readDeadline: 0.2)
+    let box = Box<VibeEvent?>(nil)
+    try server.start { e in box.set(e); return nil }
+    defer { server.stop() }
+
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    defer { close(fd) }
+    #if canImport(Darwin)
+    var nosigpipe: Int32 = 1
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe,
+               socklen_t(MemoryLayout<Int32>.size))
+    #endif
+    var addr = try UnixAddress.make(path)
+    #expect(UnixAddress.withSockaddr(&addr) { connect(fd, $0, $1) } == 0)
+
+    // Dribble bytes that never form a line, each arriving inside the
+    // per-syscall timeout so only the absolute deadline can stop it.
+    // Once the server gives up and closes, our write fails with EPIPE —
+    // that failure IS the observation that the deadline was enforced.
+    var serverGaveUp = false
+    for _ in 0..<15 {
+        var byte = UInt8(ascii: "x")
+        if write(fd, &byte, 1) < 0 { serverGaveUp = true; break }
+        try await Task.sleep(nanoseconds: 100_000_000)
+    }
+
+    #expect(serverGaveUp)               // fails if the server read forever
+    #expect(box.get() == nil)           // and it never decoded an event
+}
+
 @Test func theHandlerRunsEvenWhenTheReplyIsNotWanted() async throws {
     let path = tempPath("nogate")
     let server = SocketServer(path: path)

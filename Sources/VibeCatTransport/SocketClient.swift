@@ -44,6 +44,19 @@ public struct SocketClient: Sendable {
     private func connectSocket() -> Int32? {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
+        // A peer that has gone away must not be able to kill us: without this,
+        // write() to a closed peer raises SIGPIPE, whose default disposition
+        // terminates the process. Per-socket rather than signal(SIGPIPE, SIG_IGN),
+        // because the hook runs inside a CLI's process and must not change that
+        // process's global signal disposition.
+        #if canImport(Darwin)
+        var nosigpipe: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe,
+                   socklen_t(MemoryLayout<Int32>.size))
+        #else
+        // Linux has no SO_NOSIGPIPE; the equivalent is MSG_NOSIGNAL on each
+        // send(). Not adopted yet — Linux support is compile-only today.
+        #endif
         guard var addr = try? UnixAddress.make(path) else {
             close(fd)
             return nil

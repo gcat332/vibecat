@@ -92,6 +92,14 @@ public final class SocketServer: @unchecked Sendable {
     private static func serve(conn: Int32, deadline: TimeInterval,
                               handler: @Sendable (VibeEvent) -> Reply?) {
         defer { close(conn) }
+        #if canImport(Darwin)
+        var nosigpipe: Int32 = 1
+        setsockopt(conn, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe,
+                   socklen_t(MemoryLayout<Int32>.size))
+        #else
+        // Linux has no SO_NOSIGPIPE; the equivalent is MSG_NOSIGNAL on each
+        // send(). Not adopted yet — Linux support is compile-only today.
+        #endif
         guard let line = readLine(conn, deadline: deadline),
               let event = try? WireCodec.decode(VibeEvent.self, from: line) else { return }
 
