@@ -1964,11 +1964,22 @@ public enum OriginReader {
         "Hyper":           "co.zeit.hyper",
     ]
 
-    public static func read(env: [String: String]) -> Origin {
-        let app = env["__CFBundleIdentifier"]
-            ?? env["TERM_PROGRAM"].flatMap { bundleIDsByTermProgram[$0] }
+    /// Only these are accepted from `__CFBundleIdentifier`. That variable holds
+    /// whatever GUI app owns the process tree, which is often not a terminal at
+    /// all — a shell spawned by a desktop app reports that app. Recording it
+    /// blindly makes the island jump to the wrong application.
+    static let knownTerminalBundleIDs: Set<String> =
+        Set(bundleIDsByTermProgram.values)
 
-        return Origin(app: app,
+    public static func read(env: [String: String]) -> Origin {
+        // TERM_PROGRAM is set by the terminal emulator itself, so it is the
+        // trustworthy signal. __CFBundleIdentifier is only a fallback, and only
+        // when it names a terminal we recognise.
+        let fromTermProgram = env["TERM_PROGRAM"].flatMap { bundleIDsByTermProgram[$0] }
+        let fromBundleID = env["__CFBundleIdentifier"]
+            .flatMap { knownTerminalBundleIDs.contains($0) ? $0 : nil }
+
+        return Origin(app: fromTermProgram ?? fromBundleID,
                       termSession: env["TERM_SESSION_ID"],
                       vscodePid: env["VSCODE_PID"])
     }
