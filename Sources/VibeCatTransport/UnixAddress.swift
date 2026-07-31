@@ -36,6 +36,14 @@ public enum UnixAddress {
     }
 
     /// `connect` and `bind` want a `sockaddr *`; this does the rebind in one place.
+    ///
+    /// Reports the full struct size as the length rather than computing
+    /// `offsetof(sun_path) + strlen(path)`. Verified correct on Darwin for
+    /// ordinary filesystem paths: `sockaddr_un()` zero-fills, and BSD reads
+    /// `sun_path` as a NUL-terminated string, so the trailing zeros are ignored.
+    /// It would be WRONG for a Linux abstract-namespace socket, whose path
+    /// begins with NUL and needs an exact length — `make` never produces one
+    /// today, so nothing depends on that case yet.
     public static func withSockaddr<R>(_ addr: inout sockaddr_un,
                                        _ body: (UnsafePointer<sockaddr>, socklen_t) -> R) -> R {
         let len = socklen_t(MemoryLayout<sockaddr_un>.size)

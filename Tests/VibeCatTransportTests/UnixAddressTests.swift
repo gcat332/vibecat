@@ -27,3 +27,26 @@ import Glibc
         _ = try UnixAddress.make(tooLong)
     }
 }
+
+@Test func theBoundaryIsExactlyOneByteBelowCapacity() throws {
+    // sun_path must hold the path AND its NUL terminator, so the longest
+    // accepted path is capacity - 1. Getting this wrong writes past the end
+    // of the tuple rather than truncating, which nothing else would catch.
+    let capacity = MemoryLayout.size(ofValue: sockaddr_un().sun_path)
+
+    let longest = String(repeating: "a", count: capacity - 1)
+    var addr = try UnixAddress.make(longest)
+    let readBack = withUnsafePointer(to: &addr.sun_path) { ptr in
+        ptr.withMemoryRebound(to: CChar.self, capacity: capacity) {
+            String(cString: $0)
+        }
+    }
+    #expect(readBack == longest)
+
+    #expect(throws: SocketError.pathTooLong) {
+        _ = try UnixAddress.make(String(repeating: "a", count: capacity))
+    }
+    #expect(throws: SocketError.pathTooLong) {
+        _ = try UnixAddress.make(String(repeating: "a", count: capacity + 1))
+    }
+}
