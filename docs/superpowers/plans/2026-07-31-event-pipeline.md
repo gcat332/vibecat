@@ -105,7 +105,10 @@ let package = Package(
         // executable target with a main.swift cannot be @testable imported
         // reliably, so the executable is kept to nothing but wiring.
         .target(name: "VibeCatHookKit", dependencies: ["VibeCatCore", "VibeCatTransport"]),
-        .executableTarget(name: "VibeCatHook", dependencies: ["VibeCatHookKit"]),
+        // main.swift imports all three directly, so all three are declared —
+        // a transitive dependency is not guaranteed to be importable.
+        .executableTarget(name: "VibeCatHook",
+                          dependencies: ["VibeCatHookKit", "VibeCatCore", "VibeCatTransport"]),
         .testTarget(name: "VibeCatCoreTests", dependencies: ["VibeCatCore"]),
         .testTarget(name: "VibeCatTransportTests",
                     dependencies: ["VibeCatTransport", "VibeCatCore", "VibeCatHookKit"]),
