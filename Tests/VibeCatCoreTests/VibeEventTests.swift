@@ -33,3 +33,29 @@ import Testing
     #expect(a.activity == "Grep: handleRequest")
     #expect(a.finished == false)
 }
+
+@Test func decodingSuppliesDefaultsForAbsentKeys() throws {
+    // Only the required keys; everything defaulted must come from init(from:).
+    let json = #"{"id":"a","cli":"claude-code","kind":"running","session":"s1","cwd":"/tmp"}"#
+    let e = try JSONDecoder().decode(VibeEvent.self, from: Data(json.utf8))
+    #expect(e.v == 1)
+    #expect(e.multi == false)
+    #expect(e.wantsReply == false)
+    #expect(e.origin == Origin())
+    #expect(e.choices == nil)
+    #expect(e.tasks == nil)
+}
+
+@Test func encodingEmitsTheShortWireKeys() throws {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+
+    let task = try String(decoding: encoder.encode(TaskItem(title: "Audit", status: .doing)),
+                          as: UTF8.self)
+    #expect(task == #"{"s":"doing","t":"Audit"}"#)
+
+    let agent = try String(decoding: encoder.encode(
+        AgentItem(name: "Explore", elapsed: "8s", model: "Sonnet 4.6", activity: "Grep")),
+                           as: UTF8.self)
+    #expect(agent == #"{"done":false,"m":"Sonnet 4.6","n":"Explore","sub":"Grep","t":"8s"}"#)
+}
