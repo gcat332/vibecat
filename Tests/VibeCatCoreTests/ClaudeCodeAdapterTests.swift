@@ -61,7 +61,7 @@ private func raw(_ json: String) throws -> [String: Any] {
 
 @Test func anUnhandledHookIsIgnoredRatherThanFatal() throws {
     let e = try adapter.parse(raw("""
-      {"hook_event_name":"PostToolUse","session_id":"s1","cwd":"/dev/api"}
+      {"hook_event_name":"SessionStart","session_id":"s1","cwd":"/dev/api"}
       """), origin: origin)
     #expect(e == nil)
 }
@@ -70,4 +70,31 @@ private func raw(_ json: String) throws -> [String: Any] {
     let a = try #require(try adapter.parse(raw(#"{"hook_event_name":"Stop","session_id":"s","cwd":"/d"}"#), origin: origin))
     let b = try #require(try adapter.parse(raw(#"{"hook_event_name":"Stop","session_id":"s","cwd":"/d"}"#), origin: origin))
     #expect(a.id != b.id)
+}
+
+@Test func postToolUseReturnsTheSessionToRunning() throws {
+    let e = try #require(try adapter.parse(raw("""
+      {"hook_event_name":"PostToolUse","session_id":"s1","cwd":"/dev/api",
+       "tool_name":"Bash"}
+      """), origin: origin))
+    #expect(e.kind == .running)
+    #expect(e.wantsReply == false)
+}
+
+@Test func toolDetailFallsBackThroughKnownKeysThenAnyString() throws {
+    func body(_ toolInput: String) throws -> String? {
+        try adapter.parse(raw("""
+          {"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/d",
+           "tool_name":"T","tool_input":\(toolInput)}
+          """), origin: origin)?.body
+    }
+    #expect(try body(#"{"pattern":"handleRequest"}"#) == "handleRequest")
+    #expect(try body(#"{"url":"https://example.com"}"#) == "https://example.com")
+    #expect(try body(#"{"prompt":"find the bug"}"#) == "find the bug")
+    // unknown key: still shows something rather than nothing
+    #expect(try body(#"{"somethingNew":"a value"}"#) == "a value")
+    // nothing usable at all
+    #expect(try body(#"{"count":3}"#) == nil)
+    #expect(try body(#"{}"#) == nil)
+    #expect(try body(#""just a string""#) == nil)
 }

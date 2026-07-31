@@ -41,6 +41,11 @@ public struct ClaudeCodeAdapter: SourceAdapter {
                 Choice(id: "deny",   label: "Deny"),
             ]
 
+        case "PostToolUse":
+            // The tool has run and the agent is thinking again. Without this the
+            // session would stay .waiting for the whole tool execution.
+            event.kind = .running
+
         case "Notification":
             event.kind = .question
             event.body = raw["message"] as? String
@@ -59,12 +64,19 @@ public struct ClaudeCodeAdapter: SourceAdapter {
         return event
     }
 
-    /// `tool_input` is shaped differently per tool; the command is the useful
-    /// part for Bash and the file path for edits.
+    /// `tool_input` is shaped differently per tool. Try the keys that carry the
+    /// useful detail, then fall back to any string in the payload — a prompt that
+    /// names a tool but shows nothing leaves the user approving blind.
     static func command(from toolInput: Any?) -> String? {
         guard let dict = toolInput as? [String: Any] else { return nil }
-        if let c = dict["command"] as? String { return c }
-        if let p = dict["file_path"] as? String { return p }
-        return nil
+        let preferred = ["command", "file_path", "pattern", "url", "query",
+                         "prompt", "notebook_path", "path"]
+        for key in preferred {
+            if let value = dict[key] as? String, !value.isEmpty { return value }
+        }
+        // Deterministic order so the same payload always renders the same way.
+        return dict.keys.sorted()
+            .compactMap { dict[$0] as? String }
+            .first { !$0.isEmpty }
     }
 }
