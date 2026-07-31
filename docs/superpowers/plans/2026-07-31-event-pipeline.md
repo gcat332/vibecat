@@ -942,8 +942,12 @@ public protocol SourceAdapter: Sendable {
 public struct SourceRegistry: Sendable {
     private let byID: [String: any SourceAdapter]
 
+    /// Later adapters win on a duplicate id, so a user's custom source can
+    /// deliberately override a built-in preset. Never traps: a duplicate id is
+    /// user input, and Settings can produce one.
     public init(adapters: [any SourceAdapter]) {
-        byID = Dictionary(uniqueKeysWithValues: adapters.map { ($0.id, $0) })
+        byID = Dictionary(adapters.map { ($0.id, $0) },
+                          uniquingKeysWith: { _, later in later })
     }
 
     public func adapter(for id: String) -> (any SourceAdapter)? { byID[id] }

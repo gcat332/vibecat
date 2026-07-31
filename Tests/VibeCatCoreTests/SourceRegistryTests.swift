@@ -28,3 +28,22 @@ private struct StubAdapter: SourceAdapter {
     #expect(JumpStrategy.activateApp(bundleID: "a") != .activateApp(bundleID: "b"))
     #expect(JumpStrategy.terminalSession == .terminalSession)
 }
+
+@Test func laterAdaptersWinOnADuplicateId() {
+    struct Other: SourceAdapter {
+        let id = "stub"                       // deliberately collides
+        let displayName = "Other"
+        let jumpStrategy = JumpStrategy.vscode
+        let reports: Set<Kind> = [.failed]
+        func parse(_ raw: [String: Any], origin: Origin) throws -> VibeEvent? { nil }
+    }
+    let r = SourceRegistry(adapters: [StubAdapter(), Other()])
+    #expect(r.ids == ["stub"])                // one entry, not a crash
+    #expect(r.adapter(for: "stub")?.displayName == "Other")
+}
+
+@Test func adapterErrorComparesByCaseAndValue() {
+    #expect(AdapterError.missingField("session_id") == .missingField("session_id"))
+    #expect(AdapterError.missingField("a") != .missingField("b"))
+    #expect(AdapterError.missingField("a") != .unknownEvent("a"))
+}
