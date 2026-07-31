@@ -40,6 +40,22 @@ Both prototypes are single self-contained HTML files — no build, no network.
   waiting agent is idling on you right now while a failed one has already
   stopped.
 
+## Running it
+
+```bash
+swift build          # builds VibeCatCore, VibeCatTransport and vibecat-hook
+swift test           # the whole pipeline, headless
+```
+
+Replay a hook payload by hand:
+
+```bash
+VIBECAT_SOCKET=/tmp/vibecat-dev.sock Scripts/replay.sh permission
+```
+
+With nothing listening the hook prints nothing and exits `0` — that is the
+fail-open path, and it is the behaviour to preserve above all others.
+
 ## Planned stack
 
 Swift 6, SwiftUI with AppKit interop, no external dependencies. Developer ID and
