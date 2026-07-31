@@ -23,6 +23,7 @@ transport, the session store and the Claude Code adapter. No UI yet.
 | [Design doc](docs/superpowers/specs/2026-07-31-vibecat-design.md) | Architecture, geometry, sprite spec, settings schema — with the reasoning behind each decision |
 | [Island prototype](docs/superpowers/prototypes/island-motion.html) | Every state, mood, coat and Display option, live. Open in a browser |
 | [Settings prototype](docs/superpowers/prototypes/settings.html) | All four settings sections, every control interactive |
+| [Notch shell spike](docs/superpowers/spikes/2026-08-01-notch-shell-spike.md) | Window level, notch geometry and hit-testing, measured on real hardware rather than assumed |
 
 Both prototypes are single self-contained HTML files — no build, no network.
 
