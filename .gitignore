@@ -1,0 +1,12 @@
+# Local Claude Code settings — machine-specific paths
+.claude/settings.local.json
+
+# macOS
+.DS_Store
+
+# Xcode / SwiftPM (for when the app lands)
+.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
