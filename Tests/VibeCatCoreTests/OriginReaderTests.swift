@@ -30,3 +30,24 @@ import Testing
 @Test func anUnknownTerminalYieldsAnEmptyOrigin() {
     #expect(OriginReader.read(env: [:]) == Origin())
 }
+
+@Test func aNonTerminalGuiAppIsNotMistakenForATerminal() {
+    // Measured from a real shell spawned by a desktop app: __CFBundleIdentifier
+    // was com.anthropic.claudefordesktop with TERM_PROGRAM unset. Recording that
+    // would make the island jump to the wrong application.
+    let o = OriginReader.read(env: ["__CFBundleIdentifier": "com.anthropic.claudefordesktop"])
+    #expect(o.app == nil)
+}
+
+@Test func termProgramWinsOverAConflictingBundleId() {
+    let o = OriginReader.read(env: [
+        "TERM_PROGRAM": "ghostty",
+        "__CFBundleIdentifier": "com.googlecode.iterm2",
+    ])
+    #expect(o.app == "com.mitchellh.ghostty")
+}
+
+@Test func aRecognisedTerminalBundleIdIsStillAcceptedWithoutTermProgram() {
+    let o = OriginReader.read(env: ["__CFBundleIdentifier": "com.apple.Terminal"])
+    #expect(o.app == "com.apple.Terminal")
+}
