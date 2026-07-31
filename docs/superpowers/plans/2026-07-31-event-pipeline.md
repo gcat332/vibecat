@@ -406,12 +406,14 @@ public enum WireCodec {
     }
 
     /// Pulls every complete line out of `buffer`, leaving any partial tail behind
-    /// for the next read.
+    /// for the next read. Blank lines are skipped: every caller decodes what this
+    /// returns, and an empty line would only ever be a decode error.
     public static func splitLines(_ buffer: inout Data) -> [Data] {
         var lines: [Data] = []
         while let idx = buffer.firstIndex(of: newline) {
-            lines.append(Data(buffer[buffer.startIndex..<idx]))
+            let line = Data(buffer[buffer.startIndex..<idx])
             buffer = Data(buffer[buffer.index(after: idx)...])
+            if !line.isEmpty { lines.append(line) }
         }
         return lines
     }
