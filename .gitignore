@@ -1,6 +1,12 @@
 # Local Claude Code settings — machine-specific paths
 .claude/settings.local.json
 
+# Isolated worktrees for in-progress plans
+.worktrees/
+
+# Subagent-driven development scratch (ledger, briefs, review packages)
+.superpowers/
+
 # macOS
 .DS_Store
 
