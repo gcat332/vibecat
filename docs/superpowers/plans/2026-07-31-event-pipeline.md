@@ -31,6 +31,11 @@ This plan produces working, testable software on its own: after Task 12 you can 
 - Create: `Package.swift`
 - Create: `Sources/VibeCatCore/VibeEvent.swift`
 - Test: `Tests/VibeCatCoreTests/VibeEventTests.swift`
+- Create: a placeholder source file in every other declared target — SwiftPM fails
+  the build on an empty target. A comment-only `.swift` file for each library, and
+  for `Sources/VibeCatHook/main.swift` the single line `// wired up in Task 13`.
+  Later tasks replace these; Task 13 overwrites `main.swift` and deletes
+  `Sources/VibeCatHookKit/Placeholder.swift`.
 
 **Interfaces:**
 - Consumes: nothing
@@ -1881,7 +1886,8 @@ git commit -m "feat(core): read session origin from the hook's environment"
 
 **Files:**
 - Create: `Sources/VibeCatHookKit/HookRunner.swift`
-- Create: `Sources/VibeCatHook/main.swift`
+- **Overwrite:** `Sources/VibeCatHook/main.swift` — Task 1 leaves a one-line placeholder there so the executable target compiles; replace its whole contents
+- Delete: `Sources/VibeCatHookKit/Placeholder.swift` — this task gives the target a real file
 - Test: `Tests/VibeCatTransportTests/HookRunnerTests.swift`
 
 **Interfaces:**
