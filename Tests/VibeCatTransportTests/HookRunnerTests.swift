@@ -51,8 +51,8 @@ private let permissionPayload = Data("""
                             client: SocketClient(path: path, deadline: 1.0),
                             env: [:])
     let out = try #require(runner.run(cli: "claude-code", stdin: permissionPayload))
-    let json = try JSONSerialization.jsonObject(with: Data(out.utf8)) as! [String: Any]
-    let perm = json["hookSpecificOutput"] as! [String: Any]
+    let json = try #require(try JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any])
+    let perm = try #require(json["hookSpecificOutput"] as? [String: Any])
     #expect(perm["permissionDecision"] as? String == "allow")
 }
 

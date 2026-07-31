@@ -8,12 +8,13 @@ private func event(_ kind: Kind, session: String, cli: String = "claude-code") -
     VibeEvent(id: "e-\(session)", cli: cli, kind: kind, session: session, cwd: "/dev/\(session)")
 }
 
-@Test func applyInsertsThenUpdatesInPlace() {
+@Test func applyInsertsThenUpdatesInPlace() throws {
     var store = SessionStore()
     store.apply(event(.running, session: "a"), now: t0)
     store.apply(event(.permission, session: "a"), now: t0.addingTimeInterval(5))
     #expect(store.sessions.count == 1)
-    #expect(store.sessions[0].state == .waiting)
+    let session = try #require(store.sessions.first)
+    #expect(session.state == .waiting)
 }
 
 @Test func sameSessionIdOnDifferentCliIsADifferentSession() {

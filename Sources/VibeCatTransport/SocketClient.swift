@@ -16,13 +16,17 @@ public struct SocketClient: Sendable {
     /// let a wedged app hang the terminal. Never negative: setsockopt rejects
     /// it and the socket silently keeps its default of no timeout.
     static let floorDeadline: TimeInterval = 0.02
+    /// Never unbounded: Int(deadline) traps on infinity and on overflow, and a
+    /// hook that traps is a hook that failed closed.
+    static let ceilingDeadline: TimeInterval = 60
 
     public let path: String
     public let deadline: TimeInterval
 
     public init(path: String, deadline: TimeInterval = 0.3) {
         self.path = path
-        self.deadline = Swift.max(Self.floorDeadline, deadline)
+        self.deadline = Swift.min(Self.ceilingDeadline,
+                                  Swift.max(Self.floorDeadline, deadline))
     }
 
     public func send(_ line: Data) {
@@ -72,11 +76,18 @@ public struct SocketClient: Sendable {
     }
 
     /// Belt to the absolute deadline's braces: keeps a single syscall from
-    /// parking forever. `deadline` is already clamped above zero, so this
-    /// never asks for the "no timeout" timeval.
+    /// parking forever. `deadline` is already clamped above zero and below
+    /// the ceiling, so this never asks for the "no timeout" timeval and never
+    /// traps converting to a timeval's fields.
     private func setTimeout(_ fd: Int32, _ option: Int32) {
-        var tv = timeval(tv_sec: Int(deadline),
-                         tv_usec: Int32((deadline - floor(deadline)) * 1_000_000))
+        let whole = Swift.min(Self.ceilingDeadline, Swift.max(Self.floorDeadline, deadline))
+        let fraction = (whole - floor(whole)) * 1_000_000
+        #if canImport(Darwin)
+        var tv = timeval(tv_sec: Int(whole), tv_usec: Int32(fraction))
+        #else
+        // Glibc's tv_usec is __suseconds_t (Int), not Int32.
+        var tv = timeval(tv_sec: Int(whole), tv_usec: Int(fraction))
+        #endif
         setsockopt(fd, SOL_SOCKET, option, &tv, socklen_t(MemoryLayout<timeval>.size))
     }
 

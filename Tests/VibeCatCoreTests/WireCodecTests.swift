@@ -33,13 +33,14 @@ import Testing
     #expect(back == r)
 }
 
-@Test func splitLinesReturnsCompleteLinesAndKeepsTheRemainder() {
+@Test func splitLinesReturnsCompleteLinesAndKeepsTheRemainder() throws {
     var buf = Data(#"{"a":1}"#.utf8) + Data("\n".utf8)
              + Data(#"{"b":2}"#.utf8) + Data("\n".utf8)
              + Data(#"{"partial"#.utf8)
     let lines = WireCodec.splitLines(&buf)
     #expect(lines.count == 2)
-    #expect(String(decoding: lines[0], as: UTF8.self) == #"{"a":1}"#)
+    let first = try #require(lines.first)
+    #expect(String(decoding: first, as: UTF8.self) == #"{"a":1}"#)
     #expect(String(decoding: buf, as: UTF8.self) == #"{"partial"#)
 }
 
@@ -48,16 +49,18 @@ import Testing
     #expect(WireCodec.splitLines(&buf).isEmpty)
 }
 
-@Test func splitLinesSkipsBlankLines() {
+@Test func splitLinesSkipsBlankLines() throws {
     var buf = Data("{\"a\":1}\n\n{\"b\":2}\n".utf8)
     let lines = WireCodec.splitLines(&buf)
     #expect(lines.count == 2)
-    #expect(String(decoding: lines[0], as: UTF8.self) == "{\"a\":1}")
-    #expect(String(decoding: lines[1], as: UTF8.self) == "{\"b\":2}")
+    let first = try #require(lines.first)
+    let second = try #require(lines.dropFirst().first)
+    #expect(String(decoding: first, as: UTF8.self) == "{\"a\":1}")
+    #expect(String(decoding: second, as: UTF8.self) == "{\"b\":2}")
     #expect(buf.isEmpty)
 }
 
-@Test func splitLinesHandlesASlicedBuffer() {
+@Test func splitLinesHandlesASlicedBuffer() throws {
     // Data.SubSequence is Data, and a slice keeps its parent's indices.
     // Anything in splitLines that assumed startIndex == 0 breaks here.
     let parent = Data("XXXX{\"a\":1}\n{\"b\":2}\n".utf8)
@@ -66,8 +69,10 @@ import Testing
 
     let lines = WireCodec.splitLines(&buf)
     #expect(lines.count == 2)
-    #expect(String(decoding: lines[0], as: UTF8.self) == "{\"a\":1}")
-    #expect(String(decoding: lines[1], as: UTF8.self) == "{\"b\":2}")
+    let first = try #require(lines.first)
+    let second = try #require(lines.dropFirst().first)
+    #expect(String(decoding: first, as: UTF8.self) == "{\"a\":1}")
+    #expect(String(decoding: second, as: UTF8.self) == "{\"b\":2}")
     #expect(buf.isEmpty)
 }
 

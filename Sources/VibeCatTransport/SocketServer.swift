@@ -9,6 +9,11 @@ import Glibc
 /// One thread accepts, one thread per connection reads a single line and
 /// answers it. Connections are short-lived — a hook sends one event and leaves.
 public final class SocketServer: @unchecked Sendable {
+    /// See SocketClient: a zero or negative timeout disables it entirely, and
+    /// an unbounded one traps when converted to a timeval.
+    static let floorReadDeadline: TimeInterval = 0.05
+    static let ceilingReadDeadline: TimeInterval = 60
+
     public let path: String
     /// A hook writes its event immediately after connecting, so a peer still
     /// silent after this long is misbehaving. Without it, such a peer parks a
@@ -20,9 +25,14 @@ public final class SocketServer: @unchecked Sendable {
 
     public init(path: String, readDeadline: TimeInterval = 5.0) {
         self.path = path
-        self.readDeadline = Swift.max(0.05, readDeadline)
+        self.readDeadline = Swift.min(Self.ceilingReadDeadline,
+                                      Swift.max(Self.floorReadDeadline, readDeadline))
     }
 
+    /// - Important: `handler` is invoked on a fresh thread per connection and
+    ///   may run concurrently with itself. It must be safe to call from any
+    ///   thread — `SessionStore` is a value type with `mutating` methods, so a
+    ///   caller holding one must serialise access itself.
     public func start(handler: @escaping @Sendable (VibeEvent) -> Reply?) throws {
         try prepareDirectory()
         unlink(path)                                  // clear any stale socket file
@@ -121,8 +131,17 @@ public final class SocketServer: @unchecked Sendable {
     private static func readLine(_ fd: Int32, deadline: TimeInterval) -> Data? {
         // Bound each syscall AND the whole loop: SO_RCVTIMEO alone lets a peer
         // that trickles bytes run indefinitely.
-        var tv = timeval(tv_sec: Int(deadline),
-                         tv_usec: Int32((deadline - floor(deadline)) * 1_000_000))
+        //
+        // `deadline` here is always the already-clamped `readDeadline` passed
+        // down through acceptLoop/serve, so it is not reclamped — it is
+        // already safe to convert.
+        let fraction = (deadline - floor(deadline)) * 1_000_000
+        #if canImport(Darwin)
+        var tv = timeval(tv_sec: Int(deadline), tv_usec: Int32(fraction))
+        #else
+        // Glibc's tv_usec is __suseconds_t (Int), not Int32.
+        var tv = timeval(tv_sec: Int(deadline), tv_usec: Int(fraction))
+        #endif
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         let expiry = Date().addingTimeInterval(deadline)
 

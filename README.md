@@ -13,7 +13,8 @@ A pixel cat sleeps in your notch. It trots while an agent works, sits up with a
 
 ## Status
 
-Design complete. No code yet.
+Headless event pipeline implemented and tested — the hook binary, the socket
+transport, the session store and the Claude Code adapter. No UI yet.
 
 ## Contents
 

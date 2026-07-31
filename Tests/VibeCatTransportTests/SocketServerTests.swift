@@ -51,7 +51,7 @@ private func sampleEvent(wantsReply: Bool) -> VibeEvent {
     try server.start { _ in nil }
     defer { server.stop() }
 
-    let mode = try FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as! NSNumber
+    let mode = try #require(FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? NSNumber)
     #expect(mode.int16Value == 0o600)
 }
 

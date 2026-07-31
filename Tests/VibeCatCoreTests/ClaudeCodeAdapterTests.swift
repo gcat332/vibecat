@@ -6,7 +6,7 @@ private let adapter = ClaudeCodeAdapter()
 private let origin = Origin(app: "com.googlecode.iterm2", termSession: "w0t1p0")
 
 private func raw(_ json: String) throws -> [String: Any] {
-    try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+    try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
 }
 
 @Test func preToolUseBecomesAPermissionThatWantsAReply() throws {
