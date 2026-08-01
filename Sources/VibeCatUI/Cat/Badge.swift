@@ -97,13 +97,21 @@ public enum Badge: String, Sendable, CaseIterable {
             g[6][3] = true
 
         case .star:
-            set([".......",
-                 "...#...",
-                 "...#...",
+            // A four-pointed star with a body — a filled diamond, one row
+            // wider on each side moving toward the middle, tapering back to
+            // single-cell tips. Previously a plain `+`, indistinguishable
+            // from `cross` (the same `+`, rotated 45°) except by hue — idle
+            // green versus failed red, the classic colour-vision failure
+            // pair, which defeated "colour means state" (design §4.3: that
+            // only holds if shape carries it too). See
+            // `starAndCrossAreNotJustRotationsOfEachOther` in BadgeTests.swift.
+            set(["...#...",
+                 "..###..",
                  ".#####.",
-                 "...#...",
-                 "...#...",
-                 "......."])
+                 "#######",
+                 ".#####.",
+                 "..###..",
+                 "...#..."])
 
         case .cross:
             set(["#.....#",
