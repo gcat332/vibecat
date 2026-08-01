@@ -27,6 +27,7 @@ the session list and settings are still to come.
 | [Island prototype](docs/superpowers/prototypes/island-motion.html) | Every state, mood, coat and Display option, live. Open in a browser |
 | [Settings prototype](docs/superpowers/prototypes/settings.html) | All four settings sections, every control interactive |
 | [Notch shell spike](docs/superpowers/spikes/2026-08-01-notch-shell-spike.md) | Window level, notch geometry and hit-testing, measured on real hardware rather than assumed |
+| [Animation spike](docs/superpowers/spikes/2026-08-01-animation-spike.md) | What motion costs: frame rates, CPU, and which architecture to animate with |
 
 Both prototypes are single self-contained HTML files — no build, no network.
 
