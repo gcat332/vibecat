@@ -38,10 +38,18 @@ private func event(_ kind: Kind, session: String) -> VibeEvent {
     #expect(IslandState.failed.accent.hex == "#FF5C5C")
 }
 
-/// Dormant is a mood, not a fifth colour — an idle machine reads as idle.
-@Test func dormantBorrowsTheIdleAccent() {
-    #expect(IslandState.dormant.accent == IslandState.idle.accent)
+/// Dormant is dim, not idle's green — design §4.3's table never assigns it a
+/// colour, but the reference prototype does (`--dim:#5A6273`), and a machine
+/// with no sessions at all must read as *off*, not as *a run just finished*.
+@Test func dormantIsDimNotIdle() {
+    #expect(IslandState.dormant.accent.hex == "#5A6273")
     #expect(IslandState.dormant.isDormant)
+
+    let others: [IslandState] = [.idle, .running, .waiting, .failed]
+    for other in others {
+        #expect(IslandState.dormant.accent != other.accent,
+                "dormant should not share \(other)'s accent")
+    }
 }
 
 @Test func hexRoundTrips() throws {

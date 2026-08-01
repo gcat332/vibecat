@@ -51,15 +51,24 @@ public enum IslandState: String, Sendable, CaseIterable {
 
     public var isDormant: Bool { self == .dormant }
 
-    /// Colour means state and only state. Dormant shares idle's green: it is
-    /// distinguished by the cat's mood, not by a fifth hue competing for
-    /// meaning. Design §4.3.
+    /// Colour means state and only state. Design §4.3's table covers only the
+    /// four *session* states and never assigns dormant a colour — but the
+    /// reference prototype (`docs/superpowers/prototypes/island-motion.html`,
+    /// `--dim:#5A6273` on `.island[data-state="dormant"]`) does, and it is the
+    /// authority this project has been iterating against throughout. Dormant
+    /// is dim, not idle's green: a machine with no sessions at all must read
+    /// as *off*, not as *a run just finished successfully* — the distinction
+    /// this type exists to make in the first place. (An earlier version of
+    /// this comment inferred dormant shared idle's green, reasoning it was
+    /// distinguished by the cat's mood instead of a fifth hue; the prototype
+    /// says otherwise, and it is the one with authority here.)
     public var accent: RGBA {
         switch self {
-        case .dormant, .idle: RGBA(hex: "#3FD99B")!
-        case .running:        RGBA(hex: "#5B9DF9")!
-        case .waiting:        RGBA(hex: "#FFA63C")!
-        case .failed:         RGBA(hex: "#FF5C5C")!
+        case .dormant:  RGBA(hex: "#5A6273")!
+        case .idle:     RGBA(hex: "#3FD99B")!
+        case .running:  RGBA(hex: "#5B9DF9")!
+        case .waiting:  RGBA(hex: "#FFA63C")!
+        case .failed:   RGBA(hex: "#FF5C5C")!
         }
     }
 }
