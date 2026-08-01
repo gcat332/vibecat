@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import CoreGraphics
+import SwiftUI
 import VibeCatCore
 @testable import VibeCatUI
 
@@ -165,6 +166,13 @@ private let externalDisplay = ScreenMetrics(
 
     let panel = try #require(c.panelForTesting)
     let first = try #require(panel.contentView)
+    // buildCount == 1 proves an IslandView was constructed; contentView ===
+    // first (below) proves it did not later change. Neither proves it was
+    // ever *installed* — `_ = IslandView(model: model)` with the result
+    // discarded would pass both, leaving `contentView` as whatever AppKit's
+    // NSPanel init assigned by default. This is what actually pins
+    // installation.
+    #expect(panel.contentView is NSHostingView<IslandView>)
     model.ingest(VibeEvent(id: "e1", cli: "claude-code", kind: .running,
                            session: "a", cwd: "/dev/a"), now: t0)
     model.ingest(VibeEvent(id: "e2", cli: "claude-code", kind: .permission,

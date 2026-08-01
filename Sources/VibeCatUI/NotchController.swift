@@ -11,7 +11,15 @@ import SwiftUI
     /// `present()`, and mutated thereafter — never rebuilt into a fresh view
     /// tree, because a fresh `IslandModel` would break the observation
     /// SwiftUI already established with the old one.
-    public private(set) var model: IslandModel
+    ///
+    /// `let`, not `private(set) var`: it is assigned only in `init`, and the
+    /// once-only hosting guard in `present()` keys on the hosted *type*
+    /// (`NSHostingView<IslandView>`), not the hosted *model* — so a future
+    /// reassignment here would silently keep stale hosting bound to the old
+    /// object, with `panel.contentView is NSHostingView<IslandView>` still
+    /// true and nothing failing. `let` makes that reassignment impossible
+    /// rather than merely untested.
+    public let model: IslandModel
 
     /// The app-level model — named `appModel` rather than `model` (the
     /// external label on both initialisers below stays `model:` for call-site
