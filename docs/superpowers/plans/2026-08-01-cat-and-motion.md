@@ -1437,6 +1437,16 @@ git commit -m "feat: observable island model, so the hosting root is assigned on
 - Consumes: `ResolvedCat`, `CatPalette`, `Badge`, `RGBA`, `Tone`.
 - Produces: `public struct CatCanvas: View` with `public init(cat: ResolvedCat, palette: CatPalette, cellSize: CGFloat)`; `public struct BadgeCanvas: View` with `public init(badge: Badge, phase: Double, tint: RGBA, cellSize: CGFloat)`.
 
+> **Corrected during execution.** The Step 3 code below puts the per-cell walk
+> *inside* the `Canvas` renderer closure. That closure is `@escaping` and does
+> not run when a test merely evaluates `.body` — so all four smoke tests would
+> have caught nothing. Proven by mutation: an injected out-of-bounds index
+> crashes when the walk is eager and produces zero failures when it sits in the
+> closure. **What shipped hoists the walk into a private eager property**, so
+> only `ctx.fill` remains inside the closure and the tests genuinely execute the
+> code they cover. This is the same mechanism as Plan 2's `TimelineView` split;
+> see `CatCanvas.swift` and `BadgeCanvas.swift` for the shipped shape.
+
 Both draw with `Canvas`. The spike found path batching makes no measurable difference at any rate — the cost is per-frame overhead, not the fills — so draw the clearest way rather than the cleverest: one `fill` per cell for the cat, grouped by tone only because that is fewer colour switches, not because it is faster.
 
 Cells are drawn on integer boundaries. Pixel art must land on the pixel grid; a fractional origin blurs every edge.
