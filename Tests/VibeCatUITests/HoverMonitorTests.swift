@@ -96,3 +96,38 @@ import CoreGraphics
     m.sample()
     #expect(m.isHovering)
 }
+
+// start()/stop() wire up a real, wall-clock-driven Timer, so a test cannot
+// deterministically observe it actually firing (or having stopped firing)
+// without depending on real timer scheduling — which is exactly what the
+// injected cursor/clock exist to let us avoid. These two tests cover what
+// remains deterministic: start()+stop() introduce no side effects of their
+// own outside of an explicit sample() call, and stop() clears the in-flight
+// dwell entry rather than merely silencing the timer, so a cursor that was
+// partway through its dwell before stop() does not get credit for that time
+// afterwards.
+
+@MainActor @Test func startingThenStoppingProducesNoAutomaticHoverChanges() {
+    let f = Fake()
+    let m = f.monitor()
+    m.start()
+    m.stop()
+    f.point = CGPoint(x: 150, y: 110)   // inside; would eventually hover if sampled
+    f.tick(0.31)                          // well past the dwell, if anything were sampling
+    #expect(m.isHovering == false)
+    #expect(f.changes.isEmpty)
+}
+
+@MainActor @Test func stopClearsTheInFlightDwellEntryRatherThanJustTheTimer() {
+    let f = Fake()
+    let m = f.monitor()
+    m.start()
+    f.point = CGPoint(x: 150, y: 110)   // inside; dwell begins accumulating
+    m.sample()
+    f.tick(0.2)                          // short of the 0.30s dwell
+    m.stop()
+    f.tick(0.2)                          // if the entry survived stop(), 0.4s total would clear the dwell
+    m.sample()
+    #expect(m.isHovering == false)
+    #expect(f.changes.isEmpty)
+}

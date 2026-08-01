@@ -73,4 +73,16 @@ import AppKit
         timer = nil
         enteredAt = nil
     }
+
+    /// RunLoop.main holds the Timer strongly regardless of what happens to
+    /// this object, so without this, a caller that drops a HoverMonitor
+    /// without calling stop() first would leave it firing at 30 Hz for the
+    /// rest of the process — a leak that depends on every call site
+    /// remembering to tear down. `isolated deinit` (this class is
+    /// @MainActor, and a plain deinit can't call MainActor-isolated methods)
+    /// lets teardown happen automatically and immediately at deallocation,
+    /// making it safe by construction instead.
+    isolated deinit {
+        stop()
+    }
 }
