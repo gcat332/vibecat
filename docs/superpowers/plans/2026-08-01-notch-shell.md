@@ -1942,6 +1942,13 @@ import VibeCatTransport
         pruneTimer?.invalidate()
         pruneTimer = nil
     }
+
+    /// Same trap as HoverMonitor's, and worse: without this, an AppModel
+    /// dropped after `start()` leaks a Timer, the socket server's accept
+    /// thread, and a bound Unix socket for the process's life. `stop()` is
+    /// non-blocking and never touches an in-flight connection's fd, so calling
+    /// it from deinit adds no shutdown race.
+    isolated deinit { stop() }
 }
 ```
 
