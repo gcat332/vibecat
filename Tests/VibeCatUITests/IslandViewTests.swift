@@ -190,10 +190,20 @@ private let externalDisplay = ScreenMetrics(
 ///
 /// This proves the properties are *read* during `body`'s construction — not
 /// that the two `.animation` modifiers are wired to the *correct* one of the
-/// two, or that the curves themselves are `.spring`/`.easeOut`. Confirming
-/// that would need a snapshot or view-inspection dependency, which this
-/// project does not take; a read count is the narrower, honest thing
-/// available without one.
+/// two, or that the curves themselves are `.spring`/`.easeOut`.
+///
+/// This comment used to say confirming more "would need a snapshot or
+/// view-inspection dependency, which this project does not take." Half of that
+/// was wrong: `ImageRenderer` is a snapshot facility in the standard library,
+/// and IslandGoldenTests.swift now uses it to check that the split reaches the
+/// pixels — that hovering widens the *painted* island by exactly the reveal.
+///
+/// The counter still earns its place, because the two tests fail on different
+/// mutations. Reverting `body` to `.frame(width: body.width)` with a single
+/// `.animation` renders **identically** — the sum is the same number — so the
+/// golden test cannot see it, and only the read counts go to zero. The render
+/// covers geometry reaching the frame; the counter covers which value the
+/// animation is keyed on. Neither supersedes the other.
 @MainActor @Test func bodyActuallyRoutesThroughBothHalvesOfTheWidthSplit() {
     for hovering in [false, true] {
         IslandBody.restingWidthReadCount = 0
