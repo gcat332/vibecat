@@ -95,3 +95,44 @@ public struct IslandGeometry: Sendable, Equatable {
         return IslandFrames(body: body, shape: shape, panel: panel)
     }
 }
+
+/// What the right flank is showing, and how wide that makes it.
+///
+/// Design §5.4: measured from content, never reserved. The island never holds
+/// space it is not using.
+public struct CollapsedLayout: Sendable, Equatable {
+    public enum RightContent: Sendable, Equatable {
+        case sessionCount(Int)
+        case agentIcon
+        case nothing
+    }
+
+    /// 10 leading + content + 12 trailing.
+    private static let padding: CGFloat = 22
+    private static let digitWidth: CGFloat = 9
+    private static let iconWidth: CGFloat = 14
+    /// Design §9.1: hover reveals name and elapsed time over 280ms, up to 150pt.
+    private static let hoverReveal: CGFloat = 150
+
+    public let right: RightContent
+    public let hovering: Bool
+
+    public init(right: RightContent, hovering: Bool) {
+        self.right = right
+        self.hovering = hovering
+    }
+
+    public var rightFlankWidth: CGFloat {
+        let content: CGFloat = switch right {
+        case .nothing: 0
+        case .agentIcon: Self.iconWidth
+        case let .sessionCount(n):
+            n <= 0 ? 0 : CGFloat(String(n).count) * Self.digitWidth
+        }
+        guard content > 0 else { return 0 }
+        return Self.padding + content + (hovering ? Self.hoverReveal : 0)
+    }
+
+    /// A fillet welded to an empty flank pokes out past the notch as a beak.
+    public var showsRightFillet: Bool { rightFlankWidth > 0 }
+}
