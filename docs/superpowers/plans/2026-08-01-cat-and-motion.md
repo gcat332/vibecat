@@ -1982,8 +1982,13 @@ Expected: FAIL — `hoveringOpensTheRevealEvenWithNoRightContent` expects 150, g
         let content: CGFloat = switch right {
         case .nothing: 0
         case .agentIcon: Self.iconWidth
-        case let .sessionCount(n):
-            n <= 0 ? 0 : CGFloat(String(n).count) * metrics.digitWidth
+        case .sessionCount:
+            // Measure the CLAMPED text, never String(n). An earlier task made
+            // sessionCountText the single clamp so the fixed panel is a real
+            // ceiling; reformatting the raw count here reintroduces the
+            // overflow it closed. This is the third time this regression has
+            // been written into the plan.
+            CGFloat(sessionCountText?.count ?? 0) * metrics.digitWidth
         }
         let reveal = hovering ? Self.hoverReveal : 0
         // An empty flank stays empty at rest — the island never reserves space
@@ -1999,6 +2004,29 @@ Expected: FAIL — `hoveringOpensTheRevealEvenWithNoRightContent` expects 150, g
 
 Run: `swift test`
 Expected: the whole suite green. `nothingOnTheRightMeansNoRightFlankAndNoContent` may need its hovering case checked — confirm it asserts the resting case.
+
+- [ ] **Step 4b: Implement the 280ms hover reveal (design §9.1)**
+
+Retargeted here from Task 9. The constraint is real and named in Global
+Constraints, and it is implementable — the earlier claim that it was blocked on
+Plan 4/5 content confused *invisible* with *unimplementable*. There is nothing to
+reveal yet, so what you will see is 150pt of empty black easing open; that is
+expected and is recorded in the carried follow-ups.
+
+The trap: `IslandBody` already animates width with `.spring(response: 0.42,
+dampingFraction: 0.72)` on `value: body.width`, and the hover reveal also changes
+`body.width`. A naive `withAnimation(.easeOut(duration: 0.28))` around the
+`hovering` mutation gets swallowed by that spring.
+
+Separate the two so they compose rather than compete: the base width (content)
+springs, and the reveal is its own `0 → CollapsedLayout.hoverReveal` transition
+carrying `.easeOut(duration: 0.28)`. Design §9.1 describes exactly that shape —
+"hover reveal, `280ms`, `max-width` 0 → 150pt" is a distinct animation from the
+width spring, not the same one with a different curve.
+
+Add a test that the reveal's contribution is driven by `hovering` alone and is
+independent of the content width, so the two cannot be collapsed back into one
+animation by a later edit.
 
 - [ ] **Step 5: Verify by hand, end to end**
 
