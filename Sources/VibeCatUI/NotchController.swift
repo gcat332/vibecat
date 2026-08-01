@@ -45,13 +45,13 @@ import SwiftUI
         panel.apply(frames)
 
         let hover = self.hover ?? HoverMonitor()
-        hover.frame = frames.shape
+        hover.frame = frames.body
         hover.onChange = { [weak self] hovering in
             self?.tier = hovering ? .hover : .rest
             // A hover edge is not a display change, so this reflows the
             // existing geometry rather than re-deriving it from
             // NSScreen.screens the way refreshGeometry() does. reflow()
-            // still updates hover.frame (from currentFrames().shape), so the
+            // still updates hover.frame (from currentFrames().body), so the
             // hover monitor's own frame stays correct across the tier change.
             self?.reflow()
         }
@@ -125,7 +125,7 @@ import SwiftUI
     private func reflow() {
         guard let frames = currentFrames() else { return }
         panel?.apply(frames)
-        hover?.frame = frames.shape
+        hover?.frame = frames.body
         render()
     }
 

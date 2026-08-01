@@ -242,11 +242,17 @@ Measured examples: dormant `244pt`, running `279pt`, three agents `295pt`.
 
 ### 5.5 Corners
 
-Small concave fillets (`9pt`) at the top corners, `15pt` radius at the bottom —
-Apple's own cutout does not meet the bezel at a right angle.
+Straight sides, `15pt` radius at the bottom. The same shape the physical cutout
+has, so the island and the notch read as one object.
 
-**The fillet on an empty flank is suppressed.** Dormant has no right-hand content,
-and a weld with nothing to weld to just pokes out past the notch as a beak.
+> **Corrected 2026-08-01, after Plan 2 shipped.** This section originally called
+> for `9pt` concave fillets at the top, on the claim that "Apple's own cutout
+> does not meet the bezel at a right angle", plus a rule suppressing the fillet
+> on an empty flank. Both were wrong. Measured on the running app, the dormant
+> island's left edge climbed `599.5 → 605.0` over six rows while its right sat
+> dead straight at `847.5` — the suppression rule guaranteed the two ends could
+> never match, and the flare read as a hook the real notch does not have.
+> Straight sides make the ends identical and the suppression rule unnecessary.
 
 ---
 

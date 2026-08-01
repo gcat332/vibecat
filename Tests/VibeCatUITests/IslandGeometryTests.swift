@@ -39,39 +39,23 @@ private let externalDisplay = ScreenMetrics(
     #expect(running.width == (58 + 185 + 35 as CGFloat))
 }
 
-/// The fillets flare outside the core, so the shape is wider than the body.
-/// With an empty right flank the right fillet is suppressed and only the
-/// left flare is added.
-@Test func theShapeAddsAFlareOnEachSideThatHasAFillet() {
-    let g = IslandGeometry(screen: mbp14)
-    let f = IslandGeometry.fillet
-
-    let running = g.frames(rightFlank: 35, tier: .rest)
-    #expect(running.shape.width == running.body.width + f * 2)
-    #expect(running.shape.minX == running.body.minX - f)
-
-    let dormant = g.frames(rightFlank: 0, tier: .rest)
-    #expect(dormant.shape.width == dormant.body.width + f)
-    #expect(dormant.shape.maxX == dormant.body.maxX)   // no right flare
-}
-
 /// The aura blooms outside the shape, and never above the notch.
 @Test func thePanelIsInflatedForTheAuraOnThreeSidesOnly() {
     let g = IslandGeometry(screen: mbp14)
     let f = g.frames(rightFlank: 35, tier: .rest)
-    #expect(f.panel.maxY == f.shape.maxY)                       // no top margin
-    #expect(f.panel.minX == f.shape.minX - IslandGeometry.auraMargin)
-    #expect(f.panel.maxX == f.shape.maxX + IslandGeometry.auraMargin)
-    #expect(f.panel.minY == f.shape.minY - IslandGeometry.auraMargin)
+    #expect(f.panel.maxY == f.body.maxY)                       // no top margin
+    #expect(f.panel.minX == f.body.minX - IslandGeometry.auraMargin)
+    #expect(f.panel.maxX == f.body.maxX + IslandGeometry.auraMargin)
+    #expect(f.panel.minY == f.body.minY - IslandGeometry.auraMargin)
 }
 
 /// Panel-local coordinates are flipped (SwiftUI y grows downward) and there
 /// is no top margin, so the shape starts flush with the panel's top edge.
-@Test func shapeInPanelIsTheShapeExpressedInPanelLocalCoordinates() {
+@Test func bodyInPanelIsTheBodyExpressedInPanelLocalCoordinates() {
     let g = IslandGeometry(screen: mbp14)
     let f = g.frames(rightFlank: 35, tier: .rest)
-    #expect(f.shapeInPanel.origin == CGPoint(x: IslandGeometry.auraMargin, y: 0))
-    #expect(f.shapeInPanel.size == f.shape.size)
+    #expect(f.bodyInPanel.origin == CGPoint(x: IslandGeometry.auraMargin, y: 0))
+    #expect(f.bodyInPanel.size == f.body.size)
 }
 
 @Test func theDrawerGrowsDownwardAndKeepsItsTopAtTheScreenEdge() {

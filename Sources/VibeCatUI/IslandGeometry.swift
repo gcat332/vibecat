@@ -14,24 +14,22 @@ public struct IslandFrames: Sendable, Equatable {
     /// The core: leftFlank + notch + rightFlank, in screen coordinates. This is
     /// what design §5.4's measured widths describe, and what the content is
     /// laid out against.
+    /// This is also the rect handed to `IslandShape` — the silhouette has
+    /// straight sides, so it occupies the core exactly and sticks out nowhere.
     public let body: CGRect
-    /// The core plus the fillet flares, which stick out past it. This is the
-    /// rect handed to IslandShape.
-    public let shape: CGRect
-    /// The window: the shape plus room for the aura to bloom into.
+    /// The window: the body plus room for the aura to bloom into.
     public let panel: CGRect
 
-    public init(body: CGRect, shape: CGRect, panel: CGRect) {
+    public init(body: CGRect, panel: CGRect) {
         self.body = body
-        self.shape = shape
         self.panel = panel
     }
 
-    /// The shape relative to the panel's own origin, in SwiftUI's flipped
+    /// The body relative to the panel's own origin, in SwiftUI's flipped
     /// coordinates. There is no top margin, so y is always 0.
-    public var shapeInPanel: CGRect {
-        CGRect(x: shape.minX - panel.minX, y: panel.maxY - shape.maxY,
-               width: shape.width, height: shape.height)
+    public var bodyInPanel: CGRect {
+        CGRect(x: body.minX - panel.minX, y: panel.maxY - body.maxY,
+               width: body.width, height: body.height)
     }
 }
 
@@ -39,7 +37,6 @@ public struct IslandGeometry: Sendable, Equatable {
     /// 12 padding + 18 cat + 4 gap + 14 badge + 10 padding. Constant so that
     /// the island's left edge — and therefore the cat — never moves.
     public static let leftFlank: CGFloat = 58
-    public static let fillet: CGFloat = 9
     public static let bottomRadius: CGFloat = 15
     /// Room outside the body for the aura to bloom into.
     public static let auraMargin: CGFloat = 24
@@ -78,21 +75,14 @@ public struct IslandGeometry: Sendable, Equatable {
         let body = CGRect(x: left, y: screen.frame.maxY - height,
                           width: width, height: height)
 
-        // A fillet welded to an empty flank pokes out past the notch as a
-        // beak, so the right flare only exists when there is content. §5.5.
-        let rightFlare: CGFloat = right > 0 ? Self.fillet : 0
-        let shape = CGRect(x: body.minX - Self.fillet, y: body.minY,
-                           width: body.width + Self.fillet + rightFlare,
-                           height: body.height)
-
         let m = Self.auraMargin
-        var panel = CGRect(x: shape.minX - m, y: shape.minY - m,
-                           width: shape.width + m * 2, height: shape.height + m)
+        var panel = CGRect(x: body.minX - m, y: body.minY - m,
+                           width: body.width + m * 2, height: body.height + m)
         // Clamp horizontally; the top is already the screen edge.
         panel.origin.x = max(screen.frame.minX, panel.minX)
         panel.size.width = min(panel.width, screen.frame.maxX - panel.minX)
 
-        return IslandFrames(body: body, shape: shape, panel: panel)
+        return IslandFrames(body: body, panel: panel)
     }
 }
 
@@ -158,6 +148,5 @@ public struct CollapsedLayout: Sendable, Equatable {
         return Self.padding + content + (hovering ? Self.hoverReveal : 0)
     }
 
-    /// A fillet welded to an empty flank pokes out past the notch as a beak.
-    public var showsRightFillet: Bool { rightFlankWidth > 0 }
+    public var hasRightContent: Bool { rightFlankWidth > 0 }
 }

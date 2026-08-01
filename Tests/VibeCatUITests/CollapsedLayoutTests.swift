@@ -3,10 +3,10 @@ import CoreGraphics
 import AppKit
 @testable import VibeCatUI
 
-@Test func nothingOnTheRightMeansNoRightFlankAndNoFillet() {
+@Test func nothingOnTheRightMeansNoRightFlankAndNoContent() {
     let l = CollapsedLayout(right: .nothing, hovering: false)
     #expect(l.rightFlankWidth == 0)
-    #expect(l.showsRightFillet == false)
+    #expect(l.hasRightContent == false)
 }
 
 /// This is about the *shape* of the width function (more digits, more
@@ -21,14 +21,14 @@ private let fixedMetrics = CollapsedLayout.Metrics(digitWidth: 9)
     #expect(one.rightFlankWidth > 0)
     #expect(twelve.rightFlankWidth > one.rightFlankWidth)
     #expect(many.rightFlankWidth > twelve.rightFlankWidth)
-    #expect(one.showsRightFillet)
+    #expect(one.hasRightContent)
 }
 
 /// A count of zero is dormant — show nothing rather than a bare "0".
 @Test func aZeroCountCollapsesToNothing() {
     let l = CollapsedLayout(right: .sessionCount(0), hovering: false)
     #expect(l.rightFlankWidth == 0)
-    #expect(l.showsRightFillet == false)
+    #expect(l.hasRightContent == false)
 }
 
 /// Design §6.1: hover widens the flanks to reveal name and elapsed time.

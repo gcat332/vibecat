@@ -26,7 +26,7 @@
 - Geometry is always derived from `NSScreen`; no per-model tables. Recompute on `NSApplication.didChangeScreenParametersNotification`.
 - State colours, exact: idle `#3FD99B`, running `#5B9DF9`, waiting `#FFA63C`, failed `#FF5C5C`.
 - `LW = 58` — the left flank is a constant, so the island's left edge never moves.
-- Corners: `9pt` concave fillet at the top, `15pt` radius at the bottom. Suppress the right fillet when the right flank is empty.
+- Corners: straight sides, `15pt` radius at the bottom. (Superseded the original `9pt` concave fillet + suppression rule — see design §5.5's correction.)
 - Motion: width spring response `0.42` damping `0.72`; drawer-height spring response `0.42` damping `0.78`; hover reveal `280ms`; aura `900ms` peaking at `14%`.
 - Public API on every type the app target or a later plan touches — the library is consumed across module boundaries.
 

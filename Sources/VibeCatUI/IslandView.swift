@@ -117,19 +117,17 @@ struct IslandBody: View {
     /// their sum against `IslandGeometry.leftFlank` (see
     /// `leftAndRightFlankLiteralsAgreeWithTheGeometryConstants` in
     /// IslandViewTests.swift). `leadingPadding + catWidth + gap + badgeWidth +
-    /// trailingPadding` must equal `IslandGeometry.leftFlank +
-    /// IslandGeometry.fillet` — that sum is the only reason the dead-zone
-    /// spacer starts precisely at the cutout's left edge. Change one side of
-    /// the equation without the other and content slides under the cutout,
-    /// the one rule design §5.1 calls absolute, with no test failing except
-    /// the one this comment points at.
+    /// trailingPadding` must equal `IslandGeometry.leftFlank` — that sum is the
+    /// only reason the dead-zone spacer starts precisely at the cutout's left
+    /// edge. Change one side of the equation without the other and content
+    /// slides under the cutout, the one rule design §5.1 calls absolute, with
+    /// no test failing except the one this comment points at.
     enum LeftFlankLayout {
-        static let outerPadding: CGFloat = 12
+        static let leadingPadding: CGFloat = 12
         static let catWidth: CGFloat = 18
         static let gap: CGFloat = 4
         static let badgeWidth: CGFloat = 14
         static let trailingPadding: CGFloat = 10
-        static var leadingPadding: CGFloat { outerPadding + IslandGeometry.fillet }
     }
 
     /// The right flank's padding, split out for the same reason.
@@ -148,8 +146,8 @@ struct IslandBody: View {
     private var accent: Color { Color(state.accent) }
 
     var body: some View {
-        let rect = frames.shapeInPanel
-        let silhouette = IslandShape(rightFilletSuppressed: !layout.showsRightFillet)
+        let rect = frames.bodyInPanel
+        let silhouette = IslandShape()
 
         ZStack(alignment: .topLeading) {
             Color.clear
@@ -157,9 +155,9 @@ struct IslandBody: View {
                 .fill(Color(islandGroundColour))
                 .overlay(alignment: .topLeading) { content }
                 .clipShape(silhouette)
-                // A shadow on the shape traces its rendered alpha, fillets
-                // included, so the aura follows the silhouette rather than a
-                // bounding box — and follows the drawer down for free.
+                // A shadow on the shape traces its rendered alpha, rounded
+                // corners included, so the aura follows the silhouette rather
+                // than a bounding box — and follows the drawer down for free.
                 .shadow(color: accent.opacity(aura.opacity(at: now)),
                         radius: 18, x: 0, y: 2)
                 .frame(width: rect.width, height: rect.height)

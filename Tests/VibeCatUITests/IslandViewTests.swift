@@ -67,7 +67,7 @@ private func evaluate(_ screen: ScreenMetrics, _ state: IslandState,
              + IslandBody.LeftFlankLayout.gap
              + IslandBody.LeftFlankLayout.badgeWidth
              + IslandBody.LeftFlankLayout.trailingPadding
-    #expect(left == IslandGeometry.leftFlank + IslandGeometry.fillet)
+    #expect(left == IslandGeometry.leftFlank)
 
     let sessionCountPadding = IslandBody.RightFlankLayout.leadingPadding
                              + IslandBody.RightFlankLayout.trailingPadding
