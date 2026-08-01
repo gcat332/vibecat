@@ -686,8 +686,9 @@ private let mbp14 = ScreenMetrics(
     return (NotchPanel(frames: frames), frames)
 }
 
-/// Spike §2. AppKit clamps a window out of the menu bar unless
-/// constrainFrameRect refuses. Measured without the override: y=917, not 950.
+/// Spike §2. AppKit's clamp to visibleFrame is level-dependent: at 23 and
+/// below it drops the frame to y=917, at 24 and above it leaves y=950 alone.
+/// So at .statusBar the override is inert — it is a backstop for a wrong level.
 @MainActor @Test func constrainFrameRectReturnsTheRequestedFrameUntouched() {
     let (p, frames) = panel()
     let asked = frames.panel
@@ -760,8 +761,10 @@ import AppKit
 
 /// The window that sits in the notch.
 ///
-/// Three of its settings are load-bearing and were measured, not assumed —
-/// see docs/superpowers/spikes/2026-08-01-notch-shell-spike.md.
+/// Two of its settings are load-bearing and were measured, not assumed: the
+/// level, and the isFloatingPanel-before-level ordering. constrainFrameRect is
+/// a backstop, not load-bearing at this level — see
+/// docs/superpowers/spikes/2026-08-01-notch-shell-spike.md §2.
 @MainActor public final class NotchPanel: NSPanel {
 
     public init(frames: IslandFrames) {
@@ -770,20 +773,24 @@ import AppKit
                    backing: .buffered,
                    defer: false)
 
-        // Above the menu bar (layer 24). The lowest level that clears it;
-        // going higher only starts fighting menus and alerts.
-        level = .statusBar
-
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
         isMovable = false
+        // NSPanel's isFloatingPanel setter reassigns the window level as a side
+        // effect (to .floating, raw 3) — measured. It must be set BEFORE
+        // `level`, never after, or it silently undoes the assignment below.
         isFloatingPanel = true
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = true
         worksWhenModal = true
         collectionBehavior = [.canJoinAllSpaces, .stationary,
                               .fullScreenAuxiliary, .ignoresCycle]
+
+        // Above the menu bar (layer 24). The lowest level that clears it; going
+        // higher only starts fighting menus and alerts. Must come AFTER
+        // isFloatingPanel — see the note above.
+        level = .statusBar
 
         // At rest the island is click-through: a menu title can reach within
         // about 30pt of its left edge, and an opaque flank would eat the click.
@@ -823,7 +830,7 @@ Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Prove the override is load-bearing**
 
-Temporarily change the override body to `super.constrainFrameRect(frameRect, to: screen)`. Run `swift test --filter NotchPanelTests`. `theFrameSurvivesBeingSet` must FAIL, reporting a y of 917 rather than 950. Revert.
+**Outcome, recorded after execution:** this proof does not come out, and that is correct rather than an environment limitation. AppKit's clamp is level-dependent — measured by sweep, levels 0/3/20/22/23 clamp `y 950 → 917`, levels 24/25/101 do not. At `.statusBar` the override is inert, so swapping in `super.constrainFrameRect(frameRect, to: screen)` changes nothing and no test fails. Keep the override anyway: it is a backstop that turns a wrong-level bug into a wrong-level bug rather than a wrong-level-*and*-displaced-33pt one, and the level has already been silently clobbered once by `isFloatingPanel`. Do not delete the tests to match — they pin the override's contract.
 
 If it does **not** fail — which can happen when no window server is attached — record that in the task report as an environment limitation rather than deleting the test, and verify the override by hand with the snippet in spike §2.
 
