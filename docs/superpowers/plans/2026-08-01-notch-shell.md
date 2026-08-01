@@ -1042,13 +1042,20 @@ import AppKit
         timer = nil
         enteredAt = nil
     }
+
+    /// RunLoop holds the Timer independently of us, so a dropped monitor would
+    /// otherwise leave it firing into the void for the rest of the process.
+    /// `isolated deinit` is required — a plain deinit cannot call a main-actor
+    /// method, and invalidating via the Timer block's own parameter trips
+    /// `sending 'timer' risks causing data races` under this toolchain.
+    isolated deinit { stop() }
 }
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `swift test --filter HoverMonitorTests`
-Expected: PASS, 6 tests.
+Expected: PASS, 6 tests. Add two more covering `start()`/`stop()` — drive them through the injected cursor and clock, never real timer scheduling. The strongest available assertion is that `stop()` clears an in-flight dwell entry, not merely the timer.
 
 - [ ] **Step 5: Prove the dwell test is load-bearing**
 
