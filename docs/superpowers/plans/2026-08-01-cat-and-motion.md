@@ -1795,18 +1795,105 @@ struct IslandBody: View {
         .frame(height: model.geometry.notch.height)
     }
 
-    // rightFlank is unchanged from Plan 2 apart from reading `model` — keep the
-    // existing session-count / agentIcon / nothing switch and its paddings.
+    @ViewBuilder private var rightFlank: some View {
+        switch model.layout.right {
+        case .nothing:
+            EmptyView()
+        case .agentIcon:
+            RoundedRectangle(cornerRadius: 3)
+                .fill(accent)
+                .frame(width: CollapsedLayout.iconWidth, height: 14)
+                .padding(.horizontal, RightFlankLayout.iconPadding)
+        case let .sessionCount(n) where n > 0:
+            Text(String(n))
+                .font(RightFlankFont.swiftUI)
+                .monospacedDigit()
+                .foregroundStyle(accent)
+                .padding(.leading, RightFlankLayout.leadingPadding)
+                .padding(.trailing, RightFlankLayout.trailingPadding)
+        case .sessionCount:
+            EmptyView()
+        }
+    }
 }
 ```
 
+`LeftFlankLayout`, `RightFlankLayout`, `RightFlankFont` and `islandGroundColour` already exist in this file and are unchanged — only their consumer moves from stored properties to `model`.
+
 - [ ] **Step 4: Restructure `NotchController`**
 
-- Add `public private(set) var model: IslandModel`, built in `init` from the geometry (rebuild it in `refreshGeometry()` when the geometry changes, preserving `coat` and `motion`).
-- In `present()`, size the panel from `geometry.maxCollapsedFrames()` and assign `panel.contentView = NSHostingView(rootView: IslandView(model: model))` **once**.
-- Replace `render()`'s body with model mutation only: `model.state`, `model.sessionCount`, and `aura.observe` writing back to `model.aura`. Delete the `rootView` assignment and the `NSHostingView` cast.
-- `reflow()` sets `model.hovering` and `hover?.frame = model.frames.body`; it must no longer call `panel.apply(...)` while collapsed.
-- Keep the bloom-end re-render task — it now just re-reads `needsTimeline` by touching the model.
+Note the naming collision this creates and do not let it bite: `NotchController` already has `private let model: AppModel`. Rename that stored property to `appModel` throughout, and let `model` be the new `IslandModel` the view reads. Leaving both named `model` is how a later edit silently wires the wrong one.
+
+```swift
+    /// The one object the view reads. Built here, handed to SwiftUI once, and
+    /// mutated thereafter — never rebuilt into a fresh view tree.
+    public private(set) var model: IslandModel
+
+    public init(appModel: AppModel, metrics: @escaping @MainActor () -> ScreenMetrics?) {
+        self.appModel = appModel
+        self.metrics = metrics
+        let geometry = IslandGeometry(screen: metrics() ?? .zeroFallback)
+        self.model = IslandModel(geometry: geometry, motion: MotionPreference.current())
+    }
+```
+
+In `refreshGeometry()`, update the existing model's geometry rather than replacing the object — a fresh `IslandModel` would break the observation SwiftUI already established:
+
+```swift
+    public func refreshGeometry() {
+        geometry = metrics().map(IslandGeometry.init(screen:))
+        guard let geometry else { return }
+        model.geometry = geometry
+        panel?.apply(geometry.maxCollapsedFrames())
+        hover?.frame = model.frames.body
+    }
+```
+
+In `present()`, size the panel from the fixed maximum and assign the root **once**:
+
+```swift
+        guard let geometry else { return }
+        let frames = geometry.maxCollapsedFrames()
+        let panel = self.panel ?? NotchPanel(frames: frames)
+        self.panel = panel
+        panel.apply(frames)
+        if panel.contentView == nil {
+            panel.contentView = NSHostingView(rootView: IslandView(model: model))
+        }
+```
+
+`render()` becomes model mutation only — no view construction, no `rootView` assignment, no `NSHostingView` cast:
+
+```swift
+    private func render() {
+        let now = Date()
+        model.state = appModel.islandState
+        model.sessionCount = appModel.sessionCount
+
+        if model.aura.observe(model.state, now: now) {
+            // needsTimeline reads the aura, so the view must be nudged once
+            // more when the bloom ends or the timeline never stops.
+            bloomEnd?.cancel()
+            bloomEnd = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(AuraTrigger.duration))
+                guard !Task.isCancelled else { return }
+                self?.model.aura = self?.model.aura ?? AuraTrigger()
+            }
+        }
+    }
+```
+
+`reflow()` stops resizing the panel — that is the whole point of the fixed frame:
+
+```swift
+    private func reflow() {
+        model.hovering = (tier == .hover)
+        hover?.frame = model.frames.body
+        render()
+    }
+```
+
+`.zeroFallback` does not exist yet. Add it to `ScreenMetrics` as a `public static let` with a zero frame and no notch, so the controller has something to build a geometry from before `refreshGeometry()` runs. Give it a doc comment saying it is a placeholder that `refreshGeometry()` immediately replaces.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
