@@ -1807,7 +1807,7 @@ git commit -m "feat: collapsed layout measured from content, and the island view
 
 **Interfaces:**
 - Consumes: `SessionStore`, `VibeEvent`, `Reply` from `VibeCatCore`; `SocketServer` from `VibeCatTransport` — `init(path:readDeadline:)`, `start(handler: @escaping @Sendable (VibeEvent) -> Reply?) throws`, `stop()`.
-- Produces: `@MainActor @Observable public final class AppModel` with `public init(socketPath: String)`, `public private(set) var store: SessionStore`, `public var islandState: IslandState`, `public var sessionCount: Int`, `public func ingest(_ event: VibeEvent, now: Date) -> Reply?`, `public func start() throws`, `public func stop()`, `public func prune(now: Date)`.
+- Produces: `@MainActor @Observable public final class AppModel` with `public init(socketPath: String)`, `public private(set) var store: SessionStore`, `public var islandState: IslandState`, `public var sessionCount: Int`, `public var onChange: (@MainActor () -> Void)?`, `public func ingest(_ event: VibeEvent, now: Date) -> Reply?`, `public func start() throws`, `public func stop()`, `public func prune(now: Date)`.
 
 `SocketServer` calls its handler on a background thread, so `ingest` has to hop to the main actor. Plan 2 returns `nil` from the handler for every event — the island cannot answer anything yet, and a `nil` reply is exactly what makes the hook fall through to the CLI's own prompt. Plan 4 replaces that.
 
@@ -1880,6 +1880,14 @@ Expected: FAIL — `cannot find 'AppModel' in scope`.
 
 Create `Sources/VibeCatUI/AppModel.swift`:
 
+> **What shipped, not the original text.** The version below adds `onChange`
+> and fires it from `ingest` and from `prune` when a prune actually changed
+> something. Without it, `AppModel` has no way to tell anyone a mutation
+> happened at all — Task 10's controller has nothing to subscribe to, which
+> is exactly the defect the final review caught there. See
+> `Sources/VibeCatUI/AppModel.swift` for the file this plan is now written
+> back to match.
+
 ```swift
 import Foundation
 import Observation
@@ -1893,6 +1901,23 @@ import VibeCatTransport
     public static let idleTTL: TimeInterval = 20 * 60
 
     public private(set) var store = SessionStore()
+
+    /// Fires after `ingest` or a `prune` that actually changed `store`.
+    ///
+    /// `AppModel` stays `@Observable` for Plans 4 and 5, where a SwiftUI view
+    /// will read it directly — but `NotchController` is a plain AppKit class,
+    /// not a view, and a manual bridge onto Observation
+    /// (`withObservationTracking`) has a real gap: its `onChange` fires once
+    /// per registration, so a mutation landing between a fire and the
+    /// re-arm falls through unobserved. That is fixable by patching the
+    /// re-arm timing, but an explicit callback removes the race outright —
+    /// every mutation notifies, with no one-shot registration to fall
+    /// through between a fire and a re-arm — and it is trivially testable
+    /// without a window server. `@ObservationIgnored` because this is
+    /// wiring, not model state; nothing should ever depend on a view
+    /// re-rendering when this closure itself is reassigned.
+    @ObservationIgnored
+    public var onChange: (@MainActor () -> Void)?
 
     private let socketPath: String
     private var server: SocketServer?
@@ -1911,11 +1936,20 @@ import VibeCatTransport
     @discardableResult
     public func ingest(_ event: VibeEvent, now: Date = Date()) -> Reply? {
         store.apply(event, now: now)
+        onChange?()
         return nil
     }
 
+    /// Only notifies when a prune actually removed something. The timer
+    /// below fires every 60 seconds regardless of whether anything is stale,
+    /// and a no-op tick should not cost a re-render — the island must stay
+    /// idle when the machine is idle.
     public func prune(now: Date = Date()) {
+        let before = store
         store.prune(idleFor: Self.idleTTL, now: now)
+        if store != before {
+            onChange?()
+        }
     }
 
     public func start() throws {
@@ -1943,12 +1977,18 @@ import VibeCatTransport
         pruneTimer = nil
     }
 
-    /// Same trap as HoverMonitor's, and worse: without this, an AppModel
-    /// dropped after `start()` leaks a Timer, the socket server's accept
-    /// thread, and a bound Unix socket for the process's life. `stop()` is
-    /// non-blocking and never touches an in-flight connection's fd, so calling
-    /// it from deinit adds no shutdown race.
-    isolated deinit { stop() }
+    /// RunLoop.main holds the prune Timer strongly regardless of what happens
+    /// to this object, and the socket server's accept thread otherwise runs
+    /// forever too — so without this, a caller that drops an AppModel after
+    /// start() without calling stop() first would leak both the timer and the
+    /// listening socket for the rest of the process. `isolated deinit` (this
+    /// class is @MainActor, and a plain deinit can't call MainActor-isolated
+    /// methods) lets teardown happen automatically at deallocation, the same
+    /// fix already applied to HoverMonitor for the identical timer-lifecycle
+    /// risk.
+    isolated deinit {
+        stop()
+    }
 }
 ```
 
@@ -2075,10 +2115,25 @@ Expected: FAIL — `cannot find 'NotchController' in scope`.
 
 Create `Sources/VibeCatUI/NotchController.swift`:
 
+> **What shipped, not the original text.** The version originally drafted here
+> subscribed to nothing: `AppModel` had no way to announce a mutation, and
+> this controller never registered for one, so ingesting an event never
+> reached `render()` — the branch's worst defect, found only because the
+> final review traced the whole path end to end. It also called
+> `refreshGeometry()` from the hover callback, which re-derives geometry from
+> `NSScreen.screens` on every hover edge even though a hover edge is not a
+> display change. The version below is what actually shipped: `present()`
+> wires `model.onChange` to a shared `reflow()` (also used by
+> `refreshGeometry()` and by the hover callback), `dismiss()` clears it, and
+> `NotchController` picked up the same `isolated deinit` treatment as
+> `HoverMonitor` and `AppModel` so a controller dropped without an
+> intervening `dismiss()` doesn't leak the screen-change observer. See
+> `Sources/VibeCatUI/NotchController.swift` for the file this plan is now
+> written back to match.
+
 ```swift
 import AppKit
 import SwiftUI
-import Observation
 
 /// Owns the panel, the geometry and the hover monitor, and keeps them in step
 /// with the model and with the display.
@@ -2105,10 +2160,7 @@ import Observation
 
     public func refreshGeometry() {
         geometry = metrics().map(IslandGeometry.init(screen:))
-        guard let frames = currentFrames() else { return }
-        panel?.apply(frames)
-        hover?.frame = frames.shape
-        render()
+        reflow()
     }
 
     public func present() {
@@ -2122,15 +2174,32 @@ import Observation
         hover.frame = frames.shape
         hover.onChange = { [weak self] hovering in
             self?.tier = hovering ? .hover : .rest
-            self?.refreshGeometry()
+            // A hover edge is not a display change, so this reflows the
+            // existing geometry rather than re-deriving it from
+            // NSScreen.screens the way refreshGeometry() does. reflow()
+            // still updates hover.frame (from currentFrames().shape), so the
+            // hover monitor's own frame stays correct across the tier change.
+            self?.reflow()
         }
         hover.start()
         self.hover = hover
+
+        // Deterministic and race-free, unlike the withObservationTracking
+        // bridge this replaced: every ingest or store-changing prune notifies
+        // directly, with no one-shot registration to fall through between a
+        // fire and a re-arm. See AppModel.onChange.
+        model.onChange = { [weak self] in self?.reflow() }
 
         render()
         // Never makeKeyAndOrderFront — the app must not steal focus.
         panel.orderFrontRegardless()
 
+        // present() may run again without an intervening dismiss() (there is
+        // no current caller that does, but nothing prevents it either), so
+        // the old observer is torn down first rather than merely overwritten
+        // — otherwise it would keep firing forever with no reference left to
+        // remove it by.
+        if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil, queue: .main) { [weak self] _ in
@@ -2139,6 +2208,7 @@ import Observation
     }
 
     public func dismiss() {
+        model.onChange = nil
         bloomEnd?.cancel()
         bloomEnd = nil
         hover?.stop()
@@ -2147,6 +2217,19 @@ import Observation
         panel = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
+    }
+
+    /// `NotificationCenter` holds the `didChangeScreenParametersNotification`
+    /// registration for as long as it is not explicitly removed, regardless
+    /// of what happens to this instance — so without this, a controller
+    /// dropped after `present()` with no intervening `dismiss()` would leak
+    /// that observer, plus the panel and the hover monitor's timer, for the
+    /// rest of the process. Same defect class already hardened on
+    /// `HoverMonitor` and `AppModel` via `isolated deinit`; this is the third
+    /// of the three owners. `dismiss()` already does exactly the cleanup
+    /// needed here, `bloomEnd` included, so deinit just calls it.
+    isolated deinit {
+        dismiss()
     }
 
     private var layout: CollapsedLayout {
@@ -2158,6 +2241,18 @@ import Observation
 
     private func currentFrames() -> IslandFrames? {
         geometry?.frames(rightFlank: layout.rightFlankWidth, tier: tier)
+    }
+
+    /// Re-applies the current frames to the panel and hover monitor, then
+    /// renders. Shared by `refreshGeometry()` (a real geometry change) and
+    /// `model.onChange` (a layout change driven by the model, e.g. the
+    /// session count changing the right flank's width) — both need the panel
+    /// resized, not just repainted.
+    private func reflow() {
+        guard let frames = currentFrames() else { return }
+        panel?.apply(frames)
+        hover?.frame = frames.shape
+        render()
     }
 
     private func render() {
@@ -2189,7 +2284,15 @@ import Observation
 }
 ```
 
-> **Note for the implementer:** `render()` is called on discrete events, so the aura's envelope will not animate on its own — it will jump to whatever `opacity(at:)` returns at that instant. Driving it needs a display link or a `TimelineView`, which is a Plan 3 concern once the cat needs per-frame animation too. If you find the aura never appears at all, say so in your report rather than adding a timer here; a single stale frame is the expected behaviour for this plan.
+> **Note for the implementer, superseded.** This originally warned that the
+> aura would not animate on its own — that `render()` runs on discrete
+> events, so the envelope would jump to whatever `opacity(at:)` returned at
+> that instant, and that a single stale frame was the expected behaviour for
+> this plan. Task 8's Self-Review ruling overtook that: `IslandView` became a
+> `TimelineView` wrapper that ticks only while a bloom is in flight (see
+> `IslandView.swift`), so the aura genuinely animates in Plan 2, and
+> `NotchController.render()` above re-renders once more at the end of a
+> bloom to pause that timeline again — an idle machine must not animate.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -2269,7 +2372,9 @@ git commit -m "feat: notch controller and the vibecat executable"
 
 **Spec coverage.** §4.1 five states → Task 3. §4.2 worst state wins → Tasks 3, 9. §4.3 colour means state → Task 3. §5.1 cutout is a hole, runtime dimensions, notchless fallback → Tasks 1, 2, 8. §5.2 which side holds what → Task 8. §5.3 LW constant → Task 2 (with a load-bearing test). §5.4 measured widths → Task 8. §5.5 corners and fillet suppression → Task 6. §6.1 rest and hover tiers → Tasks 2, 5, 8. §6.2 collapsed anatomy and configurable right content → Task 8. §9.2 aura → Task 7. §16 display change, notchless fallback → Tasks 1, 2, 10.
 
-**Deliberately out of scope**, each deferred to a named plan: the cat sprite and moods (§7, Plan 3), badges (§8, Plan 3), the drawer's contents and answering (§6.3, §10, Plan 4), the session list (§11, Plan 5), sound (§12, Plan 6), jump (§13, Plan 6), settings (§14, Plan 6), reduced motion (§9.3, Plan 6 — it is a settings-driven behaviour). `IslandTier.drawer` exists and has tested geometry, but nothing opens it yet.
+**Deliberately out of scope**, each deferred to a named plan: the cat sprite and moods (§7, Plan 3), §9.1's spring-driven motion — width morph, drawer-height spring, hover-reveal timing — (also Plan 3, which brings the cat and needs per-frame animation anyway), badges (§8, Plan 3), the drawer's contents and answering (§6.3, §10, Plan 4), the session list (§11, Plan 5), sound (§12, Plan 6), jump (§13, Plan 6), settings (§14, Plan 6), reduced motion (§9.3, Plan 6 — it is a settings-driven behaviour). `IslandTier.drawer` exists and has tested geometry, but nothing opens it yet.
+
+**A real hole this Self-Review missed the first time.** Global Constraints (line ~30) mandate motion — width spring response `0.42` damping `0.72`, drawer spring response `0.42` damping `0.78`, hover reveal `280ms` — and design §9.1 is not named in any task above, nor was it originally on the deferred list just above. It is now. Plainly: **nothing on this branch animates.** `NotchPanel.apply` moves the frame with a plain `setFrame(_:display: true)` — the collapsed island's width snaps between sizes today; it does not spring, morph or reveal over time. That is unchanged behaviour, not a regression introduced by this note — the note is what was missing.
 
 **Two gaps this plan closes that the spec did not name.** `SessionState` has four cases while the design describes five, so `dormant` is introduced at the UI layer in Task 3 — otherwise a machine that has never run anything looks like one that just succeeded. And the aura needs room outside the body to bloom into, so Task 2 inflates the panel on three sides.
 
