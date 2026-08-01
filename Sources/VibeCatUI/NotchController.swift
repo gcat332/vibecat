@@ -74,7 +74,18 @@ import SwiftUI
         // hosting view the first time a given panel exists — every
         // subsequent state change mutates `model` instead, which is the
         // entire point of Task 9's restructure.
-        if panel.contentView == nil {
+        //
+        // Deliberately a type check, not `panel.contentView == nil`: a
+        // freshly constructed NSPanel already has a non-nil `contentView` —
+        // AppKit assigns a default NSView of its own during
+        // `init(contentRect:styleMask:backing:defer:)`, confirmed directly
+        // against `NotchPanel`, so `== nil` is never true and the assignment
+        // below would never run at all. The pre-Task-9 code never hit this,
+        // because its own guard already asked the right question — `panel
+        // .contentView as? NSHostingView<IslandView>` — which is what this
+        // restores, just without the `else` branch that used to mutate
+        // `.rootView` on every render.
+        if !(panel.contentView is NSHostingView<IslandView>) {
             panel.contentView = NSHostingView(rootView: IslandView(model: model))
         }
 

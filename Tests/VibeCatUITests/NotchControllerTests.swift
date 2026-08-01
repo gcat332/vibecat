@@ -142,13 +142,26 @@ private let externalDisplay = ScreenMetrics(
 }
 
 /// The spike's fourth finding: the hosting root must be assigned once, not
-/// rebuilt per change. If a later refactor reintroduces per-change assignment
-/// this catches it, because the hosting view's identity would change.
+/// rebuilt per change.
+///
+/// `panel.contentView === first` is kept as one signal, but it is not the
+/// whole proof: the pre-Task-9 code's dominant path, once a hosting view
+/// already existed, was `hosting.rootView = view` — a fresh `IslandView`
+/// assigned to an *existing* hosting view's `rootView`, leaving
+/// `contentView`'s own identity completely untouched. A test that checks
+/// only `contentView` would pass against exactly that regression. So this
+/// also counts actual `IslandView` constructions via `IslandView.buildCount`
+/// — reset to 0 here so ordering against other tests cannot make it flaky —
+/// and asserts it stays at 1 across several ingests. That is the literal
+/// constraint: the root is assigned once, not merely "the hosting view
+/// object is the same."
 @MainActor @Test func theHostingRootIsAssignedOnceAndSurvivesStateChanges() throws {
+    IslandView.buildCount = 0
     let model = AppModel(socketPath: "/tmp/vibecat-test-unused.sock")
     let c = NotchController(model: model, metrics: { mbp14 })
     c.refreshGeometry()
     c.present()
+    #expect(IslandView.buildCount == 1)
 
     let panel = try #require(c.panelForTesting)
     let first = try #require(panel.contentView)
@@ -157,6 +170,7 @@ private let externalDisplay = ScreenMetrics(
     model.ingest(VibeEvent(id: "e2", cli: "claude-code", kind: .permission,
                            session: "b", cwd: "/dev/b"), now: t0)
     #expect(panel.contentView === first, "the hosting view was replaced")
+    #expect(IslandView.buildCount == 1, "IslandView was rebuilt instead of the model being mutated")
     c.dismiss()
 }
 

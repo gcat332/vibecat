@@ -72,7 +72,27 @@ extension CollapsedLayout.Metrics {
 public struct IslandView: View {
     private let model: IslandModel
 
-    public init(model: IslandModel) { self.model = model }
+    /// Counts constructions of `IslandView`. Not `public` — visible only via
+    /// `@testable import`, purely for
+    /// `theHostingRootIsAssignedOnceAndSurvivesStateChanges` in
+    /// NotchControllerTests.swift, which resets this to 0 and asserts it
+    /// stays at 1 across several ingests.
+    ///
+    /// This exists because `panel.contentView === first` alone cannot tell
+    /// "a fresh `IslandView` was assigned to an *existing* hosting view's
+    /// `rootView`" apart from "the hosting view itself was replaced" — only
+    /// the second one changes `contentView`'s identity. The pre-Task-9
+    /// code's dominant path (once a hosting view already existed) was the
+    /// first: `hosting.rootView = view`, leaving `contentView` completely
+    /// untouched. A test that checks only `contentView` cannot catch that
+    /// regression reappearing; counting constructions of the root value
+    /// itself is the literal constraint ("assigned once").
+    @MainActor static var buildCount = 0
+
+    public init(model: IslandModel) {
+        self.model = model
+        Self.buildCount += 1
+    }
 
     public var body: some View {
         // A real branch, not a paused timeline. Measured: a paused-but-present
