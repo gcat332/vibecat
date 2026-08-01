@@ -27,13 +27,6 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     #expect(a.observe(.running, now: t0.addingTimeInterval(2)) == false)
 }
 
-@Test func itBloomsInTheNewStatesColour() {
-    var a = AuraTrigger()
-    _ = a.observe(.idle, now: t0)
-    _ = a.observe(.failed, now: t0.addingTimeInterval(1))
-    #expect(a.colour == IslandState.failed.accent)
-}
-
 /// Rises, peaks at 14%, and is gone by 900ms. Design §9.2.
 @Test func theEnvelopeRisesToThePeakThenReturnsToZero() {
     var a = AuraTrigger()
@@ -78,5 +71,4 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     let second = t0.addingTimeInterval(1.4)         // mid-bloom
     _ = a.observe(.waiting, now: second)
     #expect(a.opacity(at: second) == 0)
-    #expect(a.colour == IslandState.waiting.accent)
 }

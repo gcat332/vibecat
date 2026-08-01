@@ -17,6 +17,10 @@ public struct RGBA: Sendable, Equatable {
     public init?(hex: String) {
         guard hex.count == 7, hex.hasPrefix("#") else { return nil }
         let digits = hex.dropFirst()
+        // `allSatisfy(\.isHexDigit)` looks redundant with `UInt32(_:radix:)`
+        // below — it is not. That initialiser accepts a leading sign, so
+        // `UInt32("+5B9DF", radix: 16)` succeeds, and without this guard the
+        // 7-character string "#+5B9DF" would parse as a valid colour. Keep it.
         guard digits.allSatisfy(\.isHexDigit), let v = UInt32(digits, radix: 16)
         else { return nil }
         r = Double((v >> 16) & 0xFF) / 255

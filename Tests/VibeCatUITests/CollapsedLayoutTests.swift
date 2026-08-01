@@ -47,9 +47,9 @@ private let fixedMetrics = CollapsedLayout.Metrics(digitWidth: 9)
 /// an independent measurement, which is the one thing the test exists to
 /// avoid. See `rightFlankWidthNeverClipsTheGenuinelyRenderedText` below.
 private func measuredWidth(of text: String) -> CGFloat {
-    let monospaced = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+    let monospaced = NSFont.monospacedDigitSystemFont(ofSize: RightFlankFont.size, weight: .semibold)
     let font = monospaced.fontDescriptor.withDesign(.rounded)
-        .flatMap { NSFont(descriptor: $0, size: 12) } ?? monospaced
+        .flatMap { NSFont(descriptor: $0, size: RightFlankFont.size) } ?? monospaced
     return (text as NSString).size(withAttributes: [.font: font]).width
 }
 
@@ -66,6 +66,15 @@ private func measuredWidth(of text: String) -> CGFloat {
     for n in [1, 12, 999] {
         let l = CollapsedLayout(right: .sessionCount(n), hovering: false)
         let measuredStringWidth = measuredWidth(of: String(n))
+        // `>=` rather than `==` because this is a no-clipping guarantee, not
+        // a width pin — but as of today it holds with exactly zero slack:
+        // `l.rightFlankWidth` is built from a single digit's advance times
+        // the digit count (`CollapsedLayout.Metrics.standard`), and
+        // `measuredStringWidth` is the whole rendered string measured
+        // independently, and the two are bit-identical because the font's
+        // tabular-figure feature makes every digit genuinely the same width.
+        // A one-ULP font change would flip this red for no real reason; that
+        // is expected, not a sign the test is broken.
         #expect(l.rightFlankWidth >= CollapsedLayout.padding + measuredStringWidth)
     }
 }

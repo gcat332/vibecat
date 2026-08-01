@@ -9,7 +9,6 @@ public struct AuraTrigger: Sendable, Equatable {
 
     private var lastState: IslandState?
     private var firedAt: Date?
-    private var firedColour: RGBA?
 
     public init() {}
 
@@ -20,11 +19,8 @@ public struct AuraTrigger: Sendable, Equatable {
         guard let previous = lastState else { return false }
         guard previous != state else { return false }
         firedAt = now
-        firedColour = state.accent
         return true
     }
-
-    public var colour: RGBA? { firedColour }
 
     /// Whether a bloom is in flight. The view uses this to decide if it needs
     /// per-frame redraws — an idle machine must not animate. True from the
