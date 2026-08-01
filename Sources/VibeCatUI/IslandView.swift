@@ -8,16 +8,18 @@ extension Color {
     init(_ c: RGBA) { self.init(red: c.r, green: c.g, blue: c.b) }
 }
 
-/// The right flank's session-count font — the single place both the
-/// rendered `Text` (below, in `IslandBody.rightFlank`) and
-/// `CollapsedLayout.Metrics.standard`'s digit measurement come from, so the
-/// two can never quietly drift apart.
+/// The right flank's session-count font: `swiftUI` (used by the rendered
+/// `Text` in `IslandBody.rightFlank`) and `measuredDigitWidth()` (used by
+/// `CollapsedLayout.Metrics.standard`) are two independent constructions
+/// kept in step deliberately, side by side in one declaration instead of
+/// scattered across the file.
 ///
+/// Only `size` is actually shared, so only `size` is compiler-enforced.
 /// SwiftUI's `Font.Weight` and AppKit's `NSFont.Weight` are unrelated types
-/// with no bridge between them, so this keeps both spellings of "12pt
-/// semibold rounded, monospaced digits" side by side in one declaration
-/// instead of scattered across the file — change one and the other is
-/// staring right at you.
+/// with no bridge between them, so `weight` and `design` are each spelled
+/// out once per API rather than derived from one value — "semibold" and
+/// "rounded" say the same thing in both places today, but nothing stops
+/// one from being edited without the other. Change either, and change both.
 enum RightFlankFont {
     static let size: CGFloat = 12
     static let swiftUI: Font = .system(size: size, weight: .semibold, design: .rounded)

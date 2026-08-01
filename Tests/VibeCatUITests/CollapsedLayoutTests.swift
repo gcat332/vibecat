@@ -1,5 +1,6 @@
 import Testing
 import CoreGraphics
+import AppKit
 @testable import VibeCatUI
 
 @Test func nothingOnTheRightMeansNoRightFlankAndNoFillet() {
@@ -37,18 +38,35 @@ private let fixedMetrics = CollapsedLayout.Metrics(digitWidth: 9)
     #expect(hover.rightFlankWidth > rest.rightFlankWidth)
 }
 
+/// Builds the right flank's font the same way `RightFlankFont` in
+/// IslandView.swift does, but independently, purely to measure a whole
+/// rendered string in this test. Deliberately does not read
+/// `CollapsedLayout.Metrics.standard` or multiply a single digit's width by
+/// a count — either shortcut would make this test compare the
+/// implementation to itself (or to an assumption of its own) instead of to
+/// an independent measurement, which is the one thing the test exists to
+/// avoid. See `rightFlankWidthNeverClipsTheGenuinelyRenderedText` below.
+private func measuredWidth(of text: String) -> CGFloat {
+    let monospaced = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+    let font = monospaced.fontDescriptor.withDesign(.rounded)
+        .flatMap { NSFont(descriptor: $0, size: 12) } ?? monospaced
+    return (text as NSString).size(withAttributes: [.font: font]).width
+}
+
 /// Design §5.4: "measured from actual content," not guessed — the estimate
 /// must never be narrower than the padding plus the genuinely rendered text
-/// width, for a range of digit counts. This pins the no-clipping invariant
-/// directly, using the real measured font (`.standard`), rather than a
-/// magic per-digit constant that a font or type-size change could
-/// silently invalidate.
+/// width, for a range of digit counts.
+///
+/// Measures the *whole* string here (`"12"`, not `"1"` counted twice) so
+/// this also catches a tabular-spacing regression, not only a
+/// too-small-constant one: per-digit multiplication only predicts the real
+/// width while digits are genuinely monospaced, and a future font resolving
+/// without that feature would make the two silently diverge.
 @Test func rightFlankWidthNeverClipsTheGenuinelyRenderedText() {
-    let digitWidth = CollapsedLayout.Metrics.standard.digitWidth
     for n in [1, 12, 999] {
         let l = CollapsedLayout(right: .sessionCount(n), hovering: false)
-        let renderedContentWidth = CGFloat(String(n).count) * digitWidth
-        #expect(l.rightFlankWidth >= CollapsedLayout.padding + renderedContentWidth)
+        let measuredStringWidth = measuredWidth(of: String(n))
+        #expect(l.rightFlankWidth >= CollapsedLayout.padding + measuredStringWidth)
     }
 }
 
