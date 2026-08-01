@@ -1282,7 +1282,9 @@ private let mbp14 = ScreenMetrics(
 
 /// The switch that reaches 0.0% CPU.
 @MainActor @Test func aSteadyStateNeedsNoTimeline() {
-    #expect(model(.dormant).needsTimeline == false)
+    // NOT .dormant — its zzz badge drifts even though the cat is still, so a
+    // dormant island genuinely does need a timeline. Asserting otherwise here
+    // contradicted the very next test. Corrected during execution.
     #expect(model(.failed, count: 1).needsTimeline == false)
     #expect(model(.idle, count: 1).needsTimeline == false)
 }
@@ -1318,7 +1320,14 @@ private let mbp14 = ScreenMetrics(
 @MainActor @Test func motionOffNeedsNoTimelineInAnyState() {
     for state in IslandState.allCases {
         let m = model(state, count: 1, motion: .off)
-        m.aura = AuraTrigger()
+        // The aura must genuinely be blooming. A fresh AuraTrigger() makes this
+        // test vacuous: with motion off, `resolve` already forces the mood and
+        // badge paths still, so without a live bloom the assertion holds whether
+        // or not the `.off` guard exists — and Step 5's proof proves nothing.
+        var blooming = AuraTrigger()
+        _ = blooming.observe(.idle, now: Date())
+        _ = blooming.observe(state == .idle ? .failed : .idle, now: Date())
+        m.aura = blooming
         #expect(m.needsTimeline == false, "\(state) still wants a timeline with motion off")
     }
 }
