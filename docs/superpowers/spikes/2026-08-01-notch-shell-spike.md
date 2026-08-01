@@ -77,16 +77,26 @@ final class NotchPanel: NSPanel {
 ```
 
 Re-measured on hardware with a live window server, ordering the panel front and setting
-the frame through the real path:
+the frame through the real path, sweeping the level:
 
-| Panel level | AppKit's own `constrainFrameRect` | Frame without the override | With it | Override matters |
-|---|---|---|---|---|
-| 25 `.statusBar` | returns `y 950` unchanged | `y 950` | `y 950` | **no** |
-| 3 `.floating` | returns `y 917` | `y 917` | `y 950` | yes |
+| Panel level | AppKit's own `constrainFrameRect` | Override matters |
+|---|---|---|
+| 0 `.normal` | clamps `y 950` → `y 917` | yes |
+| 3 `.floating` | clamps | yes |
+| 20 | clamps | yes |
+| 22 | clamps | yes |
+| 23 | clamps | yes |
+| **24 `.mainMenu`** | **returns `y 950` unchanged** | **no** |
+| 25 `.statusBar` | returns `y 950` unchanged | no |
+| 101 `.popUpMenu` | returns `y 950` unchanged | no |
 
-**The clamp is level-dependent.** AppKit exempts a window at `.statusBar` from
-constrain-to-visible-frame entirely. At the level this app actually ships at, the override
-changes nothing.
+**The clamp is level-dependent, and the boundary is exactly 24.** At 23 and below AppKit
+clamps to the visible frame; at 24 and above it exempts the window entirely. At the level
+this app ships at, the override changes nothing.
+
+Note the coincidence worth not misreading: 24 is also the menu bar's own layer, so the
+same threshold governs both "can I draw over the menu bar" and "will my frame be clamped
+below it". They are separate mechanisms that happen to switch at the same number.
 
 ### 2b. The trap that produced the wrong answer
 
