@@ -1,0 +1,63 @@
+import AppKit
+
+/// The window that sits in the notch.
+///
+/// Three of its settings are load-bearing and were measured, not assumed —
+/// see docs/superpowers/spikes/2026-08-01-notch-shell-spike.md.
+@MainActor public final class NotchPanel: NSPanel {
+
+    public init(frames: IslandFrames) {
+        super.init(contentRect: frames.panel,
+                   styleMask: [.borderless, .nonactivatingPanel],
+                   backing: .buffered,
+                   defer: false)
+
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+        isMovable = false
+        // NSPanel's isFloatingPanel setter reassigns the window level as a
+        // side effect (to .floating, raw 3) — measured on this machine. It
+        // must be set before `level`, never after, or it silently undoes the
+        // load-bearing .statusBar assignment below.
+        isFloatingPanel = true
+        hidesOnDeactivate = false
+        becomesKeyOnlyIfNeeded = true
+        worksWhenModal = true
+        collectionBehavior = [.canJoinAllSpaces, .stationary,
+                              .fullScreenAuxiliary, .ignoresCycle]
+
+        // Above the menu bar (layer 24). The lowest level that clears it;
+        // going higher only starts fighting menus and alerts. Must be set
+        // after isFloatingPanel, see note above.
+        level = .statusBar
+
+        // At rest the island is click-through: a menu title can reach within
+        // about 30pt of its left edge, and an opaque flank would eat the click.
+        ignoresMouseEvents = true
+
+        setFrame(frames.panel, display: false)
+    }
+
+    /// AppKit clamps a window's frame to the screen's visible area, which drops
+    /// the island 33pt out of the notch. Refusing the constraint is the whole
+    /// trick — do not call super here.
+    public override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
+
+    /// Borderless panels refuse key status by default, and the reply field in
+    /// Plan 4 needs it.
+    public override var canBecomeKey: Bool { true }
+
+    /// False while collapsed, true once the drawer is open and the island
+    /// genuinely owns the space it covers.
+    public var isInteractive: Bool {
+        get { !ignoresMouseEvents }
+        set { ignoresMouseEvents = !newValue }
+    }
+
+    public func apply(_ frames: IslandFrames) {
+        setFrame(frames.panel, display: true)
+    }
+}
