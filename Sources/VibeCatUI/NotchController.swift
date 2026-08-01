@@ -24,6 +24,14 @@ import SwiftUI
         self.init(model: model, metrics: { ScreenMetrics.current() })
     }
 
+    /// The live panel, for `NotchControllerTests` only — deliberately not
+    /// `public`, so a normal `import VibeCatUI` never sees it and only
+    /// `@testable import` does. `present()` already constructs a real
+    /// `NSPanel` in the test process; this is what lets a test observe that
+    /// `model.onChange` drives an actual frame change on it, rather than
+    /// merely checking the closure is non-nil.
+    var panelForTesting: NotchPanel? { panel }
+
     public func refreshGeometry() {
         geometry = metrics().map(IslandGeometry.init(screen:))
         reflow()
@@ -40,7 +48,12 @@ import SwiftUI
         hover.frame = frames.shape
         hover.onChange = { [weak self] hovering in
             self?.tier = hovering ? .hover : .rest
-            self?.refreshGeometry()
+            // A hover edge is not a display change, so this reflows the
+            // existing geometry rather than re-deriving it from
+            // NSScreen.screens the way refreshGeometry() does. reflow()
+            // still updates hover.frame (from currentFrames().shape), so the
+            // hover monitor's own frame stays correct across the tier change.
+            self?.reflow()
         }
         hover.start()
         self.hover = hover
@@ -78,6 +91,19 @@ import SwiftUI
         panel = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
+    }
+
+    /// `NotificationCenter` holds the `didChangeScreenParametersNotification`
+    /// registration for as long as it is not explicitly removed, regardless
+    /// of what happens to this instance — so without this, a controller
+    /// dropped after `present()` with no intervening `dismiss()` would leak
+    /// that observer, plus the panel and the hover monitor's timer, for the
+    /// rest of the process. Same defect class already hardened on
+    /// `HoverMonitor` and `AppModel` via `isolated deinit`; this is the third
+    /// of the three owners. `dismiss()` already does exactly the cleanup
+    /// needed here, `bloomEnd` included, so deinit just calls it.
+    isolated deinit {
+        dismiss()
     }
 
     private var layout: CollapsedLayout {
