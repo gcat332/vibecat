@@ -1188,9 +1188,29 @@ public struct IslandShape: Shape, Sendable {
     }
 
     public func path(in rect: CGRect) -> Path {
-        let f = IslandGeometry.fillet
-        let r = min(IslandGeometry.bottomRadius, rect.height / 2)
-        let rightF = rightFilletSuppressed ? 0 : f
+        // Nominal sizes. The left side always carries a fillet; the right
+        // carries one too unless suppressed.
+        let f0 = IslandGeometry.fillet
+        let r0 = IslandGeometry.bottomRadius
+        let rightF0: CGFloat = rightFilletSuppressed ? 0 : f0
+
+        // Two invariants keep the contour from folding back on itself:
+        //   vertical:   f + r <= rect.height           (the top curve must end
+        //               no lower than the bottom corner starts)
+        //   horizontal: f + rightF + 2r <= rect.width  (the bottom edge between
+        //               the two rounded corners cannot have negative length)
+        // One shared scale keeps f and r in their nominal 9:15 proportion as
+        // they shrink, rather than clamping either alone and distorting the
+        // corner. Clamping only `r` against height/2 is NOT sufficient: it
+        // guards heights in [18, 30) and does nothing below 18, where the
+        // path self-intersects.
+        let heightBudget = f0 + r0
+        let widthBudget = f0 + rightF0 + 2 * r0
+        let scale = min(1, rect.height / heightBudget, rect.width / widthBudget)
+
+        let f = f0 * scale
+        let r = r0 * scale
+        let rightF: CGFloat = rightFilletSuppressed ? 0 : f
 
         let left = rect.minX + f            // body's left edge
         let right = rect.maxX - rightF      // body's right edge
