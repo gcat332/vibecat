@@ -101,14 +101,9 @@ public struct ResolvedCat: Sendable, Equatable {
                 }
             }
         case .call:
-            // Open, but fixed and dilated — a wide, unblinking stare reads as
-            // "watching, waiting for attention," and keeps this mood's eyes
-            // from being pixel-identical to trot's relaxed open eye (design
-            // §7.2 lists both as "open"; the eyes are what must distinguish
-            // every mood from every other, so call needs its own open). The
-            // mouth opens too: row 11's centre becomes a dark opening.
-            let wide: [Tone?] = [.pupil, .pupil, .pupil]
-            for row in 7...9 { setEyes(wide, wide, row: row) }
+            // Open — the same category as trot's resting eye, per design
+            // §7.2. What distinguishes this mood is the mouth, not the eyes:
+            // row 11's centre becomes a dark opening.
             g[11][8] = .pupil
             g[11][9] = .pupil
         case .happy:

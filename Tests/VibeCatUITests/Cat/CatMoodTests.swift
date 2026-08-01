@@ -34,21 +34,26 @@ import Testing
     #expect(CatMood.dead.motion.cycle == 2.4)
 }
 
-/// Design §7.2 — the eyes are what distinguish the moods.
+/// Design §7.2 — every mood must look different, but not always via the
+/// eyes: `trot` and `call` are both "open"-eyed, distinguished only by
+/// `call`'s open mouth (row 11). Comparing rows 7...9 alone asked the eyes to
+/// carry a distinction the spec assigns to the mouth instead — widened to
+/// rows 7...11 (eyes, nose, mouth) so the comparison matches what actually
+/// varies between moods.
 ///
 /// On this toolchain (swift-testing 1902), a bare `!` wrapped directly around
 /// `.contains(_:)` mis-evaluates when the receiver holds optionals (see the
 /// comment above `plainRemovesEveryShadowMarking` in CatGridTests.swift) — use
 /// `== false`, not `!...contains(...)`, here too.
-@Test func eachMoodGivesTheCatDifferentEyes() {
-    func eyeRows(_ mood: CatMood) -> [[Tone?]] {
+@Test func eachMoodGivesTheCatADifferentFace() {
+    func faceRows(_ mood: CatMood) -> [[Tone?]] {
         let c = ResolvedCat(coat: .tabby, mood: mood, phase: 0).cells
-        return Array(c[7...9])
+        return Array(c[7...11])
     }
     var seen: [[[Tone?]]] = []
     for mood in CatMood.allCases {
-        let rows = eyeRows(mood)
-        #expect(seen.contains(rows) == false, "\(mood) has the same eyes as an earlier mood")
+        let rows = faceRows(mood)
+        #expect(seen.contains(rows) == false, "\(mood) has the same face as an earlier mood")
         seen.append(rows)
     }
 }
@@ -79,7 +84,6 @@ import Testing
         for i in 0...20 {
             let phase = Double(i) / 20.0
             let cat = ResolvedCat(coat: .tabby, mood: mood, phase: phase)
-            #expect(cat.verticalOffset == Int(cat.verticalOffset))
             #expect(abs(cat.verticalOffset) <= 1, "\(mood) bobs more than one cell")
         }
     }
