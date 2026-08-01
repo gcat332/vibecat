@@ -132,6 +132,39 @@ private let externalDisplay = ScreenMetrics(
     _ = islandBody(.dormant, count: 0, geometry: externalDisplay).body
 }
 
+/// Design §9.1's trap, guarded directly: a single `.animation(_, value:
+/// body.width)` can only pick one curve, so a hover-driven change and a
+/// content-driven change compete for it. `IslandBody` avoids this by keeping
+/// the two contributions to the width as separate properties driven by
+/// different inputs, so each can carry its own `.animation(value:)`. This
+/// pins both halves: `restingWidth` must depend only on content, never on
+/// `model.hovering`; `hoverRevealWidth` must depend only on `model.hovering`,
+/// never on session count; and together they must still sum back to the real
+/// `body.width`, so the split can never silently diverge from what
+/// `IslandGeometry` actually computes. If a later edit collapsed the two back
+/// into reading `model.frames.body.width` directly, this test would fail to
+/// compile — the two properties it names would no longer exist.
+@MainActor @Test func theWidthSplitsIntoAContentHalfAndAnIndependentHoverHalf() {
+    let atRest = islandBody(.running, count: 3, hovering: false)
+    let hovered = islandBody(.running, count: 3, hovering: true)
+    let moreSessionsHovered = islandBody(.running, count: 30, hovering: true)
+
+    // restingWidth must not move when only hovering changes.
+    #expect(atRest.restingWidth == hovered.restingWidth)
+    // hoverRevealWidth must not move when only content changes.
+    #expect(hovered.hoverRevealWidth == moreSessionsHovered.hoverRevealWidth)
+    // hoverRevealWidth is driven by hovering alone, by exactly hoverReveal.
+    #expect(atRest.hoverRevealWidth == 0)
+    #expect(hovered.hoverRevealWidth == CollapsedLayout.hoverReveal)
+    // The split is faithful: it must sum back to the real geometry, in both
+    // states, including the dormant-and-hovered case Task 10 fixed.
+    #expect(atRest.restingWidth + atRest.hoverRevealWidth == atRest.model.frames.body.width)
+    #expect(hovered.restingWidth + hovered.hoverRevealWidth == hovered.model.frames.body.width)
+    let dormantHovered = islandBody(.dormant, count: 0, hovering: true)
+    #expect(dormantHovered.restingWidth + dormantHovered.hoverRevealWidth
+            == dormantHovered.model.frames.body.width)
+}
+
 /// `IslandBody`'s left- and right-flank padding is a respelling, in SwiftUI's
 /// `.padding`/`.frame` vocabulary, of `IslandGeometry.leftFlank` and
 /// `CollapsedLayout.padding`. Nothing in the type system keeps a respelling

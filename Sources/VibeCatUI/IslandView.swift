@@ -196,6 +196,31 @@ struct IslandBody: View {
             .truncatingRemainder(dividingBy: cycle) / cycle
     }
 
+    /// The body's width with hover's own contribution subtracted back out —
+    /// depends only on the right flank's content (nothing / an icon / a
+    /// session count), never on `model.hovering`. This is the half of the
+    /// width the spring in `body` tracks; see `hoverRevealWidth` for the
+    /// other half, and the comment in `body` for why the two are kept apart
+    /// instead of both feeding a single `.animation(value: body.width)`.
+    ///
+    /// Not `private`: `theWidthSplitsIntoAContentHalfAndAnIndependentHoverHalf`
+    /// in IslandViewTests.swift reads it directly so a later edit that quietly
+    /// re-merges the two halves fails to compile, not just fails at runtime.
+    var restingWidth: CGFloat {
+        let resting = CollapsedLayout(right: model.layout.right, hovering: false)
+        return model.geometry.frames(rightFlank: resting.rightFlankWidth, tier: .rest).body.width
+    }
+
+    /// The hover reveal's own contribution: `CollapsedLayout.hoverReveal`
+    /// while hovering, `0` at rest — depends only on `model.hovering`, never
+    /// on session count. Always sums with `restingWidth` back to the real
+    /// `model.frames.body.width` (both `rightFlankWidth`'s branches add
+    /// exactly `hoverReveal` for hovering vs. not, whatever the content), so
+    /// splitting it out costs nothing the layout wasn't already going to draw.
+    var hoverRevealWidth: CGFloat {
+        model.hovering ? CollapsedLayout.hoverReveal : 0
+    }
+
     var body: some View {
         let panel = model.panelFrames
         let body = model.frames.body
@@ -213,14 +238,27 @@ struct IslandBody: View {
                 // than a bounding box — and follows the drawer down for free.
                 .shadow(color: accent.opacity(model.aura.opacity(at: now)),
                         radius: 18, x: 0, y: 2)
-                .frame(width: body.width, height: body.height)
+                .frame(width: restingWidth + hoverRevealWidth, height: body.height)
                 .offset(x: localX, y: 0)
                 // Design §9.1. Width overshoots more than height so the island
                 // reads as one body with mass rather than a resizing box. The
                 // panel itself never moves (Task 9's whole point) — only this
                 // silhouette, inside it, animates.
                 .animation(.spring(response: 0.42, dampingFraction: 0.72),
-                           value: body.width)
+                           value: restingWidth)
+                // Design §9.1's OTHER named animation: hover reveal, 280ms,
+                // max-width 0 → 150pt — a distinct transition from the width
+                // spring above, not the same curve wearing a second hat.
+                // Keying each `.animation(value:)` to its own independent
+                // input, rather than both to `body.width`, is what makes that
+                // true: toggling `hovering` alone leaves `restingWidth`
+                // unchanged, so the spring modifier has nothing to react to
+                // and this one governs — and vice versa when only the session
+                // count changes. A naive `withAnimation(.easeOut(duration:
+                // 0.28))` wrapped around the `hovering` mutation instead would
+                // be overridden by the spring above, because both would then
+                // be keyed to the same changing `body.width`.
+                .animation(.easeOut(duration: 0.28), value: hoverRevealWidth)
         }
         .frame(width: panel.panel.width, height: panel.panel.height,
                alignment: .topLeading)

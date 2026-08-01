@@ -38,6 +38,47 @@ private let fixedMetrics = CollapsedLayout.Metrics(digitWidth: 9)
     #expect(hover.rightFlankWidth > rest.rightFlankWidth)
 }
 
+/// Measured on the running app: hover was a guaranteed no-op while dormant,
+/// because rightFlankWidth returned before it looked at `hovering`.
+@Test func hoveringOpensTheRevealEvenWithNoRightContent() {
+    let rest = CollapsedLayout(right: .nothing, hovering: false)
+    let hovered = CollapsedLayout(right: .nothing, hovering: true)
+    #expect(rest.rightFlankWidth == 0)
+    #expect(hovered.rightFlankWidth == CollapsedLayout.hoverReveal)
+}
+
+@Test func hoveringStillAddsTheRevealOnTopOfRealContent() {
+    let rest = CollapsedLayout(right: .sessionCount(2), hovering: false)
+    let hovered = CollapsedLayout(right: .sessionCount(2), hovering: true)
+    #expect(hovered.rightFlankWidth == rest.rightFlankWidth + CollapsedLayout.hoverReveal)
+}
+
+@Test func aZeroCountStillShowsNothingAtRest() {
+    #expect(CollapsedLayout(right: .sessionCount(0), hovering: false).rightFlankWidth == 0)
+}
+
+/// Design §9.1: the hover reveal (`280ms`, `easeOut`) must be a distinct
+/// animation from the width spring, not the same curve wearing two hats.
+/// `IslandBody` achieves that by splitting the body's width into a resting
+/// half (springs) and the reveal's own contribution (eases) and animating
+/// each independently — which only works if hover's contribution is a
+/// constant, content-independent `+150`. If a later change made the reveal
+/// scale with (or vanish for) some particular content, the split could no
+/// longer be pulled apart like this, and the two animations would collapse
+/// back into one.
+@Test func theHoverRevealIsAConstantAdditionRegardlessOfContent() {
+    let contents: [CollapsedLayout.RightContent] = [
+        .nothing, .agentIcon, .sessionCount(0), .sessionCount(1),
+        .sessionCount(42), .sessionCount(999),
+    ]
+    for right in contents {
+        let rest = CollapsedLayout(right: right, hovering: false)
+        let hovered = CollapsedLayout(right: right, hovering: true)
+        #expect(hovered.rightFlankWidth - rest.rightFlankWidth == CollapsedLayout.hoverReveal,
+                "hover's contribution should be exactly hoverReveal for \(right), independent of content")
+    }
+}
+
 /// Builds the right flank's font the same way `RightFlankFont` in
 /// IslandView.swift does, but independently, purely to measure a whole
 /// rendered string in this test. Deliberately does not read

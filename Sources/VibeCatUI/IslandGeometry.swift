@@ -185,10 +185,20 @@ public struct CollapsedLayout: Sendable, Equatable {
         case .nothing: 0
         case .agentIcon: Self.iconWidth
         case .sessionCount:
+            // Measure the CLAMPED text, never String(n). An earlier task made
+            // sessionCountText the single clamp so the fixed panel is a real
+            // ceiling; reformatting the raw count here reintroduces the
+            // overflow it closed. This is the third time this regression has
+            // been written into the plan.
             CGFloat(sessionCountText?.count ?? 0) * metrics.digitWidth
         }
-        guard content > 0 else { return 0 }
-        return Self.padding + content + (hovering ? Self.hoverReveal : 0)
+        let reveal = hovering ? Self.hoverReveal : 0
+        // An empty flank stays empty at rest — the island never reserves space
+        // it is not using. But hovering always opens the reveal: returning
+        // early here made hover a guaranteed no-op on a dormant island, which
+        // reads as the feature being broken.
+        guard content > 0 else { return reveal }
+        return Self.padding + content + reveal
     }
 
     public var hasRightContent: Bool { rightFlankWidth > 0 }
