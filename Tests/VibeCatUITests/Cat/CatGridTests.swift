@@ -44,19 +44,23 @@ private let eyeTones: Set<Tone> = [.eyeWhite, .sparkle, .pupil]
     }
 }
 
-// Brief's Step 1 wrote this as `#expect(!cells.flatMap { $0 }.contains(.shadow))`.
-// On this toolchain (Swift 6.3.2, swift-testing 1902) that exact shape — a `!`
-// applied directly to a `.contains(_:)` call whose argument is implicit-member
-// syntax over `[Tone?]` — makes the macro's expectation evaluator report a
-// failure even though the underlying boolean is `true` (confirmed by printing
-// it directly: `contains` genuinely returns `false`). Rewriting the negation as
-// `== false` sidesteps the same macro path and evaluates correctly; a
-// standalone reproduction with a small unrelated optional-enum array did not
-// reproduce this, so it is not a general `!arr.contains(.case)` bug, just this
-// exact expression shape against `Tone?`. See task-2-report.md for the isolation.
+/// Distinctness is pairwise, not just "differs from tabby" — two non-default
+/// coats could still collide with each other. Worth checking directly rather
+/// than by hand, especially now that the fur-only guard narrows what each
+/// coat is allowed to repaint.
+@Test func everyCoatDiffersFromEveryOtherCoat() {
+    let all = Coat.allCases
+    for i in all.indices {
+        for j in all.indices where j > i {
+            #expect(CatGrid(coat: all[i]).cells != CatGrid(coat: all[j]).cells,
+                    "\(all[i]) is identical to \(all[j])")
+        }
+    }
+}
+
 @Test func plainRemovesEveryShadowMarking() {
     let cells = CatGrid(coat: .plain).cells
-    #expect(cells.flatMap { $0 }.contains(.shadow) == false)
+    #expect(!cells.flatMap { $0 }.contains(.shadow))
 }
 
 @Test func everyCoatKeepsTheSilhouette() {

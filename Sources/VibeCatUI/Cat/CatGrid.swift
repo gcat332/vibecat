@@ -32,8 +32,12 @@ public struct CatGrid: Sendable, Equatable {
         line.map { $0 == "." ? nil : Tone(rawValue: $0) }
     }
 
-    /// Eye cells are off-limits to coats — §7.3's "the eyes always win".
-    private static let eyeTones: Set<Tone> = [.eyeWhite, .sparkle, .pupil]
+    /// The only tones a coat may repaint. Project ruling on §7.3: a coat
+    /// repaints *fur*, and only fur — outline and linework (`O`), the pink
+    /// inner ear (`E`), the nose (`N`) and the eyes (`W`, `K`, `P`) are not
+    /// fur, so they are protected by construction rather than by a
+    /// case-by-case exclusion list.
+    private static let furTones: Set<Tone> = [.shadow, .body, .highlight, .lightest]
 
     public let coat: Coat
     public let cells: [[Tone?]]
@@ -50,11 +54,11 @@ public struct CatGrid: Sendable, Equatable {
 
     private static func apply(_ coat: Coat) -> [[Tone?]] {
         var g = base
-        // Repaint only where there is already fur, never an eye, never a hole.
+        // Repaint only existing fur — never a hole, never the face, never linework.
         func paint(rows: ClosedRange<Int>, cols: ClosedRange<Int>, _ tone: Tone) {
             for row in rows where row >= 0 && row < height {
                 for col in cols where col >= 0 && col < width {
-                    guard let existing = g[row][col], !eyeTones.contains(existing) else { continue }
+                    guard let existing = g[row][col], furTones.contains(existing) else { continue }
                     g[row][col] = tone
                 }
             }
