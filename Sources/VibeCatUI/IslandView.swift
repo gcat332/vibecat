@@ -196,15 +196,21 @@ struct IslandBody: View {
                 .fill(accent)
                 .frame(width: CollapsedLayout.iconWidth, height: 14)
                 .padding(.horizontal, RightFlankLayout.iconPadding)
-        case let .sessionCount(n) where n > 0:
-            Text(String(n))
-                .font(RightFlankFont.swiftUI)
-                .monospacedDigit()
-                .foregroundStyle(accent)
-                .padding(.leading, RightFlankLayout.leadingPadding)
-                .padding(.trailing, RightFlankLayout.trailingPadding)
         case .sessionCount:
-            EmptyView()
+            // `layout.sessionCountText` is the one place a count is clamped
+            // for display — see `CollapsedLayout.sessionCountText` — so this
+            // never reaches for `n` (or `min(...)`) itself and can't drift
+            // from the width `rightFlankWidth` already reserved for it.
+            if let text = layout.sessionCountText {
+                Text(text)
+                    .font(RightFlankFont.swiftUI)
+                    .monospacedDigit()
+                    .foregroundStyle(accent)
+                    .padding(.leading, RightFlankLayout.leadingPadding)
+                    .padding(.trailing, RightFlankLayout.trailingPadding)
+            } else {
+                EmptyView()
+            }
         }
     }
 }

@@ -113,6 +113,12 @@ private let externalDisplay = ScreenMetrics(
 /// built on, so a four-digit-or-larger count (unpruned running/waiting
 /// sessions have no upper bound) would overflow the fixed panel. This probes
 /// the type's actual range rather than the assumption of a small count.
+///
+/// Fix round 2: pairs the width assertion with a rendered-text one, in the
+/// same loop over the same counts — a width-only pass is exactly what let
+/// the other half of this bug (`IslandView` drawing the unclamped count and
+/// clipping it against the silhouette, even though the panel itself now
+/// fit) read as a complete fix.
 @Test func theMaximumCollapsedPanelHoldsAbsurdSessionCounts() {
     let g = IslandGeometry(screen: mbp14)
     let maxFrames = g.maxCollapsedFrames()
@@ -124,6 +130,8 @@ private let externalDisplay = ScreenMetrics(
                 "sessionCount(\(n)) hovering=true exceeds the fixed panel")
         #expect(f.body.maxX <= maxFrames.body.maxX + 0.001,
                 "sessionCount(\(n)) hovering=true exceeds the fixed panel")
+        #expect(layout.sessionCountText?.count == 3,
+                "sessionCount(\(n)) hovering=true should render as three characters")
     }
 }
 

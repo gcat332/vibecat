@@ -79,6 +79,32 @@ private func measuredWidth(of text: String) -> CGFloat {
     }
 }
 
+/// Fix round 2: `sessionCountText` is the one place a count is clamped for
+/// display — `IslandView` reads it instead of formatting `n` itself, so it
+/// can never render more digits than `rightFlankWidth` reserved room for.
+@Test func sessionCountTextIsNilWhenThereIsNothingToDraw() {
+    #expect(CollapsedLayout(right: .nothing, hovering: false).sessionCountText == nil)
+    #expect(CollapsedLayout(right: .agentIcon, hovering: false).sessionCountText == nil)
+    #expect(CollapsedLayout(right: .sessionCount(0), hovering: false).sessionCountText == nil)
+}
+
+@Test func sessionCountTextIsThePlainDigitsWithinTheLimit() {
+    let l = CollapsedLayout(right: .sessionCount(42), hovering: false)
+    #expect(l.sessionCountText == "42")
+}
+
+/// The regression this fix round exists for: a count of 1234 used to render
+/// as `"1234"` — four glyphs in a three-digit-wide reservation — clipping
+/// against the silhouette. Clamped, it must render as exactly
+/// `maxDisplayedSessions`, not merely "some 3-character string".
+@Test func sessionCountTextClampsBeyondTheDisplayLimit() {
+    for n in [1_000, 999_999, Int.max] {
+        let l = CollapsedLayout(right: .sessionCount(n), hovering: false)
+        #expect(l.sessionCountText == String(CollapsedLayout.maxDisplayedSessions),
+                "sessionCount(\(n)) should render as the clamp, not \(n)'s own digits")
+    }
+}
+
 /// Whatever the right side does, the geometry keeps the left edge still.
 @Test func noRightContentEverMovesTheLeftEdge() {
     let screen = ScreenMetrics(

@@ -37,7 +37,11 @@ private func evaluate(_ screen: ScreenMetrics, _ state: IslandState,
 
 @MainActor @Test func theBodyEvaluatesForEveryRightHandContent() {
     let variants: [CollapsedLayout.RightContent] =
-        [.nothing, .agentIcon, .sessionCount(0), .sessionCount(1), .sessionCount(999)]
+        [.nothing, .agentIcon, .sessionCount(0), .sessionCount(1), .sessionCount(999),
+         // Fix round 2: a count past the display limit renders through
+         // `sessionCountText` rather than `String(n)` — evaluate it too, not
+         // just the in-range counts above.
+         .sessionCount(1_000_000)]
     for right in variants {
         evaluate(mbp14, .running, right, hovering: false, tier: .rest)
     }

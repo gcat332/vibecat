@@ -87,8 +87,10 @@ public struct IslandGeometry: Sendable, Equatable {
 
     /// The widest the collapsed island can ever be: a session count clamped
     /// to `CollapsedLayout.maxDisplayedSessions` digits, hovered. Genuinely
-    /// the ceiling — not merely the assumed one — because `rightFlankWidth`
-    /// enforces that same clamp on every count it measures, however large.
+    /// the ceiling — not merely the assumed one — because both the reserved
+    /// width (`rightFlankWidth`) and the text `IslandView` actually draws
+    /// come from `CollapsedLayout.sessionCountText`, which enforces that
+    /// clamp on every count, however large.
     ///
     /// The panel is created once at this size and never resized — measured,
     /// animating the silhouette inside a fixed window has a p95 of 10.34ms
@@ -142,8 +144,9 @@ public struct CollapsedLayout: Sendable, Equatable {
     /// Design §9.1: hover reveals name and elapsed time over 280ms, up to 150pt.
     public static let hoverReveal: CGFloat = 150
     /// The most digits the right flank ever reserves width for.
-    /// `rightFlankWidth` clamps every session count to this before measuring
-    /// it, so `IslandGeometry.maxCollapsedFrames()`'s "three-digit, hovered"
+    /// `sessionCountText` clamps every session count to this before it is
+    /// either measured (`rightFlankWidth`) or drawn (`IslandView`), so
+    /// `IslandGeometry.maxCollapsedFrames()`'s "three-digit, hovered"
     /// ceiling is an enforced upper bound rather than an assumption a
     /// four-digit count — nothing upstream caps `sessionCount`'s `Int` —
     /// could silently exceed. A count beyond this still displays as exactly
@@ -162,6 +165,17 @@ public struct CollapsedLayout: Sendable, Equatable {
         self.metrics = metrics
     }
 
+    /// The exact text a session count renders as, clamped to
+    /// `maxDisplayedSessions` here and only here — `rightFlankWidth` below
+    /// and `IslandBody.rightFlank` in IslandView.swift both read this rather
+    /// than clamping independently, so the reserved width and the drawn
+    /// glyphs can never disagree. `nil` for every other `RightContent` case,
+    /// or a non-positive count: nothing to draw.
+    public var sessionCountText: String? {
+        guard case let .sessionCount(n) = right, n > 0 else { return nil }
+        return String(min(n, Self.maxDisplayedSessions))
+    }
+
     /// Design §5.4: "measured from actual content... then written back as an
     /// explicit width." `metrics.digitWidth` is a real measurement by
     /// default (see `Metrics.standard`), not a guessed constant, so this
@@ -170,9 +184,8 @@ public struct CollapsedLayout: Sendable, Equatable {
         let content: CGFloat = switch right {
         case .nothing: 0
         case .agentIcon: Self.iconWidth
-        case let .sessionCount(n):
-            n <= 0 ? 0
-                    : CGFloat(String(min(n, Self.maxDisplayedSessions)).count) * metrics.digitWidth
+        case .sessionCount:
+            CGFloat(sessionCountText?.count ?? 0) * metrics.digitWidth
         }
         guard content > 0 else { return 0 }
         return Self.padding + content + (hovering ? Self.hoverReveal : 0)
