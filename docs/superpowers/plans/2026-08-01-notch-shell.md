@@ -1240,7 +1240,7 @@ git commit -m "feat: island silhouette with concave top fillets"
 
 **Interfaces:**
 - Consumes: `IslandState` from Task 3.
-- Produces: `public struct AuraTrigger: Sendable, Equatable` with `public static let duration: TimeInterval = 0.9`, `public static let peakOpacity: Double = 0.14`; `public init()`; `public mutating func observe(_ state: IslandState, now: Date) -> Bool`; `public func opacity(at: Date) -> Double`; `public var colour: RGBA?`.
+- Produces: `public struct AuraTrigger: Sendable, Equatable` with `public static let duration: TimeInterval = 0.9`, `public static let peakOpacity: Double = 0.14`; `public init()`; `public mutating func observe(_ state: IslandState, now: Date) -> Bool`; `public func opacity(at: Date) -> Double`; `public func isBlooming(at: Date) -> Bool`; `public var colour: RGBA?`.
 
 Design §9.2: the aura is punctuation, not a status light. It fires on a state *change*, blooms in the new state's colour and leaves nothing behind. A glow that stayed lit would be a second indicator competing with the cat.
 
@@ -1307,6 +1307,20 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     #expect(a.opacity(at: after) == 0)
 }
 
+/// Drives whether the view needs per-frame redraws. True across the whole
+/// window including its zero-opacity start, so the first frame is not skipped.
+@Test func isBloomingCoversTheWholeWindowIncludingTheZeroStart() {
+    var a = AuraTrigger()
+    #expect(a.isBlooming(at: t0) == false)          // never fired
+    _ = a.observe(.idle, now: t0)
+    let fired = t0.addingTimeInterval(1)
+    _ = a.observe(.waiting, now: fired)
+
+    #expect(a.isBlooming(at: fired))                              // opacity is 0 here
+    #expect(a.isBlooming(at: fired.addingTimeInterval(0.45)))
+    #expect(a.isBlooming(at: fired.addingTimeInterval(AuraTrigger.duration)) == false)
+}
+
 @Test func aSecondChangeRestartsTheEnvelope() {
     var a = AuraTrigger()
     _ = a.observe(.idle, now: t0)
@@ -1356,6 +1370,15 @@ public struct AuraTrigger: Sendable, Equatable {
 
     public var colour: RGBA? { firedColour }
 
+    /// Whether a bloom is in flight. The view uses this to decide if it needs
+    /// per-frame redraws — an idle machine must not animate. True from the
+    /// instant it fires, even though opacity is 0 there.
+    public func isBlooming(at instant: Date) -> Bool {
+        guard let firedAt else { return false }
+        let t = instant.timeIntervalSince(firedAt)
+        return t >= 0 && t < Self.duration
+    }
+
     /// A symmetric rise and fall. Zero at both ends, so nothing is left behind.
     /// The upper bound is exclusive: `sin(.pi)` is 1.2e-16 rather than 0, and
     /// the test asserts an exact zero.
@@ -1372,7 +1395,7 @@ public struct AuraTrigger: Sendable, Equatable {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `swift test --filter AuraTriggerTests`
-Expected: PASS, 7 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Prove the change-only test is load-bearing**
 
@@ -1393,12 +1416,14 @@ git commit -m "feat: aura that fires on state change and leaves nothing behind"
 - Create: `Sources/VibeCatUI/IslandView.swift`
 - Modify: `Sources/VibeCatUI/IslandGeometry.swift` — append `CollapsedLayout`
 - Test: `Tests/VibeCatUITests/CollapsedLayoutTests.swift`
+- Test: `Tests/VibeCatUITests/IslandViewTests.swift`
 
 **Interfaces:**
 - Consumes: `IslandGeometry`, `IslandState`, `IslandShape`, `AuraTrigger`.
 - Produces:
   - `public struct CollapsedLayout: Sendable, Equatable` with `public enum RightContent: Sendable, Equatable { case sessionCount(Int), agentIcon, nothing }`; `public init(right: RightContent, hovering: Bool)`; `public var rightFlankWidth: CGFloat`; `public var showsRightFillet: Bool`.
-  - `public struct IslandView: View` with `public init(state: IslandState, layout: CollapsedLayout, aura: AuraTrigger, now: Date, geometry: IslandGeometry, frames: IslandFrames)`.
+  - `public struct IslandView: View` with `public init(state: IslandState, layout: CollapsedLayout, aura: AuraTrigger, now: Date, geometry: IslandGeometry, frames: IslandFrames)` — a thin `TimelineView` wrapper.
+  - `struct IslandBody: View` (internal) — the actual content, same initialiser signature. Split out so the smoke test can evaluate real content: evaluating a `TimelineView`'s `body` does not run its content closure.
 
 Design §5.4: the right flank is measured from its content, never reserved. Design §6.2: right-flank content is configurable — session count (default), agent icon, or nothing. Dormant shows nothing, which is what makes `showsRightFillet` false.
 
@@ -1522,7 +1547,7 @@ Expected: PASS, 5 tests.
 
 - [ ] **Step 5: Write the view**
 
-Create `Sources/VibeCatUI/IslandView.swift`. There is no assertion to make about a SwiftUI body that the layout tests do not already cover, so this step has no test of its own — every number it uses comes from a tested value type.
+Create `Sources/VibeCatUI/IslandView.swift`. Two types: `IslandView` is a thin `TimelineView` wrapper that drives the aura's per-frame redraws, and `IslandBody` is the content. They are split because evaluating a `TimelineView`'s `body` does not run its content closure — the smoke test in Step 6 would prove nothing against a single combined type.
 
 ```swift
 import SwiftUI
@@ -1531,10 +1556,12 @@ extension Color {
     init(_ c: RGBA) { self.init(red: c.r, green: c.g, blue: c.b) }
 }
 
-/// The collapsed island. Left flank, dead zone, right flank.
+/// Drives per-frame redraws while — and only while — the aura is blooming.
 ///
-/// Design §5.1: the black shape may span the cutout because the cutout is black
-/// too — but content may not. The middle is a fixed-width spacer, never a view.
+/// Design §6.1: an idle machine should look idle, so the timeline is paused at
+/// rest rather than ticking forever for a 900ms effect. `paused` is fixed when
+/// the view is built, so the controller renders once more at the end of a bloom
+/// to pause it again.
 public struct IslandView: View {
     public let state: IslandState
     public let layout: CollapsedLayout
@@ -1553,9 +1580,30 @@ public struct IslandView: View {
         self.frames = frames
     }
 
+    public var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0,
+                                paused: !aura.isBlooming(at: now))) { context in
+            IslandBody(state: state, layout: layout, aura: aura,
+                       now: context.date, geometry: geometry, frames: frames)
+        }
+    }
+}
+
+/// The collapsed island. Left flank, dead zone, right flank.
+///
+/// Design §5.1: the black shape may span the cutout because the cutout is black
+/// too — but content may not. The middle is a fixed-width spacer, never a view.
+struct IslandBody: View {
+    let state: IslandState
+    let layout: CollapsedLayout
+    let aura: AuraTrigger
+    let now: Date
+    let geometry: IslandGeometry
+    let frames: IslandFrames
+
     private var accent: Color { Color(state.accent) }
 
-    public var body: some View {
+    var body: some View {
         let rect = frames.shapeInPanel
         let silhouette = IslandShape(rightFilletSuppressed: !layout.showsRightFillet)
 
@@ -1620,16 +1668,96 @@ public struct IslandView: View {
 }
 ```
 
-- [ ] **Step 6: Verify the package builds and the whole suite passes**
+- [ ] **Step 6: Write the view smoke test**
 
-Run: `swift build && swift test`
-Expected: build clean, all tests pass.
+Create `Tests/VibeCatUITests/IslandViewTests.swift`. This does not assert appearance — it proves the body evaluates for every state and every right-hand content variant without trapping, which is what catches a bad force-unwrap or a nil geometry.
 
-- [ ] **Step 7: Commit**
+```swift
+import Foundation
+import SwiftUI
+import Testing
+import CoreGraphics
+@testable import VibeCatUI
+
+private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+private let mbp14 = ScreenMetrics(
+    frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+    visibleFrame: CGRect(x: 0, y: 0, width: 1512, height: 949),
+    safeAreaTop: 32,
+    auxLeft: CGRect(x: 0, y: 950, width: 663, height: 32),
+    auxRight: CGRect(x: 848, y: 950, width: 664, height: 32))
+
+private let externalDisplay = ScreenMetrics(
+    frame: CGRect(x: 0, y: 0, width: 2560, height: 1440),
+    visibleFrame: CGRect(x: 0, y: 0, width: 2560, height: 1415),
+    safeAreaTop: 0, auxLeft: nil, auxRight: nil)
+
+@MainActor
+private func evaluate(_ screen: ScreenMetrics, _ state: IslandState,
+                      _ right: CollapsedLayout.RightContent,
+                      hovering: Bool, tier: IslandTier) {
+    let g = IslandGeometry(screen: screen)
+    let layout = CollapsedLayout(right: right, hovering: hovering)
+    let frames = g.frames(rightFlank: layout.rightFlankWidth, tier: tier)
+    _ = IslandBody(state: state, layout: layout, aura: AuraTrigger(),
+                   now: t0, geometry: g, frames: frames).body
+}
+
+@MainActor @Test func theBodyEvaluatesForEveryState() {
+    for state in IslandState.allCases {
+        evaluate(mbp14, state, .sessionCount(2), hovering: false, tier: .rest)
+    }
+}
+
+@MainActor @Test func theBodyEvaluatesForEveryRightHandContent() {
+    let variants: [CollapsedLayout.RightContent] =
+        [.nothing, .agentIcon, .sessionCount(0), .sessionCount(1), .sessionCount(999)]
+    for right in variants {
+        evaluate(mbp14, .running, right, hovering: false, tier: .rest)
+    }
+}
+
+@MainActor @Test func theBodyEvaluatesWhileHoveringAndWithTheDrawerOpen() {
+    evaluate(mbp14, .waiting, .sessionCount(3), hovering: true, tier: .hover)
+    evaluate(mbp14, .waiting, .sessionCount(3), hovering: false,
+             tier: .drawer(height: 288))
+}
+
+/// A notchless display has a zero-width dead zone; the spacer must cope.
+@MainActor @Test func theBodyEvaluatesOnTheFallbackPill() {
+    evaluate(externalDisplay, .dormant, .nothing, hovering: false, tier: .rest)
+}
+
+/// The wrapper pauses its timeline unless a bloom is in flight.
+@MainActor @Test func theWrapperEvaluatesBothPausedAndRunning() {
+    let g = IslandGeometry(screen: mbp14)
+    let layout = CollapsedLayout(right: .sessionCount(1), hovering: false)
+    let frames = g.frames(rightFlank: layout.rightFlankWidth, tier: .rest)
+
+    var blooming = AuraTrigger()
+    _ = blooming.observe(.idle, now: t0)
+    _ = blooming.observe(.failed, now: t0)
+    #expect(blooming.isBlooming(at: t0))
+
+    for aura in [AuraTrigger(), blooming] {
+        _ = IslandView(state: .failed, layout: layout, aura: aura,
+                       now: t0, geometry: g, frames: frames).body
+    }
+}
+```
+
+- [ ] **Step 7: Run the tests and verify the package builds**
+
+Run: `swift test --filter IslandViewTests`
+Expected: PASS, 5 tests. Then `swift build && swift test` — build clean, whole suite green.
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add Sources/VibeCatUI/IslandGeometry.swift Sources/VibeCatUI/IslandView.swift \
-        Tests/VibeCatUITests/CollapsedLayoutTests.swift
+        Tests/VibeCatUITests/CollapsedLayoutTests.swift \
+        Tests/VibeCatUITests/IslandViewTests.swift
 git commit -m "feat: collapsed layout measured from content, and the island view"
 ```
 
@@ -1920,7 +2048,7 @@ import Observation
     private var panel: NotchPanel?
     private var hover: HoverMonitor?
     private var aura = AuraTrigger()
-    private var lastState: IslandState?
+    private var bloomEnd: Task<Void, Never>?
     private var observer: NSObjectProtocol?
 
     public init(model: AppModel, metrics: @escaping @MainActor () -> ScreenMetrics?) {
@@ -1968,6 +2096,8 @@ import Observation
     }
 
     public func dismiss() {
+        bloomEnd?.cancel()
+        bloomEnd = nil
         hover?.stop()
         hover = nil
         panel?.orderOut(nil)
@@ -1989,13 +2119,24 @@ import Observation
 
     private func render() {
         guard let geometry, let frames = currentFrames(), let panel else { return }
+        let now = Date()
         let state = model.islandState
-        if state != lastState {
-            _ = aura.observe(state, now: Date())
-            lastState = state
+
+        // AuraTrigger does its own change detection, so this is called
+        // unconditionally and only reports true on an actual change.
+        if aura.observe(state, now: now) {
+            // TimelineView fixes its paused flag when the view is built, so
+            // one more render is needed to stop it ticking after the bloom.
+            bloomEnd?.cancel()
+            bloomEnd = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(AuraTrigger.duration))
+                guard !Task.isCancelled else { return }
+                self?.render()
+            }
         }
+
         let view = IslandView(state: state, layout: layout, aura: aura,
-                              now: Date(), geometry: geometry, frames: frames)
+                              now: now, geometry: geometry, frames: frames)
         if let hosting = panel.contentView as? NSHostingView<IslandView> {
             hosting.rootView = view
         } else {
@@ -2059,9 +2200,12 @@ VIBECAT_SOCKET=/tmp/vibecat-dev.sock Scripts/replay.sh permission
 Check, and record each in the task report:
 1. The island appears in the notch, welded to the top edge, with the left flank clear of the cutout.
 2. Its colour turns amber on the `permission` event and the session count reads `1`.
-3. Resting the cursor on it for a third of a second widens the right flank.
-4. Clicking a menu title that sits under the island's left flank still opens that menu.
-5. The hook exits `0` with no output.
+3. An aura blooms once on that change, in amber, and fades to nothing — it does not stay lit.
+4. Resting the cursor on it for a third of a second widens the right flank.
+5. Clicking a menu title that sits under the island's left flank still opens that menu.
+6. The hook exits `0` with no output.
+
+Also confirm the island is genuinely idle at rest: with no events arriving, `vibecat`'s CPU use in Activity Monitor should sit near zero. A few percent means the timeline never paused.
 
 - [ ] **Step 7: Run the full suite**
 
@@ -2086,4 +2230,9 @@ git commit -m "feat: notch controller and the vibecat executable"
 
 **Two gaps this plan closes that the spec did not name.** `SessionState` has four cases while the design describes five, so `dormant` is introduced at the UI layer in Task 3 — otherwise a machine that has never run anything looks like one that just succeeded. And the aura needs room outside the body to bloom into, so Task 2 inflates the panel on three sides.
 
-**Two risks carried into execution.** `NSHostingView` inside a borderless non-activating panel was not spiked; the fallback is a plain `NSView` with `draw(_:)`, as the spike itself used. And the aura will not animate until something drives per-frame rendering, which arrives with the cat in Plan 3 — Task 10 says so explicitly rather than letting an implementer chase it.
+**One risk carried into execution.** `NSHostingView` inside a borderless non-activating panel was not spiked; the fallback is a plain `NSView` with `draw(_:)`, as the spike itself used.
+
+**Two rulings made before execution**, both on points where this plan mandated something a review rubric would call a defect:
+
+- `IslandView` originally shipped with no test. Ruling: add a smoke test (Task 8, Step 6) that evaluates `IslandBody.body` across every state, every right-hand content variant, hover, drawer and the fallback pill. It asserts nothing about appearance — it catches traps.
+- The aura was originally computed but never animated, deferred to Plan 3. Ruling: make it real now. `IslandView` became a `TimelineView` wrapper that ticks only while a bloom is in flight, `AuraTrigger` gained `isBlooming(at:)`, and `NotchController` renders once more at the end of a bloom to pause the timeline again — because an idle machine must not animate.
