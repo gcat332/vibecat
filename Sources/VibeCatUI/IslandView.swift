@@ -286,7 +286,24 @@ struct IslandBody: View {
     var body: some View {
         let panel = model.panelFrames
         let body = model.frames.body
-        let localX = body.minX - panel.panel.minX
+        // `IslandFrames.bodyInPanel` expresses "this body, positioned inside
+        // this panel" as one relative rect; it used to be tested but unused
+        // in production, with the same offset hand-rolled here separately —
+        // x as `body.minX - panel.panel.minX`, y hardcoded to 0 on the
+        // strength of the panel having no top margin (exactly what
+        // `bodyInPanel` already encodes). Pairing *this* body — the actual
+        // current width, not the fixed panel's own maximal one — with the
+        // fixed panel and reading `bodyInPanel` off that pairing reproduces
+        // the hand-rolled value exactly (`panel.panel`'s left edge and
+        // bottom-anchored top don't move with content width — see
+        // `theFixedPanelDoesNotMoveTheLeftEdge` — but its own `body.minX`
+        // does, on a fallback pill, where centring shifts with total width;
+        // reading `model.panelFrames.bodyInPanel` directly instead would
+        // silently swap in the fixed panel's own centring for the real
+        // content's, misplacing the silhouette whenever the two widths
+        // differ). Routing through the tested helper this way means one
+        // place computes the offset, not two that can drift apart.
+        let localOrigin = IslandFrames(body: body, panel: panel.panel).bodyInPanel.origin
         let cell: CGFloat = 1
 
         ZStack(alignment: .topLeading) {
@@ -301,7 +318,7 @@ struct IslandBody: View {
                 .shadow(color: accent.opacity(model.aura.opacity(at: now)),
                         radius: 18, x: 0, y: 2)
                 .frame(width: restingWidth + hoverRevealWidth, height: body.height)
-                .offset(x: localX, y: 0)
+                .offset(x: localOrigin.x, y: localOrigin.y)
                 // Design §9.1. Width overshoots more than height so the island
                 // reads as one body with mass rather than a resizing box. The
                 // panel itself never moves (Task 9's whole point) — only this
