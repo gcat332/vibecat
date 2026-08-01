@@ -10,6 +10,15 @@ private func event(_ kind: Kind, session: String) -> VibeEvent {
               session: session, cwd: "/dev/\(session)")
 }
 
+/// Counts `onChange` firings. A reference type rather than a captured `var`,
+/// matching HoverMonitorTests' `Fake` — a local `var` mutated from inside an
+/// escaping closure and then read from outside it trips Swift 6's "mutated
+/// after capture by sendable closure" diagnostic.
+@MainActor private final class ChangeCounter {
+    var count = 0
+    func fire() { count += 1 }
+}
+
 @MainActor @Test func aFreshModelIsDormant() {
     let m = AppModel(socketPath: "/tmp/vibecat-test-unused.sock")
     #expect(m.islandState == .dormant)
@@ -50,4 +59,42 @@ private func event(_ kind: Kind, session: String) -> VibeEvent {
     _ = m.ingest(event(.failed, session: "a"), now: t0.addingTimeInterval(1))
     #expect(m.sessionCount == 1)
     #expect(m.islandState == .failed)
+}
+
+/// `NotchController` re-renders off this callback rather than a
+/// `withObservationTracking` bridge specifically because that bridge's
+/// one-shot `onChange` can drop a second, closely-following mutation while
+/// the re-arm is still in flight. This pins the behaviour it replaces.
+@MainActor @Test func onChangeFiresOnEveryIngestIncludingTheSecond() {
+    let m = AppModel(socketPath: "/tmp/vibecat-test-unused.sock")
+    let counter = ChangeCounter()
+    m.onChange = { counter.fire() }
+
+    _ = m.ingest(event(.running, session: "a"), now: t0)
+    #expect(counter.count == 1)
+
+    _ = m.ingest(event(.permission, session: "b"), now: t0)
+    #expect(counter.count == 2)
+}
+
+@MainActor @Test func onChangeFiresOnPruneOnlyWhenSomethingWasActuallyRemoved() {
+    let m = AppModel(socketPath: "/tmp/vibecat-test-unused.sock")
+    _ = m.ingest(event(.done, session: "old"), now: t0)
+    _ = m.ingest(event(.running, session: "busy"), now: t0)
+
+    let counter = ChangeCounter()
+    m.onChange = { counter.fire() }
+
+    // Neither session is stale yet — a no-op prune must not fire.
+    m.prune(now: t0)
+    #expect(counter.count == 0)
+
+    // "old" is idle and past the TTL now; "busy" survives regardless of age.
+    m.prune(now: t0.addingTimeInterval(AppModel.idleTTL + 1))
+    #expect(counter.count == 1)
+    #expect(m.sessionCount == 1)
+
+    // Nothing left to remove — no further fire.
+    m.prune(now: t0.addingTimeInterval(AppModel.idleTTL + 2))
+    #expect(counter.count == 1)
 }

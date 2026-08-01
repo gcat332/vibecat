@@ -76,3 +76,20 @@ private let externalDisplay = ScreenMetrics(
                            session: "a", cwd: "/dev/a"), now: t0)
     #expect(model.islandState == .running)
 }
+
+/// `present()` wires `model.onChange` so the panel re-renders off the
+/// model's own mutations rather than off a one-shot Observation bridge, and
+/// `dismiss()` must clear it — otherwise a dismissed controller (or its
+/// closure's captured state) could still react to events after the panel is
+/// gone.
+@MainActor @Test func presentingWiresTheModelsOnChangeAndDismissingClearsIt() {
+    let (c, model) = controller { mbp14 }
+    #expect(model.onChange == nil)
+
+    c.refreshGeometry()   // present() needs geometry to have somewhere to go
+    c.present()
+    #expect(model.onChange != nil)
+
+    c.dismiss()
+    #expect(model.onChange == nil)
+}

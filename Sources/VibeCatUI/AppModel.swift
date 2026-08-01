@@ -11,6 +11,23 @@ import VibeCatTransport
 
     public private(set) var store = SessionStore()
 
+    /// Fires after `ingest` or a `prune` that actually changed `store`.
+    ///
+    /// `AppModel` stays `@Observable` for Plans 4 and 5, where a SwiftUI view
+    /// will read it directly — but `NotchController` is a plain AppKit class,
+    /// not a view, and a manual bridge onto Observation
+    /// (`withObservationTracking`) has a real gap: its `onChange` fires once
+    /// per registration, so a mutation landing between a fire and the
+    /// re-arm falls through unobserved. That is fixable by patching the
+    /// re-arm timing, but an explicit callback removes the race outright —
+    /// every mutation notifies, with no one-shot registration to race
+    /// against — and it is trivially testable without a window server.
+    /// `@ObservationIgnored` because this is wiring, not model state; nothing
+    /// should ever depend on a view re-rendering when this closure itself is
+    /// reassigned.
+    @ObservationIgnored
+    public var onChange: (@MainActor () -> Void)?
+
     private let socketPath: String
     private var server: SocketServer?
     private var pruneTimer: Timer?
@@ -28,11 +45,20 @@ import VibeCatTransport
     @discardableResult
     public func ingest(_ event: VibeEvent, now: Date = Date()) -> Reply? {
         store.apply(event, now: now)
+        onChange?()
         return nil
     }
 
+    /// Only notifies when a prune actually removed something. The timer
+    /// below fires every 60 seconds regardless of whether anything is stale,
+    /// and a no-op tick should not cost a re-render — the island must stay
+    /// idle when the machine is idle.
     public func prune(now: Date = Date()) {
+        let before = store
         store.prune(idleFor: Self.idleTTL, now: now)
+        if store != before {
+            onChange?()
+        }
     }
 
     public func start() throws {
