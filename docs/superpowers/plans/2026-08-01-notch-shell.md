@@ -1401,20 +1401,23 @@ public struct AuraTrigger: Sendable, Equatable {
     /// Whether a bloom is in flight. The view uses this to decide if it needs
     /// per-frame redraws — an idle machine must not animate. True from the
     /// instant it fires, even though opacity is 0 there.
+    ///
+    /// Compares `Date`s directly rather than reconstructing elapsed seconds via
+    /// `timeIntervalSince` and comparing to `duration`. At these magnitudes
+    /// (~1e9s from the reference date) a Double's ULP is ~1.2e-7, so a boundary
+    /// instant built as `firedAt + duration` comes back as `0.8999999761…`, not
+    /// `0.9`, and the exclusive bound silently admits it. Doing
+    /// `firedAt.addingTimeInterval(duration)` here and in the caller is the same
+    /// floating-point operation on the same inputs, so the two land bit-identical.
     public func isBlooming(at instant: Date) -> Bool {
         guard let firedAt else { return false }
-        let t = instant.timeIntervalSince(firedAt)
-        return t >= 0 && t < Self.duration
+        return instant >= firedAt && instant < firedAt.addingTimeInterval(Self.duration)
     }
 
     /// A symmetric rise and fall. Zero at both ends, so nothing is left behind.
-    /// The upper bound is exclusive: `sin(.pi)` is 1.2e-16 rather than 0, and
-    /// the test asserts an exact zero.
     public func opacity(at instant: Date) -> Double {
-        guard let firedAt else { return 0 }
-        let t = instant.timeIntervalSince(firedAt)
-        guard t >= 0, t < Self.duration else { return 0 }
-        let phase = t / Self.duration                     // 0…1
+        guard isBlooming(at: instant), let firedAt else { return 0 }
+        let phase = instant.timeIntervalSince(firedAt) / Self.duration     // 0…1
         return Self.peakOpacity * sin(phase * .pi)
     }
 }
