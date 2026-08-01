@@ -204,12 +204,36 @@ struct IslandBody: View {
     /// instead of both feeding a single `.animation(value: body.width)`.
     ///
     /// Not `private`: `theWidthSplitsIntoAContentHalfAndAnIndependentHoverHalf`
-    /// in IslandViewTests.swift reads it directly so a later edit that quietly
-    /// re-merges the two halves fails to compile, not just fails at runtime.
+    /// in IslandViewTests.swift reads it directly. That is compile-time
+    /// protection against exactly one regression — this property being
+    /// *deleted* so the two halves are re-merged into reading
+    /// `model.frames.body.width` directly — and no more than that: if
+    /// `body` were instead reverted to the pre-Task-10 single-animation
+    /// shape while this property is left sitting here unreferenced, that
+    /// data-level test still passes, because it never evaluates `body` at
+    /// all and the compiler has no "unused" diagnostic for an internal
+    /// property a test still reads. `restingWidthReadCount` below is what
+    /// actually proves `body` still routes through this property, because
+    /// proving that needs `body` to be evaluated, and inspecting the
+    /// resulting view tree for the *correct* `.animation` wiring would need
+    /// a snapshot/view-inspection dependency this project doesn't take —
+    /// so a read count is the narrower, honest thing this can actually show.
     var restingWidth: CGFloat {
+        Self.restingWidthReadCount += 1
         let resting = CollapsedLayout(right: model.layout.right, hovering: false)
         return model.geometry.frames(rightFlank: resting.rightFlankWidth, tier: .rest).body.width
     }
+
+    /// Counts reads of `restingWidth`. Not `public` — visible only via
+    /// `@testable import`, purely for
+    /// `bodyActuallyRoutesThroughBothHalvesOfTheWidthSplit` in
+    /// IslandViewTests.swift, which resets this to 0, evaluates `.body`, and
+    /// asserts it moved. Same technique as `IslandView.buildCount` (Task 9)
+    /// for the same underlying reason: a `some View` property's *result*
+    /// can't be introspected without a disallowed dependency, but whether
+    /// evaluating it touched a given property along the way can be counted
+    /// directly.
+    @MainActor static var restingWidthReadCount = 0
 
     /// The hover reveal's own contribution: `CollapsedLayout.hoverReveal`
     /// while hovering, `0` at rest — depends only on `model.hovering`, never
@@ -217,9 +241,16 @@ struct IslandBody: View {
     /// `model.frames.body.width` (both `rightFlankWidth`'s branches add
     /// exactly `hoverReveal` for hovering vs. not, whatever the content), so
     /// splitting it out costs nothing the layout wasn't already going to draw.
+    ///
+    /// See `restingWidth`'s doc comment for what its own equivalent test
+    /// coverage does and does not prove — the same limits apply here.
     var hoverRevealWidth: CGFloat {
-        model.hovering ? CollapsedLayout.hoverReveal : 0
+        Self.hoverRevealWidthReadCount += 1
+        return model.hovering ? CollapsedLayout.hoverReveal : 0
     }
+
+    /// Counts reads of `hoverRevealWidth`. See `restingWidthReadCount`.
+    @MainActor static var hoverRevealWidthReadCount = 0
 
     var body: some View {
         let panel = model.panelFrames

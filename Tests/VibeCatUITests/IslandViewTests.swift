@@ -137,13 +137,22 @@ private let externalDisplay = ScreenMetrics(
 /// content-driven change compete for it. `IslandBody` avoids this by keeping
 /// the two contributions to the width as separate properties driven by
 /// different inputs, so each can carry its own `.animation(value:)`. This
-/// pins both halves: `restingWidth` must depend only on content, never on
-/// `model.hovering`; `hoverRevealWidth` must depend only on `model.hovering`,
-/// never on session count; and together they must still sum back to the real
-/// `body.width`, so the split can never silently diverge from what
-/// `IslandGeometry` actually computes. If a later edit collapsed the two back
-/// into reading `model.frames.body.width` directly, this test would fail to
-/// compile — the two properties it names would no longer exist.
+/// pins both halves at the data level: `restingWidth` must depend only on
+/// content, never on `model.hovering`; `hoverRevealWidth` must depend only on
+/// `model.hovering`, never on session count; and together they must still
+/// sum back to the real `body.width`, so the split can never silently
+/// diverge from what `IslandGeometry` actually computes.
+///
+/// This test never evaluates `.body` itself, so it only protects against one
+/// specific regression — these two properties being *deleted* so the two
+/// halves are re-merged into reading `model.frames.body.width` directly
+/// (that fails to compile, since the properties this test names would no
+/// longer exist). It does NOT protect against `body` being reverted to the
+/// pre-Task-10 single-animation shape while these properties are left in
+/// place, unreferenced by anything that draws — nothing here would notice,
+/// because nothing here reads `body`.
+/// `bodyActuallyRoutesThroughBothHalvesOfTheWidthSplit` right below is what
+/// closes that half of the gap.
 @MainActor @Test func theWidthSplitsIntoAContentHalfAndAnIndependentHoverHalf() {
     let atRest = islandBody(.running, count: 3, hovering: false)
     let hovered = islandBody(.running, count: 3, hovering: true)
@@ -163,6 +172,39 @@ private let externalDisplay = ScreenMetrics(
     let dormantHovered = islandBody(.dormant, count: 0, hovering: true)
     #expect(dormantHovered.restingWidth + dormantHovered.hoverRevealWidth
             == dormantHovered.model.frames.body.width)
+}
+
+/// Closes the gap the comment above names: proves `body` itself — not just
+/// the two properties in isolation — still routes its width through both
+/// halves. `.frame(width:)` takes a plain `CGFloat`, not an `@autoclosure` or
+/// an escaping one, so evaluating `.body` evaluates `restingWidth +
+/// hoverRevealWidth` eagerly as ordinary Swift — there is no
+/// TimelineView/Canvas-style escaping-closure hazard here, unlike the
+/// `IslandView`-level tests above. If `body` were reverted to
+/// `.frame(width: body.width, ...)` with one `.animation(_, value:
+/// body.width)`, while `restingWidth`/`hoverRevealWidth` were left sitting
+/// here unreferenced, evaluating `.body` would never touch either getter and
+/// both counters would stay at 0 — which is exactly what a temporary
+/// mutation of `body` back to that shape proved (see the fix-round note in
+/// the task report).
+///
+/// This proves the properties are *read* during `body`'s construction — not
+/// that the two `.animation` modifiers are wired to the *correct* one of the
+/// two, or that the curves themselves are `.spring`/`.easeOut`. Confirming
+/// that would need a snapshot or view-inspection dependency, which this
+/// project does not take; a read count is the narrower, honest thing
+/// available without one.
+@MainActor @Test func bodyActuallyRoutesThroughBothHalvesOfTheWidthSplit() {
+    for hovering in [false, true] {
+        IslandBody.restingWidthReadCount = 0
+        IslandBody.hoverRevealWidthReadCount = 0
+        let instance = islandBody(.running, count: 3, hovering: hovering)
+        _ = instance.body
+        #expect(IslandBody.restingWidthReadCount > 0,
+                "body (hovering=\(hovering)) never read restingWidth — the width spring's input may have reverted to body.width")
+        #expect(IslandBody.hoverRevealWidthReadCount > 0,
+                "body (hovering=\(hovering)) never read hoverRevealWidth — the hover reveal's input may have reverted to body.width")
+    }
 }
 
 /// `IslandBody`'s left- and right-flank padding is a respelling, in SwiftUI's
