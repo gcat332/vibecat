@@ -85,8 +85,10 @@ public struct IslandGeometry: Sendable, Equatable {
         return IslandFrames(body: body, panel: panel)
     }
 
-    /// The widest the collapsed island can ever be: a three-digit session
-    /// count, hovered.
+    /// The widest the collapsed island can ever be: a session count clamped
+    /// to `CollapsedLayout.maxDisplayedSessions` digits, hovered. Genuinely
+    /// the ceiling — not merely the assumed one — because `rightFlankWidth`
+    /// enforces that same clamp on every count it measures, however large.
     ///
     /// The panel is created once at this size and never resized — measured,
     /// animating the silhouette inside a fixed window has a p95 of 10.34ms
@@ -96,7 +98,9 @@ public struct IslandGeometry: Sendable, Equatable {
     /// transparent window intercepts nothing. Plan 4's drawer takes mouse
     /// events, so it must size the panel to what it actually covers.
     public func maxCollapsedFrames() -> IslandFrames {
-        let widest = CollapsedLayout(right: .sessionCount(999), hovering: true)
+        let widest = CollapsedLayout(
+            right: .sessionCount(CollapsedLayout.maxDisplayedSessions),
+            hovering: true)
         return frames(rightFlank: widest.rightFlankWidth, tier: .rest)
     }
 }
@@ -137,6 +141,16 @@ public struct CollapsedLayout: Sendable, Equatable {
     static let iconWidth: CGFloat = 14
     /// Design §9.1: hover reveals name and elapsed time over 280ms, up to 150pt.
     public static let hoverReveal: CGFloat = 150
+    /// The most digits the right flank ever reserves width for.
+    /// `rightFlankWidth` clamps every session count to this before measuring
+    /// it, so `IslandGeometry.maxCollapsedFrames()`'s "three-digit, hovered"
+    /// ceiling is an enforced upper bound rather than an assumption a
+    /// four-digit count — nothing upstream caps `sessionCount`'s `Int` —
+    /// could silently exceed. A count beyond this still displays as exactly
+    /// this many digits, "999" reading as "999 or more"; a different
+    /// treatment for the overflow case is Plan 6's Display settings, not
+    /// this type's job.
+    public static let maxDisplayedSessions = 999
 
     public let right: RightContent
     public let hovering: Bool
@@ -157,7 +171,8 @@ public struct CollapsedLayout: Sendable, Equatable {
         case .nothing: 0
         case .agentIcon: Self.iconWidth
         case let .sessionCount(n):
-            n <= 0 ? 0 : CGFloat(String(n).count) * metrics.digitWidth
+            n <= 0 ? 0
+                    : CGFloat(String(min(n, Self.maxDisplayedSessions)).count) * metrics.digitWidth
         }
         guard content > 0 else { return 0 }
         return Self.padding + content + (hovering ? Self.hoverReveal : 0)

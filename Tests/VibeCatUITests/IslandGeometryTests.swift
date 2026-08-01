@@ -103,7 +103,27 @@ private let externalDisplay = ScreenMetrics(
         let f = g.frames(rightFlank: layout.rightFlankWidth, tier: .rest)
         #expect(f.panel.width <= maxFrames.panel.width + 0.001,
                 "\(layout.right) hovering=\(layout.hovering) exceeds the fixed panel")
-        #expect(f.body.maxX <= maxFrames.body.maxX + 0.001)
+        #expect(f.body.maxX <= maxFrames.body.maxX + 0.001,
+                "\(layout.right) hovering=\(layout.hovering) exceeds the fixed panel")
+    }
+}
+
+/// Fix round 1: `RightContent.sessionCount` takes an unbounded `Int` —
+/// nothing enforced the "three digits" assumption `maxCollapsedFrames()` was
+/// built on, so a four-digit-or-larger count (unpruned running/waiting
+/// sessions have no upper bound) would overflow the fixed panel. This probes
+/// the type's actual range rather than the assumption of a small count.
+@Test func theMaximumCollapsedPanelHoldsAbsurdSessionCounts() {
+    let g = IslandGeometry(screen: mbp14)
+    let maxFrames = g.maxCollapsedFrames()
+
+    for n in [1_000, 999_999, Int.max] {
+        let layout = CollapsedLayout(right: .sessionCount(n), hovering: true)
+        let f = g.frames(rightFlank: layout.rightFlankWidth, tier: .rest)
+        #expect(f.panel.width <= maxFrames.panel.width + 0.001,
+                "sessionCount(\(n)) hovering=true exceeds the fixed panel")
+        #expect(f.body.maxX <= maxFrames.body.maxX + 0.001,
+                "sessionCount(\(n)) hovering=true exceeds the fixed panel")
     }
 }
 
