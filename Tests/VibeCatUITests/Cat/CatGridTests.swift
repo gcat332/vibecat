@@ -58,9 +58,13 @@ private let eyeTones: Set<Tone> = [.eyeWhite, .sparkle, .pupil]
     }
 }
 
+// On this toolchain (swift-testing 1902), `#expect` mis-evaluates a bare `!`
+// wrapped directly around `.contains(_:)` when the receiver is `[Tone?]` —
+// verified independent of closures (reproduces even with no closure anywhere
+// in the test). Use `== false`, not `!...contains(...)`, in this file.
 @Test func plainRemovesEveryShadowMarking() {
-    let cells = CatGrid(coat: .plain).cells
-    #expect(!cells.flatMap { $0 }.contains(.shadow))
+    let flat = CatGrid(coat: .plain).cells.flatMap { $0 }
+    #expect(flat.contains(.shadow) == false)
 }
 
 @Test func everyCoatKeepsTheSilhouette() {
