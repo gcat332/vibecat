@@ -258,7 +258,7 @@ Design §7.3: a coat **changes markings, never hue** — it repaints cells with 
 | `siamese` | the ears (rows 0–2) and the muzzle (rows 10–11, columns 5–12) become `L`; the flanks rows 5–6 become `S` |
 | `patched` | rows 5–8, columns 12–16 become `S` |
 
-**A coat must never touch the eyes.** Eye cells are `W`, `K` and `P` in rows 7–9. Coat overrides skip them, and Task 3's mood overrides run afterwards regardless — §7.3's "the eyes always win".
+**A coat repaints fur, and only fur.** It may write over `S`, `B`, `H` and `L` — nothing else. That protects the outline and linework (`O`), the pink inner ears (`E`), the nose (`N`) and the eyes (`W`, `K`, `P`) by construction rather than by each coat's rectangle happening to miss them. Ruled by the project owner after the original eyes-only guard was found to let `tuxedo` erase the nose and mouth, and `siamese` flatten both ears' entire linework and pink interior. Task 3's mood overrides then run over the top regardless — §7.3's "the eyes always win".
 
 - [ ] **Step 1: Write the failing test**
 
@@ -434,7 +434,7 @@ Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Prove the eye guard is load-bearing**
 
-Temporarily remove `!eyeTones.contains(existing)` from `paint`'s guard. Re-run: `noCoatTouchesTheEyes` must FAIL — `siamese` paints rows 5–6 and 10–11 across the full width, which crosses the eye rows. Revert and confirm with `git diff`.
+Temporarily remove the fur-tone guard from `paint`. Re-run: `noCoatTouchesTheEyes` must FAIL — `patched` paints rows 5–8 columns 12–16, and row 7 columns 12–14 are the right eye's `K`,`W`,`W`. (An earlier draft of this plan named `siamese` here; that was wrong, and the mutation output is what settles it.) Revert, then confirm by re-reading the file and re-running the test — `git diff` shows nothing while the file is still untracked.
 
 - [ ] **Step 6: Commit**
 
