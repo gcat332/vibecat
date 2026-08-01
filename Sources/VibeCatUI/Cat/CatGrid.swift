@@ -1,0 +1,81 @@
+/// Which markings the cat wears. Design §7.3: a coat repaints cells with a
+/// tone already in the ramp, so the fur stays the state's colour and "colour
+/// means state" survives the customisation.
+public enum Coat: String, Sendable, CaseIterable {
+    case tabby, plain, tuxedo, siamese, patched
+}
+
+/// The cat, as cells. Design §7.1's grid verbatim — kept as character art so
+/// it stays editable as art rather than as a table of enum cases.
+public struct CatGrid: Sendable, Equatable {
+    public static let width = 18
+    public static let height = 14
+
+    private static let art = [
+        "..OO..........OO..",
+        ".OEEO........OEEO.",
+        ".OEEHO......OHEEO.",
+        ".OHHHOOOOOOOOHHHO.",
+        ".OLLLLLLLLLLLLLLO.",
+        "OHHHHHHHHHHHHHHHHO",
+        "OHHHHHHHHHHHHHHHHO",
+        "OBBKWWBBBBBBKWWBBO",
+        "OBBWPPBBBBBBWPPBBO",
+        "OBBPPPBBBBBBPPPBBO",
+        "OBBBBBBBNNBBBBBBBO",
+        "OSBBBBBOBBOBBBBBSO",
+        ".OSSBBBBBBBBBBSSO.",
+        "..OOOOOOOOOOOOOO..",
+    ]
+
+    public static let base: [[Tone?]] = art.map { line in
+        line.map { $0 == "." ? nil : Tone(rawValue: $0) }
+    }
+
+    /// Eye cells are off-limits to coats — §7.3's "the eyes always win".
+    private static let eyeTones: Set<Tone> = [.eyeWhite, .sparkle, .pupil]
+
+    public let coat: Coat
+    public let cells: [[Tone?]]
+
+    public init(coat: Coat) {
+        self.coat = coat
+        self.cells = Self.apply(coat)
+    }
+
+    public subscript(_ col: Int, _ row: Int) -> Tone? {
+        guard row >= 0, row < Self.height, col >= 0, col < Self.width else { return nil }
+        return cells[row][col]
+    }
+
+    private static func apply(_ coat: Coat) -> [[Tone?]] {
+        var g = base
+        // Repaint only where there is already fur, never an eye, never a hole.
+        func paint(rows: ClosedRange<Int>, cols: ClosedRange<Int>, _ tone: Tone) {
+            for row in rows where row >= 0 && row < height {
+                for col in cols where col >= 0 && col < width {
+                    guard let existing = g[row][col], !eyeTones.contains(existing) else { continue }
+                    g[row][col] = tone
+                }
+            }
+        }
+
+        switch coat {
+        case .tabby:
+            break
+        case .plain:
+            for row in 0..<height {
+                for col in 0..<width where g[row][col] == .shadow { g[row][col] = .body }
+            }
+        case .tuxedo:
+            paint(rows: 10...12, cols: 6...11, .lightest)
+        case .siamese:
+            paint(rows: 0...2, cols: 0...width - 1, .lightest)
+            paint(rows: 10...11, cols: 5...12, .lightest)
+            paint(rows: 5...6, cols: 0...width - 1, .shadow)
+        case .patched:
+            paint(rows: 5...8, cols: 12...16, .shadow)
+        }
+        return g
+    }
+}
