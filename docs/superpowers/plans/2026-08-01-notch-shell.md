@@ -1540,9 +1540,14 @@ public struct CollapsedLayout: Sendable, Equatable {
         case nothing
     }
 
+    // SUPERSEDED DURING EXECUTION — see Sources/VibeCatUI/IslandGeometry.swift
+    // and IslandView.swift for what shipped. A hardcoded digitWidth contradicts
+    // design §5.4 ("measured from its actual content"), so the shipped version
+    // injects a `Metrics` value whose `.standard` case measures the real font
+    // advance once, from a `RightFlankFont` that also supplies the view's font.
+    // The measured advance is 8.117pt, not 9 — the constant over-reserved.
     /// 10 leading + content + 12 trailing.
-    private static let padding: CGFloat = 22
-    private static let digitWidth: CGFloat = 9
+    static let padding: CGFloat = 22
     private static let iconWidth: CGFloat = 14
     /// Design §9.1: hover reveals name and elapsed time over 280ms, up to 150pt.
     private static let hoverReveal: CGFloat = 150
