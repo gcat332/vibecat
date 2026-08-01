@@ -135,6 +135,43 @@ wrong thing is worse than no spike, because its numbers get written into a plan.
 
 ---
 
+## 5b. Do not measure CPU with `ps %cpu` — it produced a false failure
+
+Everything in §2 and §3 was sampled with `ps -o %cpu=`. That was a mistake, and it
+cost Plan 3 a large share of its investigation budget.
+
+`%cpu` on Darwin is a **decaying average**, not an instantaneous rate. A process
+with a startup burst reads high for tens of seconds afterwards: measured, one
+process whose steady state was 0.35% read **1.29% at t+2s and 0.48% at t+16s**.
+
+Plan 3's Task 10 reported idle CPU at 4.1–4.9% against a 0.0% acceptance
+criterion and recorded it as a failure of the plan's central constraint. It was
+not. Re-measured with `getrusage(RUSAGE_SELF)` — cumulative CPU seconds, sampled
+over a steady interval — the real figures are:
+
+| state | timeline | `getrusage` | what `ps %cpu` said |
+|---|---|---|---|
+| idle | off | **0.35%** | 4.1–4.9% |
+| dormant | on, 8 fps | 3.61% | 5.5–6.0% |
+| running | on, 12 fps | 4.33% | 6.7% |
+
+Isolation sweep over 10s, release build: bare accessory run loop 0.16% · socket
+server only 0.10% · panel ordered front with no SwiftUI 0.14% · panel plus
+`NSHostingView` 0.23% · full app 0.52%. Neither the panel nor the `Canvas` views
+carry a hidden cost, and the 30 Hz hover timer is worth ~0.1–0.2%.
+
+**Use `getrusage` in-process, or two `ps -o time=` samples ≥30s apart. Never
+`%cpu`.** And assert the premise at the moment of sampling — print whether the
+timeline is actually running, so a measurement taken during an aura bloom is not
+mistaken for an idle one.
+
+**The 0.0% target was also unreachable as written.** Even with no timeline the app
+costs ~0.35%: a run-loop floor plus the hover timer. The spike's original 0.0%
+came from a harness with neither. State the criterion as "no timeline running
+**and** steady CPU below 0.5%".
+
+---
+
 ## 6. Left open
 
 - **Battery.** Every number here is on mains power. ~6 % continuous for a trotting cat may
