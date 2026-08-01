@@ -18,53 +18,127 @@ private let externalDisplay = ScreenMetrics(
     visibleFrame: CGRect(x: 0, y: 0, width: 2560, height: 1415),
     safeAreaTop: 0, auxLeft: nil, auxRight: nil)
 
-@MainActor
-private func evaluate(_ screen: ScreenMetrics, _ state: IslandState,
-                      _ right: CollapsedLayout.RightContent,
-                      hovering: Bool, tier: IslandTier) {
-    let g = IslandGeometry(screen: screen)
-    let layout = CollapsedLayout(right: right, hovering: hovering)
-    let frames = g.frames(rightFlank: layout.rightFlankWidth, tier: tier)
-    _ = IslandBody(state: state, layout: layout, aura: AuraTrigger(),
-                   now: t0, geometry: g, frames: frames).body
+@MainActor private func islandModel(_ state: IslandState, count: Int,
+                                    hovering: Bool = false,
+                                    motion: MotionLevel = .full,
+                                    coat: Coat = .tabby,
+                                    geometry: ScreenMetrics = mbp14) -> IslandModel {
+    let m = IslandModel(geometry: IslandGeometry(screen: geometry),
+                        motion: MotionPreference(chosen: motion, systemWantsReduced: false))
+    m.state = state
+    m.sessionCount = count
+    m.hovering = hovering
+    m.coat = coat
+    return m
 }
 
-@MainActor @Test func theBodyEvaluatesForEveryState() {
+// MARK: - IslandView: the top-level branch (TimelineView vs. static)
+
+@MainActor @Test func theViewEvaluatesForEveryStateAndCoat() {
     for state in IslandState.allCases {
-        evaluate(mbp14, state, .sessionCount(2), hovering: false, tier: .rest)
+        for coat in Coat.allCases {
+            let m = islandModel(state, count: state == .dormant ? 0 : 2)
+            m.coat = coat
+            _ = IslandView(model: m).body
+        }
+    }
+}
+
+@MainActor @Test func theViewEvaluatesHoveredAndWithMotionOff() {
+    _ = IslandView(model: islandModel(.running, count: 3, hovering: true)).body
+    _ = IslandView(model: islandModel(.running, count: 3, motion: .off)).body
+}
+
+@MainActor @Test func theViewEvaluatesOnTheFallbackPill() {
+    let m = IslandModel(geometry: IslandGeometry(screen: externalDisplay),
+                        motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    _ = IslandView(model: m).body
+}
+
+/// `.failed`'s cat (`dead`) and badge (`cross`) are both steady, so
+/// `activeProfile.framesPerSecond` is genuinely 0 — yet a fresh aura bloom
+/// still makes `needsTimeline` true (`IslandModel.needsTimeline` falls back
+/// to `aura.isBlooming` once neither mood nor badge is continuous). This is
+/// the one case where `IslandView.body` picks the `TimelineView` branch
+/// with a zero-fps profile, exactly what `minimumInterval(for:)` guards
+/// against below.
+@MainActor @Test func theViewEvaluatesWithAnInFlightBloomOnASteadyState() {
+    let m = islandModel(.failed, count: 1)
+    var aura = AuraTrigger()
+    _ = aura.observe(.idle, now: t0)
+    _ = aura.observe(.failed, now: Date())
+    m.aura = aura
+    #expect(m.needsTimeline)
+    #expect(m.activeProfile.framesPerSecond == 0)
+    _ = IslandView(model: m).body
+}
+
+/// `IslandView.body`'s choice of `minimumInterval` can't be read back from
+/// the `TimelineView` it builds — `TimelineSchedule` values are opaque to a
+/// test — so the guard is pinned directly instead. Without it, the
+/// steady-state-plus-bloom case above would compute `1.0 / 0` == `.infinity`,
+/// which would let the schedule's first frame be its last — freezing the
+/// glow instead of letting it fade, the one outcome `AuraTrigger`'s own doc
+/// comment rules out ("a glow that stayed lit would be a second indicator").
+@Test func minimumIntervalNeverDividesByZero() {
+    #expect(IslandView.minimumInterval(for: MotionProfile(framesPerSecond: 12, cycle: 1, isContinuous: true))
+            == 1.0 / 12.0)
+    #expect(IslandView.minimumInterval(for: .still) == 1.0 / 8.0)
+    #expect(IslandView.minimumInterval(for: .still).isFinite)
+}
+
+// MARK: - IslandBody: the actual layout
+
+/// `IslandView.body` only evaluates its own top-level branch — when
+/// `needsTimeline` is true that branch is a `TimelineView`, and its content
+/// closure is `@escaping`: SwiftUI only invokes it during a real render
+/// pass, never merely from accessing `.body` (the same hazard Task 8 found
+/// and fixed for `Canvas`'s renderer closure, in `CatCanvas`/`BadgeCanvas`).
+/// So the tests above, alone, never walk `IslandBody`'s own layout — the
+/// flank paddings, the notch spacer, the right-flank switch, the
+/// `CatCanvas`/`BadgeCanvas` construction. These evaluate `IslandBody`
+/// directly, the way the pre-restructure suite's `evaluate` helper did, so
+/// that code actually runs regardless of which branch `IslandView` takes.
+@MainActor private func islandBody(_ state: IslandState, count: Int,
+                                   hovering: Bool = false,
+                                   coat: Coat = .tabby,
+                                   geometry: ScreenMetrics = mbp14) -> IslandBody {
+    IslandBody(model: islandModel(state, count: count, hovering: hovering,
+                                  coat: coat, geometry: geometry),
+               now: t0)
+}
+
+@MainActor @Test func theBodyEvaluatesForEveryStateAndCoat() {
+    for state in IslandState.allCases {
+        for coat in Coat.allCases {
+            _ = islandBody(state, count: state == .dormant ? 0 : 2, coat: coat).body
+        }
     }
 }
 
 @MainActor @Test func theBodyEvaluatesForEveryRightHandContent() {
-    let variants: [CollapsedLayout.RightContent] =
-        [.nothing, .agentIcon, .sessionCount(0), .sessionCount(1), .sessionCount(999),
-         // Fix round 2: a count past the display limit renders through
-         // `sessionCountText` rather than `String(n)` — evaluate it too, not
-         // just the in-range counts above.
-         .sessionCount(1_000_000)]
-    for right in variants {
-        evaluate(mbp14, .running, right, hovering: false, tier: .rest)
+    // 0 (nothing), 1, a multi-digit count, and one past the display limit —
+    // the last one is the regression `sessionCountText`'s clamp exists for
+    // (see CollapsedLayoutTests.sessionCountTextClampsBeyondTheDisplayLimit):
+    // rendering the raw count instead of the clamped text would overflow the
+    // reserved width and clip against the silhouette.
+    for count in [0, 1, 999, 1_000_000] {
+        _ = islandBody(.running, count: count).body
     }
 }
 
-@MainActor @Test func theBodyEvaluatesWhileHoveringAndWithTheDrawerOpen() {
-    evaluate(mbp14, .waiting, .sessionCount(3), hovering: true, tier: .hover)
-    evaluate(mbp14, .waiting, .sessionCount(3), hovering: false,
-             tier: .drawer(height: 288))
-}
-
-/// A notchless display has a zero-width dead zone; the spacer must cope.
-@MainActor @Test func theBodyEvaluatesOnTheFallbackPill() {
-    evaluate(externalDisplay, .dormant, .nothing, hovering: false, tier: .rest)
+@MainActor @Test func theBodyEvaluatesWhileHoveringAndOnTheFallbackPill() {
+    _ = islandBody(.waiting, count: 3, hovering: true).body
+    _ = islandBody(.dormant, count: 0, geometry: externalDisplay).body
 }
 
 /// `IslandBody`'s left- and right-flank padding is a respelling, in SwiftUI's
-/// `.padding`/`.frame` vocabulary, of `IslandGeometry.leftFlank`,
-/// `IslandGeometry.fillet` and `CollapsedLayout.padding`. Nothing in the type
-/// system keeps a respelling in sync with the constant it repeats — this is
-/// the cheapest available substitute for eyes on the actual island, catching
-/// the moment the two diverge and content starts sliding under the cutout,
-/// before anyone has to notice it visually.
+/// `.padding`/`.frame` vocabulary, of `IslandGeometry.leftFlank` and
+/// `CollapsedLayout.padding`. Nothing in the type system keeps a respelling
+/// in sync with the constant it repeats — this is the cheapest available
+/// substitute for eyes on the actual island, catching the moment the two
+/// diverge and content starts sliding under the cutout, before anyone has to
+/// notice it visually.
 @Test func leftAndRightFlankLiteralsAgreeWithTheGeometryConstants() {
     let left = IslandBody.LeftFlankLayout.leadingPadding
              + IslandBody.LeftFlankLayout.catWidth
@@ -79,21 +153,4 @@ private func evaluate(_ screen: ScreenMetrics, _ state: IslandState,
 
     let iconTotal = IslandBody.RightFlankLayout.iconPadding * 2 + CollapsedLayout.iconWidth
     #expect(iconTotal == CollapsedLayout.padding + CollapsedLayout.iconWidth)
-}
-
-/// The wrapper pauses its timeline unless a bloom is in flight.
-@MainActor @Test func theWrapperEvaluatesBothPausedAndRunning() {
-    let g = IslandGeometry(screen: mbp14)
-    let layout = CollapsedLayout(right: .sessionCount(1), hovering: false)
-    let frames = g.frames(rightFlank: layout.rightFlankWidth, tier: .rest)
-
-    var blooming = AuraTrigger()
-    _ = blooming.observe(.idle, now: t0)
-    _ = blooming.observe(.failed, now: t0)
-    #expect(blooming.isBlooming(at: t0))
-
-    for aura in [AuraTrigger(), blooming] {
-        _ = IslandView(state: .failed, layout: layout, aura: aura,
-                       now: t0, geometry: g, frames: frames).body
-    }
 }

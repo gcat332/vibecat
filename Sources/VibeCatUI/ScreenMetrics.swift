@@ -36,6 +36,16 @@ public struct ScreenMetrics: Sendable, Equatable {
     }
 
     public var hasNotch: Bool { notch != nil }
+
+    /// A placeholder for the instant between `NotchController`'s init and its
+    /// first `refreshGeometry()` call — every real call site invokes
+    /// `refreshGeometry()` immediately after constructing the controller (see
+    /// `VibeCatApp/main.swift`), so this is never what actually reaches the
+    /// screen. A zero frame and no auxiliary areas means `IslandGeometry(screen:)`
+    /// falls back to its own zero-width pill rather than computing anything
+    /// from a meaningless rect.
+    public static let zeroFallback = ScreenMetrics(
+        frame: .zero, visibleFrame: .zero, safeAreaTop: 0, auxLeft: nil, auxRight: nil)
 }
 
 #if canImport(AppKit)

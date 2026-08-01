@@ -49,3 +49,13 @@ private let externalDisplay = ScreenMetrics(
         safeAreaTop: 32, auxLeft: nil, auxRight: nil)
     #expect(broken.notch == nil)
 }
+
+/// `NotchController` builds an `IslandGeometry` from this before its first
+/// `refreshGeometry()` call ever runs (see Task 9). It must report no notch,
+/// so that geometry is the harmless fallback pill rather than something a
+/// zero-sized, garbage rect would produce.
+@Test func zeroFallbackReportsNoNotch() {
+    #expect(ScreenMetrics.zeroFallback.notch == nil)
+    #expect(ScreenMetrics.zeroFallback.hasNotch == false)
+    #expect(IslandGeometry(screen: .zeroFallback).isFallbackPill == true)
+}
