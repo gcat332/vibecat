@@ -29,8 +29,13 @@ private let mbp14 = ScreenMetrics(
 }
 
 @MainActor @Test func theModelDerivesTheLayoutFromTheSessionCount() {
-    #expect(model(.dormant, count: 0).layout.rightFlankWidth == 0)
-    #expect(model(.running, count: 2).layout.rightFlankWidth > 0)
+    // Dormant is the corner minimum, not zero — see
+    // `anEmptyRightFlankIsTheCornerMinimumAndHoldsNothing`. Comparing widths
+    // rather than reading `> 0`, which the floor now makes true either way.
+    #expect(model(.dormant, count: 0).layout.rightFlankWidth
+            == IslandGeometry.minimumRightFlank)
+    #expect(model(.running, count: 2).layout.rightFlankWidth
+            > model(.dormant, count: 0).layout.rightFlankWidth)
 }
 
 /// The switch that reaches 0.0% CPU. All three steady states belong here:

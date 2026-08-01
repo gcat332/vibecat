@@ -3,10 +3,24 @@ import CoreGraphics
 import AppKit
 @testable import VibeCatUI
 
-@Test func nothingOnTheRightMeansNoRightFlankAndNoContent() {
+/// An empty right flank is the corner minimum wide and holds nothing.
+///
+/// Not zero: at zero the island's right edge lands exactly on `notch.maxX` and
+/// its bottom-right corner is drawn into the same fifteen points as the
+/// hardware's, which left a visible seam on a real screen. See
+/// `IslandGeometry.minimumRightFlank`. Width and content are separate
+/// questions now, which is the whole point of the split.
+@Test func anEmptyRightFlankIsTheCornerMinimumAndHoldsNothing() {
     let l = CollapsedLayout(right: .nothing, hovering: false)
-    #expect(l.rightFlankWidth == 0)
+    #expect(l.rightFlankWidth == IslandGeometry.minimumRightFlank)
     #expect(l.hasRightContent == false)
+}
+
+/// The floor is exactly one corner radius, and that is not decoration: below
+/// it the hardware's corner curve is exposed again, because our own curve
+/// spans `bottomRadius` and has to start at or beyond `notch.maxX`.
+@Test func theCornerMinimumIsOneCornerRadius() {
+    #expect(IslandGeometry.minimumRightFlank == IslandGeometry.bottomRadius)
 }
 
 /// This is about the *shape* of the width function (more digits, more
@@ -24,10 +38,11 @@ private let fixedMetrics = CollapsedLayout.Metrics(digitWidth: 9)
     #expect(one.hasRightContent)
 }
 
-/// A count of zero is dormant — show nothing rather than a bare "0".
+/// A count of zero is dormant — show nothing rather than a bare "0". It is
+/// indistinguishable from `.nothing`, corner minimum included.
 @Test func aZeroCountCollapsesToNothing() {
     let l = CollapsedLayout(right: .sessionCount(0), hovering: false)
-    #expect(l.rightFlankWidth == 0)
+    #expect(l.rightFlankWidth == IslandGeometry.minimumRightFlank)
     #expect(l.hasRightContent == false)
 }
 
@@ -43,8 +58,9 @@ private let fixedMetrics = CollapsedLayout.Metrics(digitWidth: 9)
 @Test func hoveringOpensTheRevealEvenWithNoRightContent() {
     let rest = CollapsedLayout(right: .nothing, hovering: false)
     let hovered = CollapsedLayout(right: .nothing, hovering: true)
-    #expect(rest.rightFlankWidth == 0)
-    #expect(hovered.rightFlankWidth == CollapsedLayout.hoverReveal)
+    #expect(rest.rightFlankWidth == IslandGeometry.minimumRightFlank)
+    #expect(hovered.rightFlankWidth
+            == IslandGeometry.minimumRightFlank + CollapsedLayout.hoverReveal)
 }
 
 @Test func hoveringStillAddsTheRevealOnTopOfRealContent() {
@@ -54,7 +70,9 @@ private let fixedMetrics = CollapsedLayout.Metrics(digitWidth: 9)
 }
 
 @Test func aZeroCountStillShowsNothingAtRest() {
-    #expect(CollapsedLayout(right: .sessionCount(0), hovering: false).rightFlankWidth == 0)
+    let l = CollapsedLayout(right: .sessionCount(0), hovering: false)
+    #expect(l.rightFlankWidth == IslandGeometry.minimumRightFlank)
+    #expect(l.sessionCountText == nil)
 }
 
 /// Design §9.1: the hover reveal (`280ms`, `easeOut`) must be a distinct

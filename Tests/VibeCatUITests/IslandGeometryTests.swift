@@ -39,6 +39,47 @@ private let externalDisplay = ScreenMetrics(
     #expect(running.width == (58 + 185 + 35 as CGFloat))
 }
 
+/// The island's right edge always clears the cutout by at least one corner
+/// radius, in every collapsed state — including the emptiest one.
+///
+/// This is the geometric content of "both corners should be ours". Our
+/// bottom-right corner curve occupies the last `bottomRadius` of the body, so
+/// while the body ends exactly on `notch.maxX` that curve is drawn into the
+/// same points as the hardware's own notch corner, and the two — 15pt against
+/// a measured ~14 — leave a seam. Clearing by a full radius puts our curve
+/// entirely to the right of theirs, so at every row our black is at or beyond
+/// their edge and their corner is covered rather than competed with.
+///
+/// Stated against `notch.maxX` rather than against the flank constant, so it
+/// keeps holding if the minimum is ever expressed some other way.
+@Test func theBodyAlwaysClearsTheCutoutByACornerRadius() {
+    let g = IslandGeometry(screen: mbp14)
+    let states: [CollapsedLayout] = [
+        CollapsedLayout(right: .nothing, hovering: false),
+        CollapsedLayout(right: .nothing, hovering: true),
+        CollapsedLayout(right: .sessionCount(0), hovering: false),
+        CollapsedLayout(right: .sessionCount(1), hovering: false),
+        CollapsedLayout(right: .sessionCount(999), hovering: true),
+        CollapsedLayout(right: .agentIcon, hovering: false),
+    ]
+    for layout in states {
+        let body = g.frames(rightFlank: layout.rightFlankWidth, tier: .rest).body
+        #expect(body.maxX >= g.notch.maxX + IslandGeometry.bottomRadius,
+                "\(layout.right) hovering=\(layout.hovering): the body ends \(body.maxX - g.notch.maxX)pt past the cutout, inside our own \(IslandGeometry.bottomRadius)pt corner — the hardware's corner shows through")
+    }
+}
+
+/// The left edge is pinned (design §5.3) and the corner minimum must not have
+/// quietly moved it. It cannot — `frames` derives the left edge from
+/// `notch.minX` and the right flank cancels out — but that is the invariant
+/// the whole fix leans on, so it is worth stating where the fix is.
+@Test func theCornerMinimumDoesNotMoveTheLeftEdge() {
+    let g = IslandGeometry(screen: mbp14)
+    let empty = g.frames(rightFlank: CollapsedLayout(right: .nothing, hovering: false).rightFlankWidth,
+                         tier: .rest).body
+    #expect(empty.minX == g.notch.minX - IslandGeometry.leftFlank)
+}
+
 /// The aura blooms outside the shape, and never above the notch.
 @Test func thePanelIsInflatedForTheAuraOnThreeSidesOnly() {
     let g = IslandGeometry(screen: mbp14)

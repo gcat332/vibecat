@@ -38,6 +38,29 @@ public struct IslandGeometry: Sendable, Equatable {
     /// the island's left edge — and therefore the cat — never moves.
     public static let leftFlank: CGFloat = 58
     public static let bottomRadius: CGFloat = 15
+
+    /// The smallest right flank the island ever has, even with nothing to show.
+    ///
+    /// This is the one place design §5.4's "never reserves space it is not
+    /// using" is broken on purpose, and the reason is the silhouette rather
+    /// than the content. With a zero right flank the island's right edge lands
+    /// exactly on `notch.maxX`, so its bottom-right corner and the *hardware's*
+    /// notch corner are two curves drawn into the same fifteen points, one over
+    /// the other. Measured off a real screen, the machine's corner spans about
+    /// 14pt against our 15 — near enough to look intended, different enough to
+    /// leave a visible seam, which is what was reported.
+    ///
+    /// Extending by exactly one corner radius puts our whole curve to the right
+    /// of theirs: at every row our edge is at or beyond `notch.maxX`, so our
+    /// black covers their corner completely and the only corner on screen is
+    /// ours. Both ends of the island then match *by construction* — which is
+    /// the property actually wanted, and is not what chasing Apple's radius by
+    /// eye converges on.
+    ///
+    /// Deriving it from `bottomRadius` is not a coincidence to be tidied away:
+    /// a smaller value would expose their curve again, and a larger one buys
+    /// nothing.
+    public static let minimumRightFlank: CGFloat = bottomRadius
     /// Room outside the body for the aura to bloom into.
     public static let auraMargin: CGFloat = 24
     /// Height of the fallback pill on a display with no notch.
@@ -193,13 +216,32 @@ public struct CollapsedLayout: Sendable, Equatable {
             CGFloat(sessionCountText?.count ?? 0) * metrics.digitWidth
         }
         let reveal = hovering ? Self.hoverReveal : 0
-        // An empty flank stays empty at rest — the island never reserves space
-        // it is not using. But hovering always opens the reveal: returning
-        // early here made hover a guaranteed no-op on a dormant island, which
-        // reads as the feature being broken.
-        guard content > 0 else { return reveal }
+        // An empty flank still clears the cutout by one corner radius, so the
+        // island's own corner covers the hardware's rather than fighting it —
+        // see `IslandGeometry.minimumRightFlank`. Hovering always opens the
+        // reveal on top: returning early here made hover a guaranteed no-op on
+        // a dormant island, which reads as the feature being broken.
+        //
+        // Added to the floor, not maxed against it: the reveal has to be the
+        // same 150pt from every starting width, or an empty island animates a
+        // different distance from a counted one. `max` made that 135 and
+        // `theHoverRevealIsAConstantAdditionRegardlessOfContent` caught it.
+        guard content > 0 else { return IslandGeometry.minimumRightFlank + reveal }
+        // Content already carries `padding` (22), comfortably past the minimum.
         return Self.padding + content + reveal
     }
 
-    public var hasRightContent: Bool { rightFlankWidth > 0 }
+    /// Whether the right flank is showing anything. Deliberately *not*
+    /// `rightFlankWidth > 0`, which it used to be: the flank now has a nonzero
+    /// floor for the corner, and hovering opens the reveal regardless, so that
+    /// spelling became permanently true and the name a lie. Nothing in
+    /// `Sources/` reads this yet — Plan 4's drawer will, and it should get the
+    /// question it is actually asking.
+    public var hasRightContent: Bool {
+        switch right {
+        case .nothing: false
+        case .agentIcon: true
+        case .sessionCount: sessionCountText != nil
+        }
+    }
 }
