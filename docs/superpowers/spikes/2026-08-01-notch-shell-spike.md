@@ -54,13 +54,18 @@ content area. Harmless, but the island must not be sized from `menuBarHeight`.
 
 ---
 
-## 2. AppKit will move your window out of the menu bar
+## 2. AppKit moves your window out of the menu bar — but only below level 24
 
-This was the first thing the spike found, and it invalidated the entire first probe run.
+> **Corrected 2026-08-01, after Plan 2 Task 4.** This section originally claimed the
+> `constrainFrameRect` override was load-bearing at the level the app ships at. It is not.
+> The original measurement was taken on a panel that was accidentally at level 3, because
+> of the `isFloatingPanel` trap in §2b below. A reviewer caught the inconsistency and the
+> re-measurement is recorded here. The override stays, for the reason in §2c — but as
+> defence, not as the thing that makes the island work.
 
 Asked for `y = 950`. Got `y = 917` — flush under `visibleFrame.maxY`. `NSWindow` runs
 `constrainFrameRect(_:to:)` on every `setFrame` and clamps the frame to the visible area.
-Refusing it is the whole trick:
+Overriding it without calling `super` refuses that clamp:
 
 ```swift
 final class NotchPanel: NSPanel {
@@ -71,12 +76,38 @@ final class NotchPanel: NSPanel {
 }
 ```
 
-Proven load-bearing by flipping it inside one process:
+Re-measured on hardware with a live window server, ordering the panel front and setting
+the frame through the real path:
 
-| | resulting frame |
-|---|---|
-| constraint active | `x 605, y 917, w 301, h 32` |
-| constraint refused | `x 605, y 950, w 301, h 32` ← what we asked for |
+| Panel level | AppKit's own `constrainFrameRect` | Frame without the override | With it | Override matters |
+|---|---|---|---|---|
+| 25 `.statusBar` | returns `y 950` unchanged | `y 950` | `y 950` | **no** |
+| 3 `.floating` | returns `y 917` | `y 917` | `y 950` | yes |
+
+**The clamp is level-dependent.** AppKit exempts a window at `.statusBar` from
+constrain-to-visible-frame entirely. At the level this app actually ships at, the override
+changes nothing.
+
+### 2b. The trap that produced the wrong answer
+
+`NSPanel.isFloatingPanel`'s setter reassigns `level` to `.floating` (3) as a side effect.
+The original spike set `level = .statusBar` and *then* `isFloatingPanel = true`, so every
+measurement in the first run was taken on a level-3 window while the code read as if it
+were level 25.
+
+**Set `isFloatingPanel` before `level`, never after**, and pin it with a test:
+
+```swift
+isFloatingPanel = true
+level = .statusBar          // must come after — the line above clobbers it
+```
+
+### 2c. Why the override stays anyway
+
+It costs one line and it is the difference between "wrong level" and "wrong level *and*
+silently displaced 33pt". We have now watched the level get clobbered once, by a setter
+whose side effect is not obvious at the call site. Keep the override as a backstop; just
+do not believe it is what puts the island in the notch. The level is.
 
 ---
 

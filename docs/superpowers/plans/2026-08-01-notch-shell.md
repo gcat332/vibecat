@@ -17,7 +17,8 @@
 - Swift 6 language mode, `platforms: [.macOS(.v14)]`, **no external dependencies**.
 - Tests use **swift-testing** (`import Testing`, `@Test`, `#expect`, `#require`) — never XCTest.
 - Window level is exactly `.statusBar` (raw 25). The menu bar is layer 24; 24 and below lose to it. Higher levels buy nothing and start fighting menus and alerts.
-- `NotchPanel.constrainFrameRect(_:to:)` **must not call `super`**. AppKit otherwise clamps the frame to `visibleFrame` and drops the island 33pt out of the notch.
+- **`isFloatingPanel = true` must be assigned before `level`.** Its setter reassigns `level` to `.floating` (3) as a side effect, silently undoing the line above. Pin it with a test.
+- `NotchPanel.constrainFrameRect(_:to:)` **must not call `super`**. At level 25 AppKit does not clamp, so this changes nothing on the happy path — it is a backstop for the case where the level is wrong, which turns a wrong-level bug into a wrong-level-*and*-displaced-33pt bug. See spike §2.
 - The collapsed island sets `ignoresMouseEvents = true`. A menu title can reach within ~30pt of the island's left edge, and an opaque flank eats its clicks.
 - Hover is detected by sampling `NSEvent.mouseLocation`, never by `NSTrackingArea` — a click-through window receives no events for a tracking area to observe.
 - Show the panel with `orderFrontRegardless()`, never `makeKeyAndOrderFront(_:)`. The app must never steal focus.
