@@ -84,6 +84,21 @@ public struct IslandGeometry: Sendable, Equatable {
 
         return IslandFrames(body: body, panel: panel)
     }
+
+    /// The widest the collapsed island can ever be: a three-digit session
+    /// count, hovered.
+    ///
+    /// The panel is created once at this size and never resized — measured,
+    /// animating the silhouette inside a fixed window has a p95 of 10.34ms
+    /// against 15.16ms for moving the window itself, and a far shorter tail.
+    ///
+    /// This is only safe while the island is click-through: an oversized
+    /// transparent window intercepts nothing. Plan 4's drawer takes mouse
+    /// events, so it must size the panel to what it actually covers.
+    public func maxCollapsedFrames() -> IslandFrames {
+        let widest = CollapsedLayout(right: .sessionCount(999), hovering: true)
+        return frames(rightFlank: widest.rightFlankWidth, tier: .rest)
+    }
 }
 
 /// What the right flank is showing, and how wide that makes it.
@@ -121,7 +136,7 @@ public struct CollapsedLayout: Sendable, Equatable {
     /// than a second literal that could drift from it.
     static let iconWidth: CGFloat = 14
     /// Design §9.1: hover reveals name and elapsed time over 280ms, up to 150pt.
-    private static let hoverReveal: CGFloat = 150
+    public static let hoverReveal: CGFloat = 150
 
     public let right: RightContent
     public let hovering: Bool

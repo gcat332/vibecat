@@ -85,3 +85,40 @@ private let externalDisplay = ScreenMetrics(
     #expect(f.panel.minX >= mbp14.frame.minX)
     #expect(f.panel.maxX <= mbp14.frame.maxX)
 }
+
+/// The spike: content animation beats window-frame animation (p95 10.34ms vs
+/// 15.16ms). So the panel is created once at its widest and never resized.
+@Test func theMaximumCollapsedPanelHoldsEveryCollapsedState() {
+    let g = IslandGeometry(screen: mbp14)
+    let maxFrames = g.maxCollapsedFrames()
+
+    let states: [CollapsedLayout] = [
+        CollapsedLayout(right: .nothing, hovering: false),
+        CollapsedLayout(right: .nothing, hovering: true),
+        CollapsedLayout(right: .agentIcon, hovering: true),
+        CollapsedLayout(right: .sessionCount(1), hovering: true),
+        CollapsedLayout(right: .sessionCount(999), hovering: true),
+    ]
+    for layout in states {
+        let f = g.frames(rightFlank: layout.rightFlankWidth, tier: .rest)
+        #expect(f.panel.width <= maxFrames.panel.width + 0.001,
+                "\(layout.right) hovering=\(layout.hovering) exceeds the fixed panel")
+        #expect(f.body.maxX <= maxFrames.body.maxX + 0.001)
+    }
+}
+
+/// Whatever the panel's width, the left edge is where it always was.
+@Test func theFixedPanelDoesNotMoveTheLeftEdge() {
+    let g = IslandGeometry(screen: mbp14)
+    let dormant = g.frames(rightFlank: 0, tier: .rest)
+    #expect(g.maxCollapsedFrames().panel.minX == dormant.panel.minX)
+    #expect(g.maxCollapsedFrames().body.minX == dormant.body.minX)
+}
+
+@Test func theFixedPanelIsWideEnoughForTheHoverReveal() {
+    let g = IslandGeometry(screen: mbp14)
+    let rest = g.frames(rightFlank: CollapsedLayout(right: .sessionCount(999),
+                                                    hovering: false).rightFlankWidth,
+                        tier: .rest)
+    #expect(g.maxCollapsedFrames().body.width - rest.body.width >= CollapsedLayout.hoverReveal)
+}
