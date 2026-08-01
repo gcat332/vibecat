@@ -8,6 +8,8 @@ let package = Package(
         .library(name: "VibeCatCore", targets: ["VibeCatCore"]),
         .library(name: "VibeCatTransport", targets: ["VibeCatTransport"]),
         .executable(name: "vibecat-hook", targets: ["VibeCatHook"]),
+        .library(name: "VibeCatUI", targets: ["VibeCatUI"]),
+        .executable(name: "vibecat", targets: ["VibeCatApp"]),
     ],
     targets: [
         .target(name: "VibeCatCore"),
@@ -20,8 +22,14 @@ let package = Package(
         // a transitive dependency is not guaranteed to be importable.
         .executableTarget(name: "VibeCatHook",
                           dependencies: ["VibeCatHookKit", "VibeCatCore", "VibeCatTransport"]),
+        // The UI logic lives in a library for the same reason the hook's does:
+        // an executable target with a main.swift cannot be @testable imported.
+        .target(name: "VibeCatUI", dependencies: ["VibeCatCore", "VibeCatTransport"]),
+        .executableTarget(name: "VibeCatApp",
+                          dependencies: ["VibeCatUI", "VibeCatCore", "VibeCatTransport"]),
         .testTarget(name: "VibeCatCoreTests", dependencies: ["VibeCatCore"]),
         .testTarget(name: "VibeCatTransportTests",
                     dependencies: ["VibeCatTransport", "VibeCatCore", "VibeCatHookKit"]),
+        .testTarget(name: "VibeCatUITests", dependencies: ["VibeCatUI", "VibeCatCore"]),
     ]
 )
