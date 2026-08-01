@@ -1,8 +1,64 @@
+import Foundation
 import SwiftUI
+#if canImport(AppKit)
+import AppKit
+#endif
 
 extension Color {
     init(_ c: RGBA) { self.init(red: c.r, green: c.g, blue: c.b) }
 }
+
+/// The right flank's session-count font — the single place both the
+/// rendered `Text` (below, in `IslandBody.rightFlank`) and
+/// `CollapsedLayout.Metrics.standard`'s digit measurement come from, so the
+/// two can never quietly drift apart.
+///
+/// SwiftUI's `Font.Weight` and AppKit's `NSFont.Weight` are unrelated types
+/// with no bridge between them, so this keeps both spellings of "12pt
+/// semibold rounded, monospaced digits" side by side in one declaration
+/// instead of scattered across the file — change one and the other is
+/// staring right at you.
+enum RightFlankFont {
+    static let size: CGFloat = 12
+    static let swiftUI: Font = .system(size: size, weight: .semibold, design: .rounded)
+
+    #if canImport(AppKit)
+    /// AppKit's equivalent of `swiftUI`, used only to measure a digit's real
+    /// advance width — `.monospacedDigitSystemFont` bakes in the same
+    /// tabular-figure feature `Text.monospacedDigit()` applies on the
+    /// SwiftUI side, verified by measuring "0" through "9" and finding
+    /// identical widths.
+    ///
+    /// Not held as a stored `NSFont`: `NSFont` is a non-`Sendable` class, so
+    /// a persistent `static let` of one trips Swift 6's global-mutable-state
+    /// check. Returning a plain `CGFloat` instead means nothing but a
+    /// number outlives this call — `Metrics.standard` below still measures
+    /// exactly once, since a `static let`'s initialiser runs a single time.
+    static func measuredDigitWidth() -> CGFloat {
+        let monospaced = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .semibold)
+        let font = monospaced.fontDescriptor.withDesign(.rounded)
+            .flatMap { NSFont(descriptor: $0, size: size) } ?? monospaced
+        return ("0" as NSString).size(withAttributes: [.font: font]).width
+    }
+    #endif
+}
+
+#if canImport(AppKit)
+extension CollapsedLayout.Metrics {
+    /// Design §5.4: measured from the real font, once, rather than guessed.
+    /// Hover polling rebuilds `CollapsedLayout` at 30Hz, so this is computed
+    /// a single time into a `static let` rather than re-measuring text on
+    /// every call.
+    public static let standard = CollapsedLayout.Metrics(
+        digitWidth: RightFlankFont.measuredDigitWidth())
+}
+#else
+extension CollapsedLayout.Metrics {
+    /// No AppKit to measure with on this platform; falls back to the old
+    /// estimate rather than failing to build.
+    public static let standard = CollapsedLayout.Metrics(digitWidth: 9)
+}
+#endif
 
 /// Drives per-frame redraws while — and only while — the aura is blooming.
 ///
@@ -104,7 +160,7 @@ struct IslandBody: View {
                 .padding(.horizontal, 10)
         case let .sessionCount(n) where n > 0:
             Text(String(n))
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .font(RightFlankFont.swiftUI)
                 .monospacedDigit()
                 .foregroundStyle(accent)
                 .padding(.leading, 10)

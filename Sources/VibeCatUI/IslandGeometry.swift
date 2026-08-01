@@ -107,27 +107,49 @@ public struct CollapsedLayout: Sendable, Equatable {
         case nothing
     }
 
-    /// 10 leading + content + 12 trailing.
-    private static let padding: CGFloat = 22
-    private static let digitWidth: CGFloat = 9
+    /// The font fact needed to size a session count without guessing.
+    ///
+    /// Measuring a real font touches the host's font system, which
+    /// `CollapsedLayout` itself must not do — it stays a pure, Sendable value
+    /// type — so the measurement is injected instead. Production code gets
+    /// `.standard`, computed once from the actual right-flank font (see
+    /// `RightFlankFont` in IslandView.swift); tests can inject a fixed value
+    /// to stay deterministic.
+    public struct Metrics: Sendable, Equatable {
+        public let digitWidth: CGFloat
+
+        public init(digitWidth: CGFloat) {
+            self.digitWidth = digitWidth
+        }
+    }
+
+    /// 10 leading + content + 12 trailing. Visible (not `private`) so tests
+    /// can pin the no-clipping invariant without a duplicated magic number.
+    static let padding: CGFloat = 22
     private static let iconWidth: CGFloat = 14
     /// Design §9.1: hover reveals name and elapsed time over 280ms, up to 150pt.
     private static let hoverReveal: CGFloat = 150
 
     public let right: RightContent
     public let hovering: Bool
+    public let metrics: Metrics
 
-    public init(right: RightContent, hovering: Bool) {
+    public init(right: RightContent, hovering: Bool, metrics: Metrics = .standard) {
         self.right = right
         self.hovering = hovering
+        self.metrics = metrics
     }
 
+    /// Design §5.4: "measured from actual content... then written back as an
+    /// explicit width." `metrics.digitWidth` is a real measurement by
+    /// default (see `Metrics.standard`), not a guessed constant, so this
+    /// can't quietly clip a digit if the font or its size ever changes.
     public var rightFlankWidth: CGFloat {
         let content: CGFloat = switch right {
         case .nothing: 0
         case .agentIcon: Self.iconWidth
         case let .sessionCount(n):
-            n <= 0 ? 0 : CGFloat(String(n).count) * Self.digitWidth
+            n <= 0 ? 0 : CGFloat(String(n).count) * metrics.digitWidth
         }
         guard content > 0 else { return 0 }
         return Self.padding + content + (hovering ? Self.hoverReveal : 0)

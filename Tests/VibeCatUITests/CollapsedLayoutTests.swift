@@ -8,10 +8,15 @@ import CoreGraphics
     #expect(l.showsRightFillet == false)
 }
 
+/// This is about the *shape* of the width function (more digits, more
+/// width) rather than any particular font, so it pins a fixed, readable
+/// metric rather than depending on the host's real font.
+private let fixedMetrics = CollapsedLayout.Metrics(digitWidth: 9)
+
 @Test func aSessionCountReservesRoomForItsDigits() {
-    let one = CollapsedLayout(right: .sessionCount(1), hovering: false)
-    let twelve = CollapsedLayout(right: .sessionCount(12), hovering: false)
-    let many = CollapsedLayout(right: .sessionCount(999), hovering: false)
+    let one = CollapsedLayout(right: .sessionCount(1), hovering: false, metrics: fixedMetrics)
+    let twelve = CollapsedLayout(right: .sessionCount(12), hovering: false, metrics: fixedMetrics)
+    let many = CollapsedLayout(right: .sessionCount(999), hovering: false, metrics: fixedMetrics)
     #expect(one.rightFlankWidth > 0)
     #expect(twelve.rightFlankWidth > one.rightFlankWidth)
     #expect(many.rightFlankWidth > twelve.rightFlankWidth)
@@ -27,9 +32,24 @@ import CoreGraphics
 
 /// Design §6.1: hover widens the flanks to reveal name and elapsed time.
 @Test func hoverWidensTheRightFlank() {
-    let rest = CollapsedLayout(right: .sessionCount(2), hovering: false)
-    let hover = CollapsedLayout(right: .sessionCount(2), hovering: true)
+    let rest = CollapsedLayout(right: .sessionCount(2), hovering: false, metrics: fixedMetrics)
+    let hover = CollapsedLayout(right: .sessionCount(2), hovering: true, metrics: fixedMetrics)
     #expect(hover.rightFlankWidth > rest.rightFlankWidth)
+}
+
+/// Design §5.4: "measured from actual content," not guessed — the estimate
+/// must never be narrower than the padding plus the genuinely rendered text
+/// width, for a range of digit counts. This pins the no-clipping invariant
+/// directly, using the real measured font (`.standard`), rather than a
+/// magic per-digit constant that a font or type-size change could
+/// silently invalidate.
+@Test func rightFlankWidthNeverClipsTheGenuinelyRenderedText() {
+    let digitWidth = CollapsedLayout.Metrics.standard.digitWidth
+    for n in [1, 12, 999] {
+        let l = CollapsedLayout(right: .sessionCount(n), hovering: false)
+        let renderedContentWidth = CGFloat(String(n).count) * digitWidth
+        #expect(l.rightFlankWidth >= CollapsedLayout.padding + renderedContentWidth)
+    }
 }
 
 /// Whatever the right side does, the geometry keeps the left edge still.
