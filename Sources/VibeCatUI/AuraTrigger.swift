@@ -5,7 +5,21 @@ import Foundation
 /// competing with the cat, so this fires on change and only on change.
 public struct AuraTrigger: Sendable, Equatable {
     public static let duration: TimeInterval = 0.9
-    public static let peakOpacity: Double = 0.14
+
+    /// Measured, not chosen. At the design's original 0.14 the bloom fired
+    /// perfectly and could not be seen: sampling the screen 24 times across a
+    /// real state change produced the exact `sin(phase · π)` hump, ~960ms
+    /// wide, whose peak lifted the band outside the island by **6 levels
+    /// summed across R, G and B** — two per channel. Plan 2's follow-up called
+    /// this before it was measured: "if it looks absent, check
+    /// `AuraTrigger.peakOpacity` before suspecting the trigger."
+    ///
+    /// Halo lift is linear in this value at about 76 levels per unit, so 0.34
+    /// buys ~26 — four times what shipped. Rendered side by side against 0.24
+    /// and 0.44 (see `auraOpacitySweep`), it is the first one that reads as a
+    /// glow rather than as dither, and stops short of shouting. A bloom that
+    /// only touches its peak for an instant needs the headroom.
+    public static let peakOpacity: Double = 0.34
 
     private var lastState: IslandState?
     private var firedAt: Date?
