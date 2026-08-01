@@ -196,6 +196,37 @@ struct IslandBody: View {
             .truncatingRemainder(dividingBy: cycle) / cycle
     }
 
+    /// 0…1 through the *badge's own* cycle (`Badge.motion.cycle`) — computed
+    /// the same way as `phase` above, but deliberately kept as a separate
+    /// property rather than sharing it.
+    ///
+    /// Before this, `content(cell:)` passed `phase` — the cat's phase — to
+    /// `BadgeCanvas` too, so `Badge.motion.cycle` went unread in production
+    /// entirely (confirmed by grep). That happened to look right only
+    /// because sleep/trot/call's cycles equal zzz/squares/bang's; nothing
+    /// enforced it. The concrete failure this coupling risks: `phase` is
+    /// pinned to 0 whenever the *cat's* cycle is 0 (today only `.happy`), so
+    /// any mood with a zero cycle paired with a *continuous* badge would
+    /// freeze that badge at phase 0 forever, burning the timeline's cost for
+    /// a picture that never changes. No such pairing exists today — `.idle`'s
+    /// badge (`star`) isn't continuous, and A1 just removed the one pairing
+    /// (dormant's `sleep` + `zzz`) that happened to demonstrate the coupling
+    /// working rather than failing — which makes the hazard more invisible,
+    /// not less. Deriving the badge's phase from its own cycle removes the
+    /// coupling outright instead of leaving it to keep working by
+    /// coincidence.
+    ///
+    /// Deliberately bypasses `MotionPreference` exactly as `phase` does —
+    /// that gap is a separate, already-noted follow-up, and fixing it for
+    /// only one of the two properties would leave them inconsistent with
+    /// each other.
+    private var badgePhase: Double {
+        let cycle = model.badge.motion.cycle
+        guard cycle > 0 else { return 0 }
+        return now.timeIntervalSinceReferenceDate
+            .truncatingRemainder(dividingBy: cycle) / cycle
+    }
+
     /// The body's width with hover's own contribution subtracted back out —
     /// depends only on the right flank's content (nothing / an icon / a
     /// session count), never on `model.hovering`. This is the half of the
@@ -303,7 +334,7 @@ struct IslandBody: View {
                           palette: CatPalette(accent: model.state.accent),
                           cellSize: cell)
                     .frame(width: LeftFlankLayout.catWidth, height: 14)
-                BadgeCanvas(badge: model.badge, phase: phase,
+                BadgeCanvas(badge: model.badge, phase: badgePhase,
                             tint: model.state.accent, cellSize: 2)
                     .frame(width: LeftFlankLayout.badgeWidth,
                            height: LeftFlankLayout.badgeWidth)
