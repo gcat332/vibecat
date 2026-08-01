@@ -1876,7 +1876,11 @@ In `present()`, size the panel from the fixed maximum and assign the root **once
         let panel = self.panel ?? NotchPanel(frames: frames)
         self.panel = panel
         panel.apply(frames)
-        if panel.contentView == nil {
+        // NOT `contentView == nil` — AppKit gives every NSPanel a non-nil
+        // placeholder NSView, so that guard never fires and IslandView is never
+        // hosted at all. Shipped exactly once during execution and rendered a
+        // blank island; caught only because a buildCount assertion was added.
+        if !(panel.contentView is NSHostingView<IslandView>) {
             panel.contentView = NSHostingView(rootView: IslandView(model: model))
         }
 ```
@@ -1921,7 +1925,12 @@ Expected: the whole suite green. Existing `NotchControllerTests` that asserted t
 
 - [ ] **Step 6: Prove the once-only assignment is load-bearing**
 
-Temporarily reinstate a `panel.contentView = NSHostingView(rootView: IslandView(model: model))` line at the end of `render()`. Re-run: `theHostingRootIsAssignedOnceAndSurvivesStateChanges` must FAIL. Revert and confirm with `git diff`.
+Mutate using `hosting.rootView = view` — the form the pre-Task-9 code actually
+took — not a fresh `contentView =` assignment. A `rootView` write leaves
+`contentView`'s identity untouched, so an identity-comparing test passes against
+it; only a construction count catches it. Assert `IslandView.buildCount` stays at
+1, and expect it to jump to 4 under the mutation while identity holds silently.
+Revert and re-run.
 
 - [ ] **Step 7: Commit**
 
