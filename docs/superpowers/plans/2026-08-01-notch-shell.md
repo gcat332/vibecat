@@ -78,11 +78,9 @@ Add to `targets:`:
 ```swift
         // The UI logic lives in a library for the same reason the hook's does:
         // an executable target with a main.swift cannot be @testable imported.
-        .target(name: "VibeCatUI", dependencies: ["VibeCatCore", "VibeCatTransport"],
-                swiftSettings: [.swiftLanguageMode(.v6)]),
+        .target(name: "VibeCatUI", dependencies: ["VibeCatCore", "VibeCatTransport"]),
         .executableTarget(name: "VibeCatApp",
-                          dependencies: ["VibeCatUI", "VibeCatCore", "VibeCatTransport"],
-                          swiftSettings: [.swiftLanguageMode(.v6)]),
+                          dependencies: ["VibeCatUI", "VibeCatCore", "VibeCatTransport"]),
         .testTarget(name: "VibeCatUITests", dependencies: ["VibeCatUI", "VibeCatCore"]),
 ```
 
@@ -576,6 +574,7 @@ Expected: FAIL — `cannot find 'IslandState' in scope`.
 Create `Sources/VibeCatUI/IslandState.swift`:
 
 ```swift
+import Foundation      // String(format:)
 import VibeCatCore
 
 public struct RGBA: Sendable, Equatable {
@@ -1929,11 +1928,9 @@ import Observation
         self.metrics = metrics
     }
 
-    #if canImport(AppKit)
     public convenience init(model: AppModel) {
         self.init(model: model, metrics: { ScreenMetrics.current() })
     }
-    #endif
 
     public func refreshGeometry() {
         geometry = metrics().map(IslandGeometry.init(screen:))
