@@ -72,6 +72,7 @@ extension CollapsedLayout.Metrics {
 public struct IslandView: View {
     private let model: IslandModel
 
+    #if DEBUG
     /// Counts constructions of `IslandView`. Not `public` — visible only via
     /// `@testable import`, purely for
     /// `theHostingRootIsAssignedOnceAndSurvivesStateChanges` in
@@ -87,11 +88,20 @@ public struct IslandView: View {
     /// untouched. A test that checks only `contentView` cannot catch that
     /// regression reappearing; counting constructions of the root value
     /// itself is the literal constraint ("assigned once").
+    ///
+    /// `#if DEBUG`-gated rather than shipped unconditionally: this counter
+    /// (and the two read-counters on `IslandBody` below) exist purely for
+    /// test instrumentation, and SwiftPM already builds the library in debug
+    /// for `swift test`, so nothing the test suite needs is lost — only the
+    /// per-construction increment a release build has no reason to pay for.
     @MainActor static var buildCount = 0
+    #endif
 
     public init(model: IslandModel) {
         self.model = model
+        #if DEBUG
         Self.buildCount += 1
+        #endif
     }
 
     public var body: some View {
@@ -250,11 +260,14 @@ struct IslandBody: View {
     /// a snapshot/view-inspection dependency this project doesn't take —
     /// so a read count is the narrower, honest thing this can actually show.
     var restingWidth: CGFloat {
+        #if DEBUG
         Self.restingWidthReadCount += 1
+        #endif
         let resting = CollapsedLayout(right: model.layout.right, hovering: false)
         return model.geometry.frames(rightFlank: resting.rightFlankWidth, tier: .rest).body.width
     }
 
+    #if DEBUG
     /// Counts reads of `restingWidth`. Not `public` — visible only via
     /// `@testable import`, purely for
     /// `bodyActuallyRoutesThroughBothHalvesOfTheWidthSplit` in
@@ -263,8 +276,9 @@ struct IslandBody: View {
     /// for the same underlying reason: a `some View` property's *result*
     /// can't be introspected without a disallowed dependency, but whether
     /// evaluating it touched a given property along the way can be counted
-    /// directly.
+    /// directly. See `IslandView.buildCount` for why this is `#if DEBUG`-gated.
     @MainActor static var restingWidthReadCount = 0
+    #endif
 
     /// The hover reveal's own contribution: `CollapsedLayout.hoverReveal`
     /// while hovering, `0` at rest — depends only on `model.hovering`, never
@@ -276,12 +290,16 @@ struct IslandBody: View {
     /// See `restingWidth`'s doc comment for what its own equivalent test
     /// coverage does and does not prove — the same limits apply here.
     var hoverRevealWidth: CGFloat {
+        #if DEBUG
         Self.hoverRevealWidthReadCount += 1
+        #endif
         return model.hovering ? CollapsedLayout.hoverReveal : 0
     }
 
+    #if DEBUG
     /// Counts reads of `hoverRevealWidth`. See `restingWidthReadCount`.
     @MainActor static var hoverRevealWidthReadCount = 0
+    #endif
 
     var body: some View {
         let panel = model.panelFrames
