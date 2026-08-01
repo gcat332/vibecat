@@ -39,9 +39,15 @@ import AppKit
         setFrame(frames.panel, display: false)
     }
 
-    /// AppKit clamps a window's frame to the screen's visible area, which drops
-    /// the island 33pt out of the notch. Refusing the constraint is the whole
-    /// trick — do not call super here.
+    /// At `.statusBar` (25), AppKit's own `constrainFrameRect` already leaves the
+    /// frame alone — the clamp to `visibleFrame` only bites below level 24, and
+    /// this panel never runs at that level. So this override changes nothing
+    /// while the level is correct; it is a backstop, not what puts the island
+    /// in the notch. Keep it anyway: we have already watched the level get
+    /// clobbered once by a non-obvious setter side effect (see `isFloatingPanel`
+    /// above), and if that happens again this turns "wrong level *and* silently
+    /// displaced 33pt" into just "wrong level". See spike §2 (and its
+    /// correction) for the measurements behind this.
     public override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         frameRect
     }
