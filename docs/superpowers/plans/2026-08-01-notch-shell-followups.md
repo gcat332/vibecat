@@ -29,6 +29,21 @@ and found nothing that would render wrong.
 Unconfirmed: appearance, the amber state colour, the aura bloom, hover
 widening, and menu click-through.
 
+> **Settled 2026-08-02**, on an unlocked machine, except for one item.
+> Appearance, geometry (left edge at exactly `notch.minX − 58`), the amber
+> state colour, and hover widening are all **confirmed correct**. The aura
+> **fires** correctly — the exact `sin` curve, ~960ms — but at 0.14 was too
+> faint to see, which is what this document predicted three lines further down;
+> raised to 0.34 in `45e1e31`. Click-through remains **unconfirmed**:
+> `ignoresMouseEvents = true` is set, but `NSWindow.windowNumber(at:)` cannot
+> test it from another process (it returns 0 for windows outside the caller, so
+> even the control point reads 0), and the island's footprint does not overlap
+> a clickable menu item at rest anyway. It needs a real click.
+>
+> Worth knowing for later: this machine runs with the **menu bar auto-hidden**,
+> so the island often sits over the wallpaper rather than a dark bar. Nothing
+> assumes otherwise today, but the aura was tuned against the bar.
+
 Four things will look surprising but are correct as built, so they should not
 be filed as bugs:
 

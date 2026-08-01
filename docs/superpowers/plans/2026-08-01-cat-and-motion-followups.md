@@ -11,21 +11,57 @@ which draws these views headlessly and needs no unlocked session. That technique
 is the answer to a gap that blocked visual verification across two plans, and it
 should be the first tool reached for next time.
 
-What the renders show:
+> **Resolved 2026-08-02.** All three artwork items below were fixed after the
+> contact sheet (`Tests/VibeCatUITests/Cat/ContactSheet.swift`) rendered them
+> side by side for the first time — commits `6c4cab3`, `b09be7b`. Each new test
+> was mutation-checked against the exact art that shipped. The originals are
+> kept here because the *pattern* is the finding: every one of these had a
+> passing test that asserted inequality where the question was perceptibility.
 
-- **The `zzz` badge does not read as z's.** The "big z" is a 3×3 `###`/`.#.`/`###`
-  that is indistinguishable from an I-beam; the "small z" is a solid 2×2 block
-  with no glyph at all. §8's "drift up and fade" has no fade. The badge is now
-  still (see below), so this is purely an artwork problem.
-- **`plain` differs from `tabby` by 6 cells out of 210** and is effectively
-  invisible. The coat tests assert *inequality*, not *perceptibility* — they pass
-  on it, which is a test sharing a premise with the code.
-- **`call` and `trot` are near-identical sprites.** `ResolvedCat.offset` takes the
-  mood but uses it only for the `isContinuous` guard, so both get the same
-  one-cell bob; `call` differs from `trot` by 2 cells out of 210 (the mouth).
-  §7.2 specifies "quick bob" for one and "attention pulse" for the other.
-- **Hover opens 150pt of empty black.** Correct until Plan 4/5 fill it, but worth
-  a conscious decision rather than shipping by omission.
+- ~~**The `zzz` badge does not read as z's.**~~ The "big z" was a 3×3
+  `###`/`.#.`/`###` indistinguishable from an I-beam; the "small z" a solid 2×2
+  block with no glyph at all. A 3×3 z *cannot* work: with top and bottom bars
+  the middle stroke can only be the centre column, which is where an I's stem
+  goes — the same nine cells. Redrawn with four rows for the big z and four
+  columns for the small.
+- ~~**`plain` differs from `tabby` by 6 cells out of 210.**~~ The cause was
+  worse than the symptom: `tabby` painted *nothing*, and the test pinning that
+  was `tabbyIsTheBaseGridUnchanged` — the defect written down as the expected
+  result. `tabby` now has forehead bars and cheek stripes; the tightest coat
+  pair is 20 cells against a 12-cell floor.
+- ~~**`call` and `trot` are near-identical sprites.**~~ `trot` now steps twice
+  per cycle and `call` hops once and holds, and `call`'s mouth opens into a 2×2
+  instead of widening an existing dark mark.
+- **Hover opens 150pt of empty black.** Confirmed on screen 2026-08-02: hover
+  works, and the island opens to 420pt with a cat, a badge, a count and a void.
+  Correct until Plan 4/5 fill it, but worth a conscious decision rather than
+  shipping by omission.
+
+## What a real screen showed, 2026-08-02
+
+First time the app has been looked at rather than reasoned about. Geometry is
+exact: the island's left edge landed on 605pt with the cutout at 663–848, i.e.
+`notch.minX − 58` to the point. State colours, badge shapes, the session count's
+position right of the hole, and the hover reveal are all correct.
+
+Two things the render could not have told us:
+
+- **The aura fires and cannot be seen.** 24 screen samples across a state change
+  traced the exact `sin(phase · π)` curve, ~960ms wide — and its peak lifted the
+  band outside the island by *six levels summed across R, G and B*. Fixed in
+  `45e1e31`; `peakOpacity` 0.14 → 0.34. Plan 2's follow-up predicted both the
+  symptom and the cause.
+- **The corner mismatch is two curves in the same fifteen points.** Ours is
+  15pt, the hardware's measures ~14. Fixed in `e72ba07` by clearing the cutout
+  by a full corner radius so ours covers theirs — matching Apple's radius by eye
+  does not converge. Pinned by test; **not yet confirmed on screen**, because
+  the machine locked before the rebuild could be photographed.
+
+One method that does **not** work, recorded so it is not tried again:
+`NSWindow.windowNumber(at:)` returns 0 for windows outside the calling process,
+so it cannot test click-through from a separate probe — the control point reads
+0 too. `ignoresMouseEvents = true` is set in `NotchPanel`; confirming it needs a
+real click.
 
 ## Spec behaviours consciously not implemented
 
@@ -77,11 +113,10 @@ an uncited assertion that is plainly wrong for a 2-frame sprite.
 
 ## Smaller, safe, unhurried
 
-- **`hasRightContent` returns true for `.nothing` while hovering.** Semantic drift
-  introduced when hover started opening the reveal unconditionally. Inert today —
-  nothing in `Sources/` reads it — but it is `public` and a later plan will
-  believe the name. Rename to `reservesRightFlankWidth` or restore the
-  content-only meaning.
+- ~~**`hasRightContent` returns true for `.nothing` while hovering.**~~ Fixed in
+  `e72ba07`, forced by the corner minimum: a nonzero floor would have made
+  `rightFlankWidth > 0` permanently true. It now switches on `right` and answers
+  the question its name asks.
 - **`.agentIcon`'s render branch is unreachable and untested.** `IslandModel.layout`
   never emits it, so no test can construct an `IslandBody` that reaches it.
 - **`Tone(rawValue:)` maps an unknown character to `nil`** — a transparent hole. A
@@ -122,3 +157,18 @@ property was *touched*, never that it was *wired to the right modifier*. The
 branch has reached the ceiling of testing SwiftUI this way. The honest next move
 is not a fourth counter — it is `ImageRenderer` golden-image tests, which work
 headlessly against these exact types with no new dependency.
+
+> **Done 2026-08-02** (`3116b89`), with one correction to the reasoning above:
+> the golden tests do **not** supersede the counters, and both are kept.
+> Reverting `body` to `.frame(width: body.width)` with a single `.animation`
+> renders *identically* — the sum is the same number — so no image can see it,
+> and only the read counts drop to zero. The render covers geometry reaching the
+> frame; the counter covers which value the animation is keyed on. They fail on
+> different mutations.
+>
+> Also established: `ImageRenderer` **does** run `Canvas`'s renderer closure
+> (29,664 opaque pixels in 9 tones for the cat alone), so the escaping-closure
+> hazard that motivated the counters does not apply to a render. And a
+> colour-count assertion is not enough to prove the cat drew — with the cat's
+> `Canvas` emptied, the island still rendered eighty-odd distinct colours from
+> the badge and antialiased text. The fixed facial tones are the discriminator.
