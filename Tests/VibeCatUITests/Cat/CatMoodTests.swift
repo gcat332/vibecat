@@ -58,6 +58,48 @@ import Testing
     }
 }
 
+/// Design §7.2 names two different motions: a "quick bob" for `trot` and an
+/// "attention pulse" for `call`. `offset` took the mood as a parameter but
+/// used it only for the `isContinuous` guard, so both moods got the identical
+/// one-cell step and the only thing telling them apart was the mouth.
+///
+/// Inequality of the two sequences is not enough on its own — a pure phase
+/// shift would satisfy it while still being the same motion. Time spent
+/// raised is the shape-sensitive part: trot is up for half its cycle in two
+/// beats, call for a sixth of it in one.
+@Test func trotAndCallMoveToDifferentRhythms() {
+    let phases = stride(from: 0.0, to: 1.0, by: 0.01).map { $0 }
+    func steps(_ mood: CatMood) -> [Int] {
+        phases.map { ResolvedCat(coat: .tabby, mood: mood, phase: $0).verticalOffset }
+    }
+    let trot = steps(.trot), call = steps(.call)
+    #expect(trot != call, "trot and call step identically — they share one motion")
+    #expect(trot.count { $0 != 0 } != call.count { $0 != 0 },
+            "trot and call spend the same share of the cycle raised — one is only a phase shift of the other, not a different motion")
+}
+
+/// The mood-to-mood counterpart of `everyPairOfCoatsIsTellableApart`, and for
+/// the same reason: `eachMoodGivesTheCatADifferentFace` above asserts `!=`,
+/// which `call` satisfied with a two-cell mouth that widened an existing dark
+/// mark rather than making a new shape.
+///
+/// The pair this exists for is `call` against `trot`, whose eyes are identical
+/// by design — §7.2 distinguishes them by the mouth, so the mouth has to carry
+/// the whole difference.
+@Test func everyPairOfMoodsIsTellableApart() {
+    let floor = 4
+    let all = CatMood.allCases
+    for i in all.indices {
+        for j in all.indices where j > i {
+            let a = ResolvedCat(coat: .tabby, mood: all[i], phase: 0).cells
+            let b = ResolvedCat(coat: .tabby, mood: all[j], phase: 0).cells
+            let differing = zip(a.joined(), b.joined()).count { $0 != $1 }
+            #expect(differing >= floor,
+                    "\(all[i]) and \(all[j]) differ by only \(differing) cells — under the \(floor)-cell floor, one reads as the other")
+        }
+    }
+}
+
 /// The eyes always win over a marking — §7.3. Scoped to the actual eye-box
 /// cells (cols 3...5 and 12...14, the ones a mood's `setEyes` writes), not
 /// the whole row: cells beside the eyes are ordinary fur, and a coat (e.g.

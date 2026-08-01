@@ -57,19 +57,31 @@ public enum Badge: String, Sendable, CaseIterable {
 
         switch self {
         case .zzz:
-            // Two z's drifting up, the small one leading. Its rise is the phase.
-            let lift = Int((phase * 3).rounded(.down))          // 0…2
-            let smallRow = max(0, 2 - lift)
-            let bigRow = min(Self.size - 3, 4 - lift)
-            if bigRow >= 0 && bigRow + 2 < Self.size {
-                g[bigRow][1] = true; g[bigRow][2] = true; g[bigRow][3] = true
-                g[bigRow + 1][2] = true
-                g[bigRow + 2][1] = true; g[bigRow + 2][2] = true; g[bigRow + 2][3] = true
-            }
-            if smallRow >= 0 && smallRow + 1 < Self.size {
-                g[smallRow][5] = true; g[smallRow][6] = true
-                g[smallRow + 1][5] = true; g[smallRow + 1][6] = true
-            }
+            // Two z's, the small one leading up and to the right.
+            //
+            // A z needs four rows to show its diagonal. The previous big z was
+            // three — `###`/`.#.`/`###` — whose middle stroke sits in the centre
+            // column, which is exactly where an I's stem goes: a 3×3 z and a 3×3
+            // I are the same nine cells. The small z was worse, a solid 2×2 block
+            // with no glyph at all. Rendered, it read as an I-beam beside a
+            // square; see ContactSheet.swift, which is how that was finally seen.
+            //
+            // The small z is three columns and so cannot escape the centred
+            // diagonal — but it does not have to. The big z establishes what
+            // these marks are, and the small one is read as another of the
+            // same. Sharing no column with the big z keeps the two bars from
+            // running together into one staircase.
+            //
+            // One frame, because `motion` makes this badge `.still` — `phase`
+            // is deliberately unread here. The case comment there says why the
+            // drift went, and restoring it means offsetting these rows again.
+            set(["....###",
+                 ".....#.",
+                 "....###",
+                 "####...",
+                 "..#....",
+                 ".#.....",
+                 "####..."])
 
         case .squares:
             // Four squares swelling in turn, clockwise. A pixel grid cannot

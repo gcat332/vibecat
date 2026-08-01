@@ -70,10 +70,26 @@ public struct ResolvedCat: Sendable, Equatable {
         self.verticalOffset = Self.offset(mood, phase: phase)
     }
 
+    /// Design §7.2 names two different motions — a "quick bob" for `trot` and
+    /// an "attention pulse" for `call`. They used to be one shared step, up for
+    /// the first half of the cycle, so the two moods differed by nothing but
+    /// the mouth. The difference is rhythm, not amplitude: a step stays one
+    /// cell, because two would carry the ear tips off the top of the canvas.
     private static func offset(_ mood: CatMood, phase: Double) -> Int {
         guard mood.motion.isContinuous else { return 0 }
-        // A single-cell step, up for the first half of the cycle.
-        return phase < 0.5 ? -1 : 0
+        switch mood {
+        case .trot:
+            // Two beats per cycle: a walking rhythm rather than one slow rise.
+            return phase.truncatingRemainder(dividingBy: 0.5) < 0.25 ? -1 : 0
+        case .call:
+            // One sharp hop, then stillness — a cat getting your attention,
+            // not a cat walking. Up for a sixth of the cycle against trot's half.
+            return phase < 0.16 ? -1 : 0
+        case .sleep, .happy, .dead:
+            // Unreachable behind the guard above; spelled out so adding a
+            // continuous mood is a compile error rather than a silent zero.
+            return 0
+        }
     }
 
     /// Rows 7…9 are the eyes; row 10 columns 8…9 the nose, row 11 the mouth.
@@ -102,10 +118,18 @@ public struct ResolvedCat: Sendable, Equatable {
             }
         case .call:
             // Open — the same category as trot's resting eye, per design
-            // §7.2. What distinguishes this mood is the mouth, not the eyes:
-            // row 11's centre becomes a dark opening.
-            g[11][8] = .pupil
-            g[11][9] = .pupil
+            // §7.2. What distinguishes this mood is the mouth, not the eyes.
+            //
+            // Two cells tall, not one. Row 11 already carries the mouth line's
+            // two outline cells at columns 7 and 10, so opening only row 11
+            // widened an existing dark mark rather than making a new shape:
+            // rendered, `call` and `trot` were two cells apart out of 210.
+            // Carrying it into row 12 makes it a 2×2 opening — a mouth that is
+            // open, which is the whole content of this mood.
+            for row in 11...12 {
+                g[row][8] = .pupil
+                g[row][9] = .pupil
+            }
         case .happy:
             // ^ ^ arcs.
             for row in 7...9 {

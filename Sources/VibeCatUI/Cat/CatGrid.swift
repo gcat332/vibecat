@@ -66,7 +66,21 @@ public struct CatGrid: Sendable, Equatable {
 
         switch coat {
         case .tabby:
-            break
+            // Four bars down the forehead and one down each cheek.
+            //
+            // The base art is an *unmarked* cat, so `tabby` used to paint
+            // nothing: it differed from `plain` only by the six shadow cells
+            // at the paws that `plain` flattens. Six of 210, at the island's
+            // ~1pt per cell — rendered side by side they were the same cat,
+            // and the coat tests passed because they asserted inequality
+            // rather than perceptibility. See `everyPairOfCoatsIsTellableApart`.
+            //
+            // Bars are symmetric about the grid's centre line (between cols 8
+            // and 9): 4↔13 and 7↔10. Rows 5–6 are `highlight` and rows 7–9
+            // `body`, so `shadow` reads against both.
+            for col in [4, 7, 10, 13] { paint(rows: 5...6, cols: col...col, .shadow) }
+            paint(rows: 7...9, cols: 1...1, .shadow)
+            paint(rows: 7...9, cols: 16...16, .shadow)
         case .plain:
             for row in 0..<height {
                 for col in 0..<width where g[row][col] == .shadow { g[row][col] = .body }

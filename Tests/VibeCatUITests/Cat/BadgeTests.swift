@@ -137,6 +137,37 @@ private func hasAFilledBlock(_ cells: [[Bool]]) -> Bool {
 /// Verified by temporarily reverting `star` to the old `+` during this
 /// task's own work and confirming the count/profile test still passed; this
 /// test is what actually would have caught it.
+/// A z is its diagonal, and the diagonal is exactly what the old artwork had
+/// no room for. The big z was three rows — `###`/`.#.`/`###` — whose middle
+/// stroke can only sit in the centre column, which is also where a capital I
+/// puts its stem: a 3×3 z and a 3×3 I are the same nine cells. The small z was
+/// a solid 2×2 block with no glyph at all. Rendered, the badge read as an
+/// I-beam beside a square (ContactSheet.swift is how that was finally seen).
+///
+/// Two structural properties separate a z from both of those:
+///
+///  - a single-cell stroke that *moves sideways as it descends*. An I's stem
+///    never does; a z's diagonal is nothing but that.
+///  - no filled block anywhere. That is precisely what the small z was.
+///
+/// Each is load-bearing against the exact art that shipped: the old grid has
+/// only one row with a single lit cell, so no step exists, and its small z is
+/// a filled 2×2.
+@Test func theSleepBadgeIsZsRatherThanAnIBeamAndABlock() {
+    let cells = Badge.zzz.cells(at: 0)
+    let singleStrokeRows = cells.enumerated().compactMap { row, line -> (row: Int, col: Int)? in
+        let lit = line.indices.filter { line[$0] }
+        return lit.count == 1 ? (row, lit[0]) : nil
+    }
+    let descendingSteps = zip(singleStrokeRows, singleStrokeRows.dropFirst()).filter {
+        $1.row == $0.row + 1 && $1.col != $0.col
+    }
+    #expect(descendingSteps.isEmpty == false,
+            "zzz has no stroke that moves sideways as it descends — with a straight stem it is an I, not a z")
+    #expect(hasAFilledBlock(cells) == false,
+            "zzz contains a filled block — that is what the small z was before it had a glyph")
+}
+
 @Test func starHasAFilledBodyUnlikeCross() {
     #expect(hasAFilledBlock(Badge.star.cells(at: 0)),
             "star has no filled 2×2 block anywhere — it reads as a thin-lined figure, not a body")
