@@ -36,10 +36,17 @@ import Testing
 }
 
 /// The spike's rule again: steady states get no timeline.
+///
+/// `.zzz` is deliberately in the still column here, not the continuous one:
+/// dormant is the state a machine sits in all day, and a continuously
+/// drifting badge cost 3.6–4.1% of a core for an animation (an I-beam and a
+/// solid square, 3 frames, no fade) that did not read as one — see the
+/// `motion` case comment on `Badge.zzz`. The sleeping cat's shut eyes
+/// already carry "dormant".
 @Test func onlyTheActiveBadgesAnimateContinuously() {
     #expect(Badge.squares.motion.isContinuous)
     #expect(Badge.bang.motion.isContinuous)
-    #expect(Badge.zzz.motion.isContinuous)
+    #expect(Badge.zzz.motion.isContinuous == false)
     #expect(Badge.cross.motion.isContinuous == false)
     #expect(Badge.star.motion.isContinuous == false)
 }

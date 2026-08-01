@@ -33,13 +33,15 @@ private let mbp14 = ScreenMetrics(
     #expect(model(.running, count: 2).layout.rightFlankWidth > 0)
 }
 
-/// The switch that reaches 0.0% CPU.
-///
-/// `.dormant` is deliberately not one of these: its badge (`zzz`) is
-/// continuous even though its mood (`sleep`) is not, so it needs a timeline
-/// too — see `aStillCatWithADriftingBadgeStillNeedsATimeline` below. `.failed`
-/// and `.idle` are genuinely steady: neither mood nor badge is continuous.
+/// The switch that reaches 0.0% CPU. All three steady states belong here:
+/// `.dormant`'s badge (`zzz`) used to be a continuous drift even though its
+/// mood (`sleep`) was not, so dormant needed a timeline anyway — see the
+/// `motion` case comment on `Badge.zzz` for why that cost 3.6–4.1% of a core
+/// for an animation that did not read as one. Now that `zzz` is still too,
+/// `.dormant` is as steady as `.failed` and `.idle`: neither its mood nor its
+/// badge is continuous.
 @MainActor @Test func aSteadyStateNeedsNoTimeline() {
+    #expect(model(.dormant, count: 1).needsTimeline == false)
     #expect(model(.failed, count: 1).needsTimeline == false)
     #expect(model(.idle, count: 1).needsTimeline == false)
 }
@@ -49,16 +51,16 @@ private let mbp14 = ScreenMetrics(
     #expect(model(.waiting, count: 1).needsTimeline)
 }
 
-/// Dormant's badge is a drifting zzz, which does animate even though the cat
-/// does not — so the timeline decision must consider both.
-@MainActor @Test func aStillCatWithADriftingBadgeStillNeedsATimeline() {
+/// Dormant's cat and badge are both still now — `sleep`'s mood and `zzz`'s
+/// badge motion are neither one continuous — so, unlike before `zzz` was
+/// made still, neither alone nor together do they require redraws.
+@MainActor @Test func aStillCatWithAStillBadgeNeedsNoTimeline() {
     #expect(CatMood.sleep.motion.isContinuous == false)
-    #expect(Badge.zzz.motion.isContinuous)
+    #expect(Badge.zzz.motion.isContinuous == false)
     let m = model(.dormant)
     m.coat = .tabby
-    // The badge alone is enough to require redraws.
-    #expect(m.activeProfile.isContinuous == Badge.zzz.motion.isContinuous)
-    #expect(m.needsTimeline)
+    #expect(m.activeProfile.isContinuous == false)
+    #expect(m.needsTimeline == false)
 }
 
 /// A bloom must keep the timeline alive even in a steady state.

@@ -26,11 +26,21 @@ public enum Badge: String, Sendable, CaseIterable {
 
     public var motion: MotionProfile {
         switch self {
-        case .zzz:     MotionProfile(framesPerSecond: 8, cycle: 3.0, isContinuous: true)
+        case .zzz:
+            // Dormant is the state a machine sits in all day. Measured
+            // properly (getrusage, not `ps %cpu`, which is too noisy at this
+            // scale): the continuous drift cost 3.6–4.1% of a core, against
+            // 0.35% with no timeline at all — for an animation that did not
+            // read as one. The glyphs are an I-beam and a solid square,
+            // there are only 3 distinct frames driven by 24 redraws a
+            // second, and §8's "drift up and fade" was never given a fade.
+            // The sleeping cat's shut eyes already say "dormant"; the badge
+            // does not need to spend a core saying it again.
+            .still
         case .squares: MotionProfile(framesPerSecond: 12, cycle: 1.0, isContinuous: true)
         case .bang:    MotionProfile(framesPerSecond: 12, cycle: 1.1, isContinuous: true)
         case .star:    MotionProfile(framesPerSecond: 0, cycle: 2.2, isContinuous: false)
-        case .cross:   MotionProfile(framesPerSecond: 0, cycle: 0.6, isContinuous: false)
+        case .cross:   .still
         }
     }
 
