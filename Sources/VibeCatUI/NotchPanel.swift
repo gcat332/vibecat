@@ -2,8 +2,10 @@ import AppKit
 
 /// The window that sits in the notch.
 ///
-/// Three of its settings are load-bearing and were measured, not assumed —
-/// see docs/superpowers/spikes/2026-08-01-notch-shell-spike.md.
+/// Two of its settings are load-bearing and were measured, not assumed —
+/// see docs/superpowers/spikes/2026-08-01-notch-shell-spike.md. The third,
+/// `constrainFrameRect`, is a backstop rather than load-bearing at the level
+/// this panel actually ships at (see the override's own doc comment below).
 @MainActor public final class NotchPanel: NSPanel {
 
     public init(frames: IslandFrames) {

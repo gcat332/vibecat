@@ -14,7 +14,10 @@ A pixel cat sleeps in your notch. It trots while an agent works, sits up with a
 ## Status
 
 Headless event pipeline implemented and tested — the hook binary, the socket
-transport, the session store and the Claude Code adapter. No UI yet.
+transport, the session store and the Claude Code adapter. The notch shell now
+runs, too: a borderless panel pinned above the menu bar shows the collapsed
+island and reacts to real hook events and to hover. The cat sprite, replying,
+the session list and settings are still to come.
 
 ## Contents
 
@@ -45,11 +48,18 @@ Both prototypes are single self-contained HTML files — no build, no network.
 ## Running it
 
 ```bash
-swift build          # builds VibeCatCore, VibeCatTransport and vibecat-hook
+swift build          # builds VibeCatCore, VibeCatTransport, VibeCatUI, vibecat-hook and vibecat
 swift test           # the whole pipeline, headless
 ```
 
-Replay a hook payload by hand:
+Run the app itself:
+
+```bash
+VIBECAT_SOCKET=/tmp/vibecat-dev.sock swift run vibecat
+```
+
+The island appears in the notch, dormant until an event arrives. In a second
+terminal, replay a hook payload by hand:
 
 ```bash
 VIBECAT_SOCKET=/tmp/vibecat-dev.sock Scripts/replay.sh permission

@@ -15,8 +15,12 @@ private let mbp14 = ScreenMetrics(
     return (NotchPanel(frames: frames), frames)
 }
 
-/// Spike §2. AppKit clamps a window out of the menu bar unless
-/// constrainFrameRect refuses. Measured without the override: y=917, not 950.
+/// Spike §2 (and its correction). At `.statusBar` (25), AppKit's own
+/// `constrainFrameRect` already leaves the frame alone — the clamp to
+/// `visibleFrame` only bites at level 23 and below. The override here is a
+/// backstop, not what puts the island in the notch: the earlier y=917
+/// measurement was taken on a panel accidentally left at level 3 by the
+/// `isFloatingPanel` ordering trap, not on this panel at its real level.
 @MainActor @Test func constrainFrameRectReturnsTheRequestedFrameUntouched() {
     let (p, frames) = panel()
     let asked = frames.panel
