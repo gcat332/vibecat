@@ -54,6 +54,29 @@ private func evaluate(_ screen: ScreenMetrics, _ state: IslandState,
     evaluate(externalDisplay, .dormant, .nothing, hovering: false, tier: .rest)
 }
 
+/// `IslandBody`'s left- and right-flank padding is a respelling, in SwiftUI's
+/// `.padding`/`.frame` vocabulary, of `IslandGeometry.leftFlank`,
+/// `IslandGeometry.fillet` and `CollapsedLayout.padding`. Nothing in the type
+/// system keeps a respelling in sync with the constant it repeats — this is
+/// the cheapest available substitute for eyes on the actual island, catching
+/// the moment the two diverge and content starts sliding under the cutout,
+/// before anyone has to notice it visually.
+@Test func leftAndRightFlankLiteralsAgreeWithTheGeometryConstants() {
+    let left = IslandBody.LeftFlankLayout.leadingPadding
+             + IslandBody.LeftFlankLayout.catWidth
+             + IslandBody.LeftFlankLayout.gap
+             + IslandBody.LeftFlankLayout.badgeWidth
+             + IslandBody.LeftFlankLayout.trailingPadding
+    #expect(left == IslandGeometry.leftFlank + IslandGeometry.fillet)
+
+    let sessionCountPadding = IslandBody.RightFlankLayout.leadingPadding
+                             + IslandBody.RightFlankLayout.trailingPadding
+    #expect(sessionCountPadding == CollapsedLayout.padding)
+
+    let iconTotal = IslandBody.RightFlankLayout.iconPadding * 2 + CollapsedLayout.iconWidth
+    #expect(iconTotal == CollapsedLayout.padding + CollapsedLayout.iconWidth)
+}
+
 /// The wrapper pauses its timeline unless a bloom is in flight.
 @MainActor @Test func theWrapperEvaluatesBothPausedAndRunning() {
     let g = IslandGeometry(screen: mbp14)

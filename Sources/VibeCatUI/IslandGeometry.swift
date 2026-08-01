@@ -126,7 +126,10 @@ public struct CollapsedLayout: Sendable, Equatable {
     /// 10 leading + content + 12 trailing. Visible (not `private`) so tests
     /// can pin the no-clipping invariant without a duplicated magic number.
     static let padding: CGFloat = 22
-    private static let iconWidth: CGFloat = 14
+    /// Visible (not `private`) so `IslandBody`'s `.agentIcon` case in
+    /// IslandView.swift renders the same 14pt this type reserves, rather
+    /// than a second literal that could drift from it.
+    static let iconWidth: CGFloat = 14
     /// Design §9.1: hover reveals name and elapsed time over 280ms, up to 150pt.
     private static let hoverReveal: CGFloat = 150
 

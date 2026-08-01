@@ -95,6 +95,12 @@ public struct IslandView: View {
     }
 }
 
+/// Design §7.1: the sprite ground colour, named there as `#05070B`. Kept as
+/// an `RGBA(hex:)` value rather than a bare `Color(red:green:blue:)` triple
+/// so it is greppable by its spec name, the same way every other colour in
+/// this module is.
+private let islandGroundColour = RGBA(hex: "#05070B")!
+
 /// The collapsed island. Left flank, dead zone, right flank.
 ///
 /// Design §5.1: the black shape may span the cutout because the cutout is black
@@ -107,6 +113,38 @@ struct IslandBody: View {
     let geometry: IslandGeometry
     let frames: IslandFrames
 
+    /// The left flank's anatomy, named instead of inlined so a test can pin
+    /// their sum against `IslandGeometry.leftFlank` (see
+    /// `leftAndRightFlankLiteralsAgreeWithTheGeometryConstants` in
+    /// IslandViewTests.swift). `leadingPadding + catWidth + gap + badgeWidth +
+    /// trailingPadding` must equal `IslandGeometry.leftFlank +
+    /// IslandGeometry.fillet` — that sum is the only reason the dead-zone
+    /// spacer starts precisely at the cutout's left edge. Change one side of
+    /// the equation without the other and content slides under the cutout,
+    /// the one rule design §5.1 calls absolute, with no test failing except
+    /// the one this comment points at.
+    enum LeftFlankLayout {
+        static let outerPadding: CGFloat = 12
+        static let catWidth: CGFloat = 18
+        static let gap: CGFloat = 4
+        static let badgeWidth: CGFloat = 14
+        static let trailingPadding: CGFloat = 10
+        static var leadingPadding: CGFloat { outerPadding + IslandGeometry.fillet }
+    }
+
+    /// The right flank's padding, split out for the same reason.
+    /// `leadingPadding + trailingPadding` must equal `CollapsedLayout.padding`
+    /// for the session-count case. `iconPadding` is derived from
+    /// `CollapsedLayout.padding` rather than a second literal precisely so
+    /// the icon case can't drift from what `CollapsedLayout.rightFlankWidth`
+    /// actually reserves the way it once did (a 2pt discrepancy: reserved
+    /// `padding + iconWidth` = 36, rendered `10 + 14 + 10` = 34).
+    enum RightFlankLayout {
+        static let leadingPadding: CGFloat = 10
+        static let trailingPadding: CGFloat = 12
+        static var iconPadding: CGFloat { CollapsedLayout.padding / 2 }
+    }
+
     private var accent: Color { Color(state.accent) }
 
     var body: some View {
@@ -116,7 +154,7 @@ struct IslandBody: View {
         ZStack(alignment: .topLeading) {
             Color.clear
             silhouette
-                .fill(Color(red: 0.02, green: 0.027, blue: 0.043))
+                .fill(Color(islandGroundColour))
                 .overlay(alignment: .topLeading) { content }
                 .clipShape(silhouette)
                 // A shadow on the shape traces its rendered alpha, fillets
@@ -134,14 +172,14 @@ struct IslandBody: View {
     private var content: some View {
         HStack(spacing: 0) {
             // Left flank — the cat lands here in Plan 3.
-            HStack(spacing: 4) {
+            HStack(spacing: LeftFlankLayout.gap) {
                 RoundedRectangle(cornerRadius: 2)
                     .fill(accent)
-                    .frame(width: 18, height: 14)
-                Color.clear.frame(width: 14, height: 14)   // fixed badge slot
+                    .frame(width: LeftFlankLayout.catWidth, height: 14)
+                Color.clear.frame(width: LeftFlankLayout.badgeWidth, height: 14)   // fixed badge slot
             }
-            .padding(.leading, 12 + IslandGeometry.fillet)
-            .padding(.trailing, 10)
+            .padding(.leading, LeftFlankLayout.leadingPadding)
+            .padding(.trailing, LeftFlankLayout.trailingPadding)
 
             // The dead zone. Never a view — just the width of the cutout.
             Color.clear.frame(width: geometry.notch.width)
@@ -158,15 +196,15 @@ struct IslandBody: View {
         case .agentIcon:
             RoundedRectangle(cornerRadius: 3)
                 .fill(accent)
-                .frame(width: 14, height: 14)
-                .padding(.horizontal, 10)
+                .frame(width: CollapsedLayout.iconWidth, height: 14)
+                .padding(.horizontal, RightFlankLayout.iconPadding)
         case let .sessionCount(n) where n > 0:
             Text(String(n))
                 .font(RightFlankFont.swiftUI)
                 .monospacedDigit()
                 .foregroundStyle(accent)
-                .padding(.leading, 10)
-                .padding(.trailing, 12)
+                .padding(.leading, RightFlankLayout.leadingPadding)
+                .padding(.trailing, RightFlankLayout.trailingPadding)
         case .sessionCount:
             EmptyView()
         }
