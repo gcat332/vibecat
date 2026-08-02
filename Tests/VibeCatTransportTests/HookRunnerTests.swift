@@ -116,6 +116,41 @@ private let permissionPayload = Data("""
     #expect(out.contains("\"permissionDecision\":\"allow\""))
 }
 
+/// A plain `var` captured by the server's `@escaping @Sendable` handler would
+/// trip Swift 6's "mutated after capture" diagnostic — same reason
+/// AppModelTests' `ChangeCounter` is a class rather than a captured local.
+/// `@unchecked Sendable` is safe here specifically because `sendExpectingReply`
+/// blocks the test's thread until the handler has already returned and its
+/// reply been written back, so the write to `.value` strictly precedes the
+/// read below — the same reasoning already applied to `SocketServer` and
+/// `PendingQuestion` elsewhere in this codebase.
+private final class Captured: @unchecked Sendable {
+    var deadline: TimeInterval?
+}
+
+/// Task 3 adds `event.answerDeadline = client.answerDeadline` to `run`, so the
+/// app can honour the hook's own bound instead of a second constant that
+/// could drift from it. Every other test in this file only checks the
+/// *decision* `HookRunner` prints, never what it put on the wire — so a
+/// regression here (the line being dropped, or reading the wrong deadline)
+/// would be invisible to the rest of the suite.
+@Test func theHookStampsTheEventWithItsOwnAnswerDeadline() throws {
+    let path = tempPath("stamped")
+    let server = SocketServer(path: path)
+    let captured = Captured()
+    try server.start { event in
+        captured.deadline = event.answerDeadline
+        return Reply(id: event.id, choice: "allow")
+    }
+    defer { server.stop() }
+
+    let runner = HookRunner(registry: registry,
+                            client: SocketClient(path: path, deadline: 1.0, answerDeadline: 7),
+                            env: [:])
+    _ = runner.run(cli: "claude-code", stdin: permissionPayload)
+    #expect(captured.deadline == 7)
+}
+
 /// Exercises the real binary, not HookRunner — main.swift's argument
 /// handling, stdin read and exit code are otherwise untested.
 private func runHookBinary(arguments: [String],

@@ -92,6 +92,7 @@ Newline-delimited JSON, request/response.
                {"id":"deny","label":"Deny"} ],
   "multi": false,                  // true → checkboxes and a Send button
   "wantsReply": true,
+  "answerDeadline": 20,             // seconds; the hook's own bound on a human answer
   "tasks":  [ {"t":"Audit authentication flow","s":"doing"} ],
   "agents": [ {"n":"Explore (Search API endpoints)","t":"8s",
                "m":"Sonnet 4.6 · High","sub":"Grep: handleRequest"} ],

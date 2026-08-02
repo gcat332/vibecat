@@ -34,6 +34,11 @@ let package = Package(
         .testTarget(name: "VibeCatCoreTests", dependencies: ["VibeCatCore"]),
         .testTarget(name: "VibeCatTransportTests",
                     dependencies: ["VibeCatTransport", "VibeCatCore", "VibeCatHookKit"]),
-        .testTarget(name: "VibeCatUITests", dependencies: ["VibeCatUI", "VibeCatCore"]),
+        // VibeCatTransport is needed directly (not just transitively through
+        // VibeCatUI) so AppModelTests can reference
+        // SocketClient.defaultAnswerDeadline — the one place the fallback
+        // deadline value lives — rather than hardcoding a second copy of 20
+        // that could silently drift from it.
+        .testTarget(name: "VibeCatUITests", dependencies: ["VibeCatUI", "VibeCatCore", "VibeCatTransport"]),
     ]
 )

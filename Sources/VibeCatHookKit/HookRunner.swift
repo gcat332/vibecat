@@ -21,9 +21,14 @@ public struct HookRunner {
     public func run(cli: String, stdin: Data) -> String? {
         guard let adapter = registry.adapter(for: cli),
               let raw = try? JSONSerialization.jsonObject(with: stdin) as? [String: Any],
-              let event = try? adapter.parse(raw, origin: OriginReader.read(env: env)),
-              let line = try? WireCodec.encode(event)
+              var event = try? adapter.parse(raw, origin: OriginReader.read(env: env))
         else { return nil }
+        // The app must honour the same bound this hook is about to wait on
+        // (below, via sendExpectingReply), not a second constant re-derived on
+        // the app side that could drift from it — so the deadline travels on
+        // the event itself.
+        event.answerDeadline = client.answerDeadline
+        guard let line = try? WireCodec.encode(event) else { return nil }
 
         guard event.wantsReply else {
             client.send(line)

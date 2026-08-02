@@ -95,6 +95,13 @@ public struct VibeEvent: Codable, Sendable, Equatable {
     public var choices: [Choice]?
     public var multi: Bool
     public var wantsReply: Bool
+    /// How long the *hook* will wait for a human answer before it gives up
+    /// and falls back to its own prompt. Carried on the event, rather than
+    /// re-derived on the app side from a second constant, so the two never
+    /// drift apart — see `SocketClient.defaultAnswerDeadline` and
+    /// `HookRunner`, which sets this from `client.answerDeadline`. `nil` on
+    /// any event the hook itself predates this field, or never sent it.
+    public var answerDeadline: TimeInterval?
     public var tasks: [TaskItem]?
     public var agents: [AgentItem]?
     public var origin: Origin
@@ -104,6 +111,7 @@ public struct VibeEvent: Codable, Sendable, Equatable {
                 worktree: String? = nil, model: String? = nil, effort: String? = nil,
                 title: String? = nil, body: String? = nil,
                 choices: [Choice]? = nil, multi: Bool = false, wantsReply: Bool = false,
+                answerDeadline: TimeInterval? = nil,
                 tasks: [TaskItem]? = nil, agents: [AgentItem]? = nil,
                 origin: Origin = Origin()) {
         self.v = v
@@ -120,6 +128,7 @@ public struct VibeEvent: Codable, Sendable, Equatable {
         self.choices = choices
         self.multi = multi
         self.wantsReply = wantsReply
+        self.answerDeadline = answerDeadline
         self.tasks = tasks
         self.agents = agents
         self.origin = origin
@@ -141,6 +150,7 @@ public struct VibeEvent: Codable, Sendable, Equatable {
         choices = try c.decodeIfPresent([Choice].self, forKey: .choices)
         multi = try c.decodeIfPresent(Bool.self, forKey: .multi) ?? false
         wantsReply = try c.decodeIfPresent(Bool.self, forKey: .wantsReply) ?? false
+        answerDeadline = try c.decodeIfPresent(TimeInterval.self, forKey: .answerDeadline)
         tasks = try c.decodeIfPresent([TaskItem].self, forKey: .tasks)
         agents = try c.decodeIfPresent([AgentItem].self, forKey: .agents)
         origin = try c.decodeIfPresent(Origin.self, forKey: .origin) ?? Origin()
