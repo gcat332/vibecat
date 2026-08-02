@@ -546,7 +546,30 @@ Expected: PASS.
 
 - [ ] **Step 5: Prove the no-wait hop is load-bearing**
 
-Replace the `Task { @MainActor … }` with a synchronous `MainActor.assumeIsolated` hop and re-run `aQuestionEventParksUntilItIsAnswered` **with a 10s test timeout**. Expected: it hangs or traps — the socket thread is not the main actor. Restore. Record the observed failure mode in the task report; do not leave the hanging version committed even briefly.
+**Do not mutate this one by making it deadlock.** The obvious mutation —
+swapping the `Task { @MainActor … }` for a synchronous hop — hangs the test
+process rather than failing it, and swift-testing has no sub-minute time limit
+to catch that. A test run that never returns is worse than no mutation test.
+
+Prove it the safe way instead: add a test that the question reaches the UI
+*while the socket thread is still parked*, which is the property the async hop
+exists for and which a synchronous hop could not satisfy.
+
+```swift
+@MainActor @Test func theQuestionIsVisibleBeforeTheSocketThreadIsReleased() async throws {
+    let m = AppModel(socketPath: "/tmp/unused.sock")
+    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s",
+                          choices: [Choice(id: "allow", label: "Allow")],
+                          wantsReply: true, answerDeadline: 5)
+    let ingest = Task.detached { m.ingest(event) }
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(m.pending != nil, "the question never reached the main actor")
+    #expect(ingest.isCancelled == false)
+    // Still parked: nothing has answered it, so ingest has not returned.
+    m.answer(Reply(id: "q1", choice: "allow"))
+    #expect(await ingest.value != nil)
+}
+```
 
 - [ ] **Step 6: Commit**
 
@@ -1236,7 +1259,9 @@ echo '{"hook_event_name":"PreToolUse","session_id":"dev-1","cwd":"'"$PWD"'","too
 
 The hook should block. Click the island, answer, and the hook should print claude-code's `permissionDecision` JSON and exit 0. Then repeat and answer nothing: after the answer deadline the hook should print nothing and exit 0, and the drawer should close itself.
 
-While you are there, settle the item owed since Plan 2: **click a menu bar item under the island while no question is pending, and confirm the menu opens.** That is click-through, and no automated probe available to this project can check it — `NSWindow.windowNumber(at:)` returns 0 for windows outside the calling process, so it reports the same answer for a click-through panel and for bare menu bar.
+**Click-through is already settled — do not re-test it, and do not synthesise clicks on the menu bar.** It was confirmed on 2026-08-02: the *panel* spans x 581…1069 while the island ends at 863, a status item sat at 1046…1079, and a click at 1060 activated that item. It also made a menu bar app request keychain access, which is why this says don't.
+
+What Task 4 changes is the other direction, and it is worth a look here: with clicks turned on while hovering, that same ~200pt of panel to the right of the island starts intercepting. Hover the island and check whether a status item under the panel has become unclickable. If it has, that is a finding for the report — the panel may need to shrink to what it actually draws.
 
 - [ ] **Step 6: Commit**
 
