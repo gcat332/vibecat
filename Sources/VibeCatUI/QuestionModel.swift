@@ -1,0 +1,63 @@
+import Foundation
+import Observation
+import VibeCatCore
+
+/// What the drawer is showing and what has been chosen so far.
+///
+/// Deliberately free of SwiftUI: every rule §10 states — one tap answers a
+/// single select, Send is dead at zero, `Other…` shrinks the drawer — is
+/// decided here, where it can be tested without a render.
+@Observable
+@MainActor
+public final class QuestionModel {
+    public let event: VibeEvent
+    public private(set) var selected: Set<String> = []
+    public private(set) var isWritingOther = false
+    public var otherText = ""
+
+    public init(event: VibeEvent) { self.event = event }
+
+    public var rows: [Choice] { event.choices ?? [] }
+    public var isMulti: Bool { event.multi }
+
+    public var face: DrawerFace {
+        if isWritingOther { return .questionWithReply }
+        return isMulti ? .questionMulti : .question
+    }
+
+    /// Single select: the click *is* the answer (§10.1), so this both records
+    /// the pick and makes `reply()` non-nil.
+    public func pick(_ id: String) {
+        guard !isMulti else { return }
+        selected = [id]
+    }
+
+    public func toggle(_ id: String) {
+        guard isMulti else { return }
+        if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+    }
+
+    public func beginOther() {
+        isWritingOther = true
+        selected = []
+    }
+
+    /// Only ever consulted for multi select — a single select has no Send.
+    public var canSend: Bool { isMulti && !selected.isEmpty }
+
+    public var tally: Int { selected.count }
+
+    public func reply() -> Reply? {
+        if isWritingOther {
+            let text = otherText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return Reply(id: event.id, text: text)
+        }
+        if isMulti {
+            guard !selected.isEmpty else { return nil }
+            return Reply(id: event.id, choices: selected.sorted())
+        }
+        guard let one = selected.first else { return nil }
+        return Reply(id: event.id, choice: one)
+    }
+}
