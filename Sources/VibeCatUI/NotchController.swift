@@ -34,6 +34,19 @@ import SwiftUI
     private var hover: HoverMonitor?
     private var bloomEnd: Task<Void, Never>?
     private var observer: NSObjectProtocol?
+    /// Task 9's own hardware question (can a `.nonactivatingPanel` become key
+    /// without stealing focus?) is still open — see `KeyDownProbe` — so this
+    /// is the only keyboard wiring this round. A *local* monitor, never
+    /// `NSEvent.addGlobalMonitorForEvents`: a global monitor needs
+    /// Accessibility, which this app does not otherwise require, and trading
+    /// a whole-input-stream grant for one keystroke is a bad deal the plan
+    /// already rejected. This never calls `makeKey`/activates anything
+    /// itself, so it changes nothing about the unmeasured question either
+    /// way — it only reacts to a `keyDown` AppKit was already going to hand
+    /// this app. See `dismissOnEscape`'s own doc comment for why Escape,
+    /// specifically, is safe to wire before that question is answered, when
+    /// number keys are not.
+    private var escapeMonitor: Any?
     private let sampler = BackdropSampler()
     private var backdropSample: Task<Void, Never>?
     /// Cancel-and-reschedule, the same shape as `bloomEnd` and for the same
@@ -177,6 +190,18 @@ import SwiftUI
         model.onIslandClick = { [weak self] in self?.click() }
         model.onAnswer = { [weak self] reply in self?.appModel.answer(reply) }
 
+        // Escape while the drawer is open dismisses without answering — see
+        // dismissOnEscape's own doc comment. Torn down and rebuilt the same
+        // way the screen-parameters observer below is, so a second present()
+        // without an intervening dismiss() re-installs rather than leaking a
+        // second monitor.
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            return self.dismissOnEscape(charactersIgnoringModifiers: event.charactersIgnoringModifiers)
+                ? nil : event
+        }
+
         render()
         // Never makeKeyAndOrderFront — the app must not steal focus.
         panel.orderFrontRegardless()
@@ -209,6 +234,8 @@ import SwiftUI
         panel = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+        escapeMonitor = nil
     }
 
     /// `NotificationCenter` holds the `didChangeScreenParametersNotification`
@@ -320,6 +347,41 @@ import SwiftUI
     func click() {
         model.drawerOpen = true
         reflow()
+    }
+
+    /// The escape monitor's own decision, factored out so a test can drive it
+    /// directly with a plain character string rather than a real `NSEvent`
+    /// delivered through the window server — the same "testable without a
+    /// window" split `KeyRouting.pick`'s own doc comment gives for the same
+    /// reason. Returns whether the keystroke was consumed, mirroring the
+    /// monitor's own `NSEvent?` return (`nil` swallows it, the event itself
+    /// lets it fall through) — see `present()`'s own installation of it.
+    ///
+    /// Dismissing calls `appModel.dismissQuestion()` rather than touching
+    /// `model` directly: that is the exact fail-open path a lapsed question
+    /// already takes (see `setQuestion`'s own `lapseCheck`), already covered
+    /// by Task 1/3's fail-open guarantees, and it reaches back into `model`
+    /// through the same `onQuestion` wiring `setQuestion(_:)` already is —
+    /// one path, not a second copy of "close the drawer" logic.
+    ///
+    /// Escape only, deliberately — not number keys. Both would need the same
+    /// delivery (a `keyDown` this app actually receives), which is Task 9's
+    /// own still-unmeasured hardware question — but the two have opposite
+    /// risk if that measurement ever turns out to allow delivery at all:
+    /// dismissing is always safe (worst case, a drawer closes a beat early,
+    /// recoverable with one more click), while answering — even a
+    /// non-destructive one — is not something this file does from a
+    /// keystroke yet, and a destructive one is exactly what §10.3's second
+    /// ask exists to gate. So this never calls `QuestionModel.pick`/`reply()`
+    /// at all, regardless of what the keystroke was, unless it is Escape.
+    @discardableResult
+    func dismissOnEscape(charactersIgnoringModifiers: String?) -> Bool {
+        // Pattern match, not `== .drawer`: `IslandTier.drawer(height:)` carries
+        // an associated value, the same reason `IslandView`'s own drawer gate
+        // uses `if case .drawer = model.tier` rather than `==`.
+        guard case .drawer = model.tier, KeyRouting.isEscape(charactersIgnoringModifiers) else { return false }
+        appModel.dismissQuestion()
+        return true
     }
 
     private func render() {

@@ -458,3 +458,86 @@ private let externalDisplay = ScreenMetrics(
             "model.onAnswer did not reach appModel.answer — the question is still parked")
     c.dismiss()
 }
+
+// MARK: - Task 9: Escape dismisses; number keys wait on the hardware question
+
+/// Escape while the drawer is open dismisses the question without answering
+/// it. Driven directly through `dismissOnEscape`, the same way
+/// `QuestionFaceTests` calls `tapped(_:)` directly rather than through a
+/// synthesised `NSEvent` — there is no window server in `swift test`, and
+/// this is exactly what a real Escape `keyDown` would eventually call (see
+/// `present()`'s own local monitor installation).
+@MainActor @Test func escapeDismissesTheOpenDrawerWithoutAnswering() {
+    let c = makeController()
+    c.setQuestion(aQuestion())
+    c.click()
+    #expect(c.model.tier != .rest, "setup: the drawer never opened, so this test proves nothing")
+
+    let consumed = c.dismissOnEscape(charactersIgnoringModifiers: "\u{1b}")
+
+    #expect(consumed, "Escape must report the keystroke as handled while the drawer is open")
+    #expect(c.model.tier == .rest, "Escape did not close the drawer")
+}
+
+@MainActor @Test func escapeDoesNothingWhileTheDrawerIsClosed() {
+    let c = makeController()
+    #expect(c.model.tier == .rest, "setup: nothing should be open yet")
+
+    let consumed = c.dismissOnEscape(charactersIgnoringModifiers: "\u{1b}")
+
+    #expect(consumed == false, "there is nothing to dismiss, so this must not report the keystroke as handled")
+}
+
+/// A non-Escape key must never dismiss — and, per Task 9's own still-open
+/// hardware question, must not do anything else either. Number keys are not
+/// wired at all this round (see `dismissOnEscape`'s own doc comment on why
+/// Escape alone is safe to wire before that question is answered), so a
+/// digit reaching this same entry point must be a complete no-op.
+@MainActor @Test func aNonEscapeKeyNeverDismissesEvenWithTheDrawerOpen() {
+    let c = makeController()
+    c.setQuestion(aQuestion())
+    c.click()
+    #expect(c.model.tier != .rest, "setup: the drawer never opened, so this test proves nothing")
+
+    let consumed = c.dismissOnEscape(charactersIgnoringModifiers: "1")
+
+    #expect(consumed == false, "a number key must not be reported as handled")
+    #expect(c.model.tier != .rest, "a number key must not have closed the drawer either")
+}
+
+/// The full real path, mirroring `theAnswerCallbackReachesAppModelAnswer`'s
+/// own pattern: a genuinely parked `PendingQuestion` actually unblocks with a
+/// `nil` reply when Escape dismisses it — the same fail-open guarantee
+/// Task 1/3 already cover for a lapse, reached here through
+/// `dismissOnEscape` instead of a timeout, and via `appModel.dismissQuestion()`
+/// rather than a second, ad-hoc "close the drawer" mechanism.
+@MainActor @Test func escapeFailsOpenTheSameWayALapseDoes() async throws {
+    let (c, appModel) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+
+    let event = VibeEvent(id: "q-escape", cli: "claude-code", kind: .permission,
+                          session: "s", cwd: "/tmp/proj",
+                          choices: [Choice(id: "allow", label: "Allow once")],
+                          wantsReply: true, answerDeadline: 5)
+    Thread.detachNewThread { _ = appModel.ingest(event) }
+
+    let arrived = Date().addingTimeInterval(2)
+    while appModel.pending == nil, Date() < arrived {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(appModel.pending?.id == "q-escape", "the question never reached the model")
+    c.click()
+    #expect(c.model.tier != .rest, "setup: the drawer never opened, so this test proves nothing")
+
+    c.dismissOnEscape(charactersIgnoringModifiers: "\u{1b}")
+
+    let resolved = Date().addingTimeInterval(2)
+    while appModel.pending != nil, Date() < resolved {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(appModel.pending == nil,
+            "Escape did not reach appModel.dismissQuestion — the question is still parked")
+    #expect(c.model.tier == .rest, "Escape did not close the drawer")
+    c.dismiss()
+}
