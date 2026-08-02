@@ -59,15 +59,15 @@ private let mbp14 = ScreenMetrics(
 
 /// Spike §5. A menu title can reach within ~30pt of the island's left edge,
 /// so at rest the island must not be able to swallow a click.
-@MainActor @Test func itIsClickThroughUntilMadeInteractive() {
+@MainActor @Test func itIsClickThroughUntilMadeToAcceptClicks() {
     let (p, _) = panel()
     #expect(p.ignoresMouseEvents == true)
-    #expect(p.isInteractive == false)
+    #expect(p.acceptsClicks == false)
 
-    p.isInteractive = true
+    p.acceptsClicks = true
     #expect(p.ignoresMouseEvents == false)
 
-    p.isInteractive = false
+    p.acceptsClicks = false
     #expect(p.ignoresMouseEvents == true)
 }
 

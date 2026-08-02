@@ -58,9 +58,14 @@ import AppKit
     /// Plan 4 needs it.
     public override var canBecomeKey: Bool { true }
 
-    /// False while collapsed, true once the drawer is open and the island
-    /// genuinely owns the space it covers.
-    public var isInteractive: Bool {
+    /// Whether a click lands on the island or passes through to the menu bar.
+    ///
+    /// False at rest, always: an oversized transparent panel that intercepts
+    /// nothing is what makes Plan 3's fixed-size panel safe. The drawer needs
+    /// clicks, so this is turned on exactly while the pointer is over the
+    /// island *and* there is something a click would do — see
+    /// `NotchController.reflow`.
+    public var acceptsClicks: Bool {
         get { !ignoresMouseEvents }
         set { ignoresMouseEvents = !newValue }
     }

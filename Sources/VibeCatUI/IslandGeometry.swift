@@ -10,6 +10,28 @@ public enum IslandTier: Sendable, Equatable {
     }
 }
 
+/// What the drawer is showing, and how tall that makes it. Design §6.3.
+///
+/// The heights are the design's, verbatim. `questionWithReply` being *shorter*
+/// than `question` is not a typo: opening the reply field replaces the list of
+/// choices with a field, and §6.3 says the drawer follows its content rather
+/// than leaving dead space.
+///
+/// `.sessionList` (420pt) is Plan 5's and is deliberately absent — adding a
+/// case nothing constructs would be an unreachable branch, which this project
+/// has shipped once already.
+public enum DrawerFace: Sendable, Equatable, CaseIterable {
+    case question, questionWithReply, questionMulti
+
+    public var height: CGFloat {
+        switch self {
+        case .question:          288
+        case .questionWithReply: 184
+        case .questionMulti:     300
+        }
+    }
+}
+
 public struct IslandFrames: Sendable, Equatable {
     /// The core: leftFlank + notch + rightFlank, in screen coordinates. This is
     /// what design §5.4's measured widths describe, and what the content is
