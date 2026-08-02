@@ -18,14 +18,23 @@ public enum DestructiveGuard {
         // `--force` as a substring (deliberately unbounded, so `--force-with-
         // lease` and `--force-if-includes` still count), or the short spelling
         // `-f` — the same flag, not a different one, and the more common
-        // spelling in practice. `-f` is required to stand as its own token
-        // (`\s` before, `\b` after): that excludes a branch/remote literally
-        // named `f`, a hyphenated name like `my-feature-branch` (its "-f" is
-        // preceded by a letter, not whitespace), and a longer flag like
-        // `-foo` (no boundary between "f" and "oo"). It does not extend to a
-        // bundled cluster like `-uf`/`-fu` — a deliberate scope limit, not an
-        // oversight; see DestructiveGuardTests.
-        #"\bgit\s+push\b(?=.*(?:--force|\s-f\b))"#,
+        // spelling in practice — including bundled with `git push`'s other
+        // pure-boolean short flags (`-u -n -v -q -d -4 -6`; confirmed against
+        // real git in a scratch repo that e.g. `-uf`/`-fu` are accepted and
+        // report "(forced update)" — see theBundledShortFlagsAlsoAskTwice).
+        // `-o` (`--push-option`) is the one flag from git's own short-flag
+        // list left out of the bundle alphabet: it takes a value, and
+        // including it lets a cluster degrade into "any word starting with f
+        // made of these letters" — `-foo` and `-flag` both read as f+o+o /
+        // f+l+a+g under that reading, and neither is a real force flag.
+        // Dropping just `-o` closes that without losing any real boolean
+        // combination — verified against the engine, not assumed (see
+        // theBundledClusterRequiresAnActualForceFlagNotJustFlagShapedLetters).
+        // A cluster must stand as its own token (`\s` before, `\b` after),
+        // exactly like the standalone spelling, so it inherits the same
+        // exclusions: a branch/remote literally named `f`, a hyphenated name
+        // like `my-feature-branch` (see theShortFlagDoesNotBecomeAFalsePositiveMagnet).
+        #"\bgit\s+push\b(?=.*(?:--force|\s-[fFuUnNvVqQdD46]*[fF][fFuUnNvVqQdD46]*\b))"#,
         #"\bdrop\s+table\b"#,
     ]
 

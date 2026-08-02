@@ -110,6 +110,35 @@ import VibeCatCore
     }
 }
 
+/// Git genuinely accepts bundled short flags for `git push` — confirmed
+/// against real git in a scratch repo with a local bare remote:
+/// `git push -uf origin main --dry-run` is accepted and reports
+/// "(forced update)". So `-uf`/`-fu` are not a strawman; they are real,
+/// valid, destructive invocations that must ask twice exactly like `-f` on
+/// its own.
+@Test func theBundledShortFlagsAlsoAskTwice() {
+    #expect(DestructiveGuard.matches("git push -uf origin main"))
+    #expect(DestructiveGuard.matches("git push -fu origin main"))
+    #expect(DestructiveGuard.matches("git push -nf origin main"))
+}
+
+/// Two ways a bundle-aware pattern could over-match, both closed and pinned
+/// here rather than left to the comment alone: a cluster made only of
+/// *other* known flag letters, with no `f` anywhere in it (`-un` is
+/// set-upstream + dry-run, not force), must not count; and `-o`
+/// (`--push-option`, the one bundle letter that takes a value) is
+/// deliberately excluded from the alphabet, because keeping it in would let
+/// `-foo`/`-flag` parse as "f" plus letters that merely happen to also be
+/// flag names — exactly the false-positive magnet
+/// `theShortFlagDoesNotBecomeAFalsePositiveMagnet` already refuses for the
+/// standalone spelling.
+@Test func theBundledClusterRequiresAnActualForceFlagNotJustFlagShapedLetters() {
+    for safe in ["git push -un origin main", "git push -uv origin main",
+                 "git push -foo origin main", "git push -flag origin main"] {
+        #expect(DestructiveGuard.matches(safe) == false, "\(safe) was flagged as destructive")
+    }
+}
+
 /// `beginOther()` clears `selected`, and `needsConfirmation` only ever reads
 /// `selected` — so a free-text reply against a destructive body is never
 /// gated. Pinned deliberately, per `needsConfirmation`'s doc comment: writing
