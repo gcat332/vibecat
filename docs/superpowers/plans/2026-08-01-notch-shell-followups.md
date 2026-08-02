@@ -41,8 +41,22 @@ widening, and menu click-through.
 > a clickable menu item at rest anyway. It needs a real click.
 >
 > Worth knowing for later: this machine runs with the **menu bar auto-hidden**,
-> so the island often sits over the wallpaper rather than a dark bar. Nothing
-> assumes otherwise today, but the aura was tuned against the bar.
+> so the island often sits over the wallpaper rather than a dark bar.
+>
+> **Second pass, same day.** Testing 0.34 on screen found the machine in
+> **Light mode**, and the bloom lifted the halo by 8 against the 26 it was
+> tuned for — the constant had been raised against a dark backdrop the design
+> assumes and this machine does not always have. Fixed properly in `1ed2a31`:
+> the aura's *colour* now follows the backdrop, deepening on light where a
+> bright glow has nowhere to go, with both peaks measured to the same lift
+> (0.34 dark, 0.30 light). On screen the light-mode bloom went 8 → 12 and
+> reversed from washing out to darkening.
+>
+> **Still open, deliberately.** `colorScheme` describes the menu *bar*. With
+> the bar auto-hidden the island sits over the wallpaper, so a dark wallpaper
+> under a Light system picks the deepened glow when the bright one is right.
+> Reading the pixels actually behind the island would need screen-recording
+> permission — too much to ask for a glow. Revisit only if it grates in use.
 
 Four things will look surprising but are correct as built, so they should not
 be filed as bugs:
