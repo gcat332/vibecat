@@ -19,22 +19,43 @@ public enum DestructiveGuard {
         // lease` and `--force-if-includes` still count), or the short spelling
         // `-f` — the same flag, not a different one, and the more common
         // spelling in practice — including bundled with `git push`'s other
-        // pure-boolean short flags (`-u -n -v -q -d -4 -6`; confirmed against
-        // real git in a scratch repo that e.g. `-uf`/`-fu` are accepted and
-        // report "(forced update)" — see theBundledShortFlagsAlsoAskTwice).
-        // `-o` (`--push-option`) is the one flag from git's own short-flag
-        // list left out of the bundle alphabet: it takes a value, and
-        // including it lets a cluster degrade into "any word starting with f
-        // made of these letters" — `-foo` and `-flag` both read as f+o+o /
-        // f+l+a+g under that reading, and neither is a real force flag.
-        // Dropping just `-o` closes that without losing any real boolean
-        // combination — verified against the engine, not assumed (see
-        // theBundledClusterRequiresAnActualForceFlagNotJustFlagShapedLetters).
-        // A cluster must stand as its own token (`\s` before, `\b` after),
-        // exactly like the standalone spelling, so it inherits the same
-        // exclusions: a branch/remote literally named `f`, a hyphenated name
-        // like `my-feature-branch` (see theShortFlagDoesNotBecomeAFalsePositiveMagnet).
-        #"\bgit\s+push\b(?=.*(?:--force|\s-[fFuUnNvVqQdD46]*[fF][fFuUnNvVqQdD46]*\b))"#,
+        // short flags (`-u -n -v -q -d -4 -6 -o`; confirmed against real git
+        // in a scratch repo that e.g. `-uf`/`-fu` are accepted and report
+        // "(forced update)" — see theBundledShortFlagsAlsoAskTwice).
+        //
+        // git parses a cluster left to right, and that *order* — not merely
+        // which letters appear — decides whether force is reached. `-o`
+        // (`--push-option`) is the only one of the nine that takes a value:
+        // once parsing reaches it, everything left in the token is swallowed
+        // as *its* argument, and nothing after that point is parsed as a
+        // flag at all. Confirmed against real git in a scratch repo with
+        // `receive.advertisePushOptions=true` and a genuinely diverged
+        // history: `-foo` parses as `-f` (force) then `-o` taking the
+        // literal value "o", and reports "(forced update)"; `-of` parses
+        // `-o` *first*, which swallows the trailing "f" as its value, so
+        // force is never reached at all (see
+        // orderInsideTheClusterDecidesForceNotJustWhichLettersAppear). So the
+        // rule: everything *before* the first `f` must be a pure boolean —
+        // the alphabet below excludes `o` for exactly that reason — and
+        // everything *after* it is irrelevant, because force is already
+        // parsed by then, whether what follows is more booleans, an `-o`
+        // swallowing the rest, or a character git doesn't recognise at all.
+        // That last case is real too: `-flag` makes git error "unknown
+        // switch 'l'" and exit before ever reaching the network, but `f` was
+        // still the first character parsed, so this still matches it —
+        // asking twice on a command that was always going to fail is a
+        // cheap trade against missing a real `-foo` (see
+        // anInvalidTrailingFlagAfterForceIsStillCaughtRatherThanMissed).
+        //
+        // A cluster must still stand as its own token (`\s` immediately
+        // before the dash): `git push origin f` and `git push origin
+        // my-feature-branch` have no leading dash on the argument at all, so
+        // neither ever reaches this clause in the first place — see
+        // theShortFlagDoesNotBecomeAFalsePositiveMagnet. And a cluster with
+        // no `f` anywhere in it is never force regardless of order, because
+        // there is nothing for any parse to reach — see
+        // theBundledClusterRequiresAnActualForceFlagPresent.
+        #"\bgit\s+push\b(?=.*(?:--force|\s-[fFuUnNvVqQdD46]*[fF]))"#,
         #"\bdrop\s+table\b"#,
     ]
 

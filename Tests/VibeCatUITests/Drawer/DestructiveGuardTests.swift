@@ -105,7 +105,7 @@ import VibeCatCore
     for safe in ["git push origin feature", "git push origin my-feature-branch",
                  "git push origin f", "git push f main",
                  "git push -u origin main", "git push -v origin main",
-                 "git push -n origin main", "git push -foo origin main"] {
+                 "git push -n origin main"] {
         #expect(DestructiveGuard.matches(safe) == false, "\(safe) was flagged as destructive")
     }
 }
@@ -122,21 +122,39 @@ import VibeCatCore
     #expect(DestructiveGuard.matches("git push -nf origin main"))
 }
 
-/// Two ways a bundle-aware pattern could over-match, both closed and pinned
-/// here rather than left to the comment alone: a cluster made only of
-/// *other* known flag letters, with no `f` anywhere in it (`-un` is
-/// set-upstream + dry-run, not force), must not count; and `-o`
-/// (`--push-option`, the one bundle letter that takes a value) is
-/// deliberately excluded from the alphabet, because keeping it in would let
-/// `-foo`/`-flag` parse as "f" plus letters that merely happen to also be
-/// flag names — exactly the false-positive magnet
-/// `theShortFlagDoesNotBecomeAFalsePositiveMagnet` already refuses for the
-/// standalone spelling.
-@Test func theBundledClusterRequiresAnActualForceFlagNotJustFlagShapedLetters() {
-    for safe in ["git push -un origin main", "git push -uv origin main",
-                 "git push -foo origin main", "git push -flag origin main"] {
+/// A cluster with no `f` anywhere in it is never force, regardless of git's
+/// own left-to-right parsing order — there is nothing for any parse to
+/// reach. `-un` is set-upstream + dry-run; `-uv` is set-upstream + verbose;
+/// neither touches force.
+@Test func theBundledClusterRequiresAnActualForceFlagPresent() {
+    for safe in ["git push -un origin main", "git push -uv origin main"] {
         #expect(DestructiveGuard.matches(safe) == false, "\(safe) was flagged as destructive")
     }
+}
+
+/// git's own left-to-right cluster parsing — not which letters merely
+/// appear — decides this. Confirmed against real git in a scratch repo with
+/// `receive.advertisePushOptions=true` and a genuinely diverged history:
+/// `-foo` parses as `-f` (force) then `-o` swallowing the literal value
+/// "o", and reports "(forced update)"; `-of` parses `-o` *first*, which
+/// swallows the trailing "f" as its own value, so `-f` is never parsed at
+/// all. An earlier version of this file asserted `-foo` must *not* match —
+/// on nothing but assumption, the exact shape of bug this task started with.
+@Test func orderInsideTheClusterDecidesForceNotJustWhichLettersAppear() {
+    #expect(DestructiveGuard.matches("git push -foo origin main --dry-run"),
+            "f before o still forces")
+    #expect(DestructiveGuard.matches("git push -of origin main --dry-run") == false,
+            "o swallows the trailing f as its own value; force is never reached")
+}
+
+/// `-flag` is never valid git — it errors "unknown switch 'l'", exit 129,
+/// before ever reaching the network — but `f` is still the *first*
+/// character parsed, so force is set before that error aborts everything.
+/// Matching it anyway is a deliberate trade: a confirmation prompt on a
+/// command that was always going to fail is cheap, cheaper than a pattern
+/// contorted to exclude it that also risks missing a real `-foo`.
+@Test func anInvalidTrailingFlagAfterForceIsStillCaughtRatherThanMissed() {
+    #expect(DestructiveGuard.matches("git push -flag origin main"))
 }
 
 /// `beginOther()` clears `selected`, and `needsConfirmation` only ever reads
