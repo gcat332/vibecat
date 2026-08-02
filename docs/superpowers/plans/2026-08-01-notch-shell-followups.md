@@ -52,11 +52,29 @@ widening, and menu click-through.
 > (0.34 dark, 0.30 light). On screen the light-mode bloom went 8 → 12 and
 > reversed from washing out to darkening.
 >
-> **Still open, deliberately.** `colorScheme` describes the menu *bar*. With
-> the bar auto-hidden the island sits over the wallpaper, so a dark wallpaper
-> under a Light system picks the deepened glow when the bright one is right.
-> Reading the pixels actually behind the island would need screen-recording
-> permission — too much to ask for a glow. Revisit only if it grates in use.
+> **Third pass — closed** (`ce09d18`, `9b65c13`). The owner asked for the
+> permission, so the island now measures the backdrop instead of guessing it.
+> Three things that had to be true, each of which was not at first:
+>
+> 1. **The app needed an identity.** Unbundled, `CGPreflightScreenCaptureAccess()`
+>    returned *true* — inherited from the terminal, and worthless. Bundled and
+>    signed, it correctly returns false until granted. Signing with a real
+>    certificate rather than ad-hoc is what makes the grant survive a rebuild.
+> 2. **The capture must exclude our own window**, or it measures the island's
+>    own ground and always concludes dark.
+> 3. **The region must stop at the menu bar.** Sampling the whole panel
+>    included 24pt below the bar — a window at 236 against a bar at 27, 41% of
+>    the area — and reported `.light` over a black bar.
+>
+> Measured end to end on the same screen and event: **6 → 6 → 13**, for the
+> original constant, the raised constant guessing wrong, and the sampler
+> reading right.
+>
+> What is left: a **mixed backdrop** has no single right answer, and the glow
+> genuinely spills below the bar. The strip is a choice. And nothing prompts
+> for the permission — `VIBECAT_REQUEST_SCREEN_RECORDING=1` is a stopgap until
+> Plan 6's Settings makes it a real choice. Without it the aura falls back to
+> `colorScheme`, which is where every machine that never grants it stays.
 
 Four things will look surprising but are correct as built, so they should not
 be filed as bugs:

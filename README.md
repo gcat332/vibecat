@@ -59,6 +59,22 @@ Run the app itself:
 VIBECAT_SOCKET=/tmp/vibecat-dev.sock swift run vibecat
 ```
 
+That is enough for everything except permissions. A bare executable has no
+bundle identifier, so macOS attributes anything it asks for to the terminal
+that launched it — and a grant obtained that way disappears the moment the app
+is opened any other way. For that, build the bundle:
+
+```bash
+Scripts/build-app.sh && open .build/VibeCat.app
+```
+
+`open`, not the binary inside it: launching it from a shell makes the shell the
+responsible process again, which is the thing the bundle exists to avoid. The
+script signs with the first Apple Development or Developer ID certificate it
+finds, because TCC remembers a grant against the code's designated
+requirement — ad-hoc signing puts the binary's hash there, so every rebuild
+becomes a new program that has to ask again.
+
 The island appears in the notch, dormant until an event arrives. In a second
 terminal, replay a hook payload by hand:
 
