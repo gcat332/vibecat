@@ -210,3 +210,32 @@ private let externalDisplay = ScreenMetrics(
     #expect(c.model.sessionCount == 1)
     c.dismiss()
 }
+
+/// The region the aura's backdrop is measured from covers the menu bar strip
+/// and stops there.
+///
+/// The first version used the panel's height, which runs `auraMargin` past the
+/// bottom of the island into whatever window is below the bar. On this machine
+/// that window was at luminance 236 against a menu bar at 27, and it was 41% of
+/// the sampled area — enough to carry the mean over the threshold, so the
+/// sampler reported `.light` while the bar behind the island was black. The
+/// aura then deepened when it should have brightened, which is the exact fault
+/// the sampler was added to fix.
+@MainActor @Test func theBackdropRegionStopsAtTheMenuBar() {
+    let (c, _) = controller({ mbp14 })
+    c.refreshGeometry()
+    let region = c.backdropRegion()
+    let frames = c.model.frames
+
+    #expect(region.height == frames.body.height,
+            "the sampled strip is \(region.height)pt tall against a \(frames.body.height)pt island — it reaches past the menu bar into whatever is below it")
+    #expect(region.height < frames.panel.height,
+            "the sampled strip is the whole panel, aura margin included")
+    // Width follows the panel: the glow spreads sideways, and the surface it
+    // spreads onto is part of the question.
+    #expect(region.width == frames.panel.width)
+    // ScreenCaptureKit's origin is top-left; AppKit's is bottom-left. Getting
+    // this backwards would sample the bottom of the screen.
+    #expect(region.minY == mbp14.frame.maxY - frames.body.maxY)
+    #expect(region.minY == 0, "the island is at the top of the screen, so the strip starts at row 0")
+}

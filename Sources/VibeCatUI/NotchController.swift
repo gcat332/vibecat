@@ -37,18 +37,33 @@ import SwiftUI
     private let sampler = BackdropSampler()
     private var backdropSample: Task<Void, Never>?
 
-    /// The strip the aura blooms into, which is what has to be measured — not
-    /// the island itself, which is our own ground colour and would always read
-    /// dark. The panel rect is exactly that region plus the island, and
-    /// `BackdropSampler` excludes our own window from the capture, so what
-    /// comes back is whatever is behind both.
-    private func backdropRegion() -> CGRect {
-        let panel = model.frames.panel
-        guard let screen = metrics()?.frame else { return panel }
-        // ScreenCaptureKit's sourceRect has a top-left origin; ours is
-        // bottom-left, as AppKit's is.
-        return CGRect(x: panel.minX, y: screen.maxY - panel.maxY,
-                      width: panel.width, height: panel.height)
+    /// The surface the aura has to be seen against: the menu bar strip the
+    /// island sits in, as wide as the panel so it covers where the glow
+    /// spreads sideways.
+    ///
+    /// The panel's own height is deliberately *not* used. It runs
+    /// `auraMargin` past the bottom of the island, into whatever window
+    /// happens to be below the menu bar — measured here, a bright one at 236
+    /// against a menu bar at 27. That is 41% of the panel's height, and it
+    /// pulled the mean over the threshold: the first version of this sampled
+    /// the full panel and confidently reported `.light` while the bar behind
+    /// the island was black.
+    ///
+    /// The glow does spill below the bar, so this is a choice rather than a
+    /// correction — a mixed backdrop has no single right answer, and the bar
+    /// is the surface §9.2 is written about and the one the island lives on.
+    ///
+    /// Our own window is excluded from the capture by `BackdropSampler`, so
+    /// what comes back is what is behind the island rather than the island.
+    /// Internal rather than private so `theBackdropRegionStopsAtTheMenuBar`
+    /// can pin the height mistake this comment describes.
+    func backdropRegion() -> CGRect {
+        let frames = model.frames
+        guard let screen = metrics()?.frame else { return frames.body }
+        // ScreenCaptureKit's sourceRect has a top-left origin; AppKit's is
+        // bottom-left.
+        return CGRect(x: frames.panel.minX, y: screen.maxY - frames.body.maxY,
+                      width: frames.panel.width, height: frames.body.height)
     }
 
     public init(model appModel: AppModel, metrics: @escaping @MainActor () -> ScreenMetrics?) {
