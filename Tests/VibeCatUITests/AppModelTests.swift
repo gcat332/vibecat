@@ -37,9 +37,15 @@ private func event(_ kind: Kind, session: String) -> VibeEvent {
     #expect(m.sessionCount == 2)
 }
 
-/// Plan 2 cannot answer anything yet, and nil is what makes the hook fall
-/// through to the CLI's own prompt rather than hanging.
-@MainActor @Test func everyEventIsAnsweredWithNoReplyForNow() {
+/// Whole-branch review minor: this test's name and comment were Plan-2
+/// stale ("Plan 2 cannot answer anything yet") — Task 3 gave `AppModel` a
+/// real answering path below, so that is no longer true. What this actually
+/// proves, and still does: `kind` alone never implies parking, only
+/// `wantsReply` does. `event(_:session:)` never sets `wantsReply` or
+/// `choices`, so even a `.permission`/`.question`-kind event — the two kinds
+/// a real question arrives as — must return nil immediately here, the same
+/// as an ordinary fire-and-forget event, rather than parking on `kind` alone.
+@MainActor @Test func aPermissionOrQuestionKindWithoutWantsReplySetStillReturnsNilImmediately() {
     let m = AppModel(socketPath: "/tmp/vibecat-test-unused.sock")
     #expect(m.ingest(event(.permission, session: "a"), now: t0) == nil)
     #expect(m.ingest(event(.question, session: "b"), now: t0) == nil)
@@ -145,6 +151,33 @@ private func event(_ kind: Kind, session: String) -> VibeEvent {
     let ingest = Task.detached { m.ingest(event, now: now) }
     try await Task.sleep(for: .milliseconds(50))
     #expect(m.pending?.expiry == now.addingTimeInterval(SocketClient.defaultAnswerDeadline))
+    m.answer(Reply(id: "q1", choice: "allow"))
+    _ = await ingest.value
+}
+
+/// Whole-branch review minor: `event.answerDeadline` is decoded off the wire
+/// and used as-is otherwise — only reachable from a non-hook client speaking
+/// the wire protocol directly on the 0600 socket (`HookRunner` always sends
+/// its own already-clamped `client.answerDeadline`), so this is hardening
+/// rather than a reachable production path, but `ingest` has no way to tell
+/// the two apart. An absurd value near `Int64.max` nanoseconds (~1e12
+/// seconds) would make `DispatchTime.now() + …` inside `PendingQuestion
+/// .await()` saturate to `.distantFuture`, parking that thread permanently
+/// — exactly what §2.3's fail-open guarantee forbids. Checks the computed
+/// `expiry` directly, the same shape as `aMissingAnswerDeadlineFallsBack
+/// ToTheSharedConstant` just above, rather than actually waiting out
+/// anything near that deadline.
+@MainActor @Test func anAbsurdAnswerDeadlineIsClampedRatherThanTrustedVerbatim() async throws {
+    let m = AppModel(socketPath: "/tmp/unused.sock")
+    let now = Date()
+    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
+                          choices: [Choice(id: "allow", label: "Allow")],
+                          wantsReply: true, answerDeadline: 1e12)
+    let ingest = Task.detached { m.ingest(event, now: now) }
+    try await Task.sleep(for: .milliseconds(50))
+    let expiry = try #require(m.pending?.expiry)
+    #expect(expiry <= now.addingTimeInterval(SocketClient.ceilingDeadline),
+            "an answerDeadline of 1e12s reached PendingQuestion.expiry \(expiry.timeIntervalSince(now))s out — unclamped, DispatchTime arithmetic on this would saturate to distantFuture and park the thread forever")
     m.answer(Reply(id: "q1", choice: "allow"))
     _ = await ingest.value
 }

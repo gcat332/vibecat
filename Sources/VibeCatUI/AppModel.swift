@@ -62,7 +62,21 @@ import VibeCatTransport
             // The hook's own deadline, carried on the event. A second constant
             // here would drift from it, and the island would keep showing a
             // question the hook had already abandoned.
-            deadline: event.answerDeadline ?? SocketClient.defaultAnswerDeadline,
+            //
+            // Clamped (whole-branch review minor): `event.answerDeadline` is
+            // decoded off the wire and trusted here unclamped otherwise. The
+            // real hook always sends an already-clamped value, but `ingest`
+            // has no way to tell a hook-originated event apart from one a
+            // non-hook client wrote directly to the socket — and this socket
+            // is 0600, reachable by anything running as the same user. An
+            // absurd value (say, ~1e12 seconds) would make `DispatchTime.now()
+            // + …` inside `PendingQuestion.await()` saturate to
+            // `.distantFuture`, parking that thread permanently rather than
+            // for any bounded time — exactly what §2.3's fail-open guarantee
+            // forbids. `SocketClient.clamped` is the same clamp `HookRunner`'s
+            // own value already went through once; this is hardening, not a
+            // reachable production path today.
+            deadline: SocketClient.clamped(event.answerDeadline ?? SocketClient.defaultAnswerDeadline),
             now: now)
         Task { @MainActor [weak self] in self?.present(question) }
         return question.await()

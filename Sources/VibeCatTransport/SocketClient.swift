@@ -18,7 +18,13 @@ public struct SocketClient: Sendable {
     static let floorDeadline: TimeInterval = 0.02
     /// Never unbounded: Int(deadline) traps on infinity and on overflow, and a
     /// hook that traps is a hook that failed closed.
-    static let ceilingDeadline: TimeInterval = 60
+    ///
+    /// `public` (whole-branch review minor, alongside `clamped` above):
+    /// `AppModelTests.anAbsurdAnswerDeadlineIsClampedRatherThanTrustedVerbatim`,
+    /// in a different module and target, needs this bound to assert against
+    /// directly rather than repeating the literal `60` as a second, driftable
+    /// copy.
+    public static let ceilingDeadline: TimeInterval = 60
 
     /// The one clamp, shared by every place a caller-supplied interval
     /// becomes a deadline: both `init` parameters, `sendExpectingReply`'s
@@ -27,7 +33,18 @@ public struct SocketClient: Sendable {
     /// sites — one function means one place to get it right, and one place
     /// a test can reach directly instead of only through an observable
     /// property or an end-to-end socket wait.
-    static func clamped(_ value: TimeInterval) -> TimeInterval {
+    ///
+    /// `public`, not merely `internal` (whole-branch review minor): `AppModel
+    /// .ingest`, in `VibeCatUI`, decodes `VibeEvent.answerDeadline` off the
+    /// wire and hands it straight to `PendingQuestion` as a deadline. The
+    /// hook always sends its own already-clamped `client.answerDeadline`, but
+    /// `ingest` has no way to know who actually wrote the bytes it decoded —
+    /// only `HookRunner` is trusted to have clamped upstream, and nothing
+    /// enforces that a client speaking the wire protocol directly must have.
+    /// Exposing this lets the untrusted value be clamped again on the way in,
+    /// rather than duplicating the same two-line expression a second time in
+    /// a different module.
+    public static func clamped(_ value: TimeInterval) -> TimeInterval {
         Swift.min(ceilingDeadline, Swift.max(floorDeadline, value))
     }
 
