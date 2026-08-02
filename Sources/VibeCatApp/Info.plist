@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>vibecat</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.gcat332.vibecat</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>VibeCat</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+
+	<!-- Design §15: no Dock icon. main.swift also calls
+	     setActivationPolicy(.accessory), which is what covered this while
+	     there was no bundle to declare it in; both are kept, because the
+	     policy call happens after launch and this is what stops a Dock icon
+	     appearing during it. -->
+	<key>LSUIElement</key>
+	<true/>
+
+	<!-- Design §15's Automation permission, needed by §13's jump-to-terminal.
+	     macOS shows this string in the prompt, so it says what the permission
+	     buys in the terms of the person reading it. -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>VibeCat focuses the terminal window an agent is running in when you click its session.</string>
+
+	<!-- Screen recording has NO usage-description key on macOS, unlike camera
+	     or microphone: it is granted only in System Settings > Privacy &amp;
+	     Security > Screen Recording, prompted by CGRequestScreenCaptureAccess().
+	     Nothing goes here for it. What matters for that permission is the
+	     bundle identifier above plus a stable signing identity — TCC keys on
+	     the pair, which is why an ad-hoc build had to re-ask on every rebuild.
+
+	     It is also not in §15's list, which names only Automation and
+	     Notifications. Adding it is a deliberate change to that section. -->
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>MacOSX</string>
+	</array>
+</dict>
+</plist>

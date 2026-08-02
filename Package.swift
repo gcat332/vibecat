@@ -25,8 +25,12 @@ let package = Package(
         // The UI logic lives in a library for the same reason the hook's does:
         // an executable target with a main.swift cannot be @testable imported.
         .target(name: "VibeCatUI", dependencies: ["VibeCatCore", "VibeCatTransport"]),
+        // Info.plist is the app *bundle's*, assembled by Scripts/build-app.sh —
+        // it is not a resource of the executable target and SwiftPM should not
+        // try to process or copy it.
         .executableTarget(name: "VibeCatApp",
-                          dependencies: ["VibeCatUI", "VibeCatCore", "VibeCatTransport"]),
+                          dependencies: ["VibeCatUI", "VibeCatCore", "VibeCatTransport"],
+                          exclude: ["Info.plist"]),
         .testTarget(name: "VibeCatCoreTests", dependencies: ["VibeCatCore"]),
         .testTarget(name: "VibeCatTransportTests",
                     dependencies: ["VibeCatTransport", "VibeCatCore", "VibeCatHookKit"]),
