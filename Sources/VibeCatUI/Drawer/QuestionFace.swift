@@ -56,9 +56,32 @@ struct QuestionFace: View {
         }
         if let body = question.event.body {
             // It is a command, so it reads as one (monospaced).
+            //
+            // `.lineLimit(1)`: final whole-branch review, finding 2. Without
+            // any limit, `.fixedSize(vertical: true)` below lets this grow to
+            // as many lines as the text needs, with no ceiling — an unusually
+            // long command (a long path, a long argument list) pushed the
+            // rows, the confirmation banner, and eventually the reserved
+            // footer down with it; measured before this fix, a 90-odd
+            // character body reached row 287 of a 288pt-tall drawer, slicing
+            // the banner mid-line rather than merely crowding it.
+            //
+            // Measured 2 lines too, before settling on 1: at this drawer's
+            // real production width (§6.3's `.question` face, three choices
+            // plus the §10.3 confirmation banner — the worst realistic case,
+            // not a padded one), a 2-line cap still overflowed the reserved
+            // footer by 8pt. There simply is not room for a second line of
+            // command text alongside three rows and a banner inside a fixed
+            // 288pt drawer, so 1 line is not an arbitrary choice — it is the
+            // number that measured clear. `.fixedSize` still applies within
+            // that cap, so an ordinary short, one-line command (the common
+            // case — `rm -rf build/`, Task 8's own hardware verification) is
+            // completely unaffected; only a command long enough to need a
+            // second line loses the tail of it to an ellipsis.
             Text(body)
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(Color.white.opacity(0.65))
+                .lineLimit(1)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -71,30 +94,23 @@ struct QuestionFace: View {
                           isRecommended: isRecommended(index), accent: accent,
                           onTap: { tapped(choice.id) })
             }
-            if !question.isMulti {
-                // §10.1: "`Other…` is the last row." A synthetic `Choice` so
-                // it shares `ChoiceRow`'s row chrome (padding, wrapping
-                // label) rather than a second, driftable copy of it. Never
-                // recommended, never ticked — picking it is a distinct model
-                // action (`beginOther()`), not a member of `selected` — and
-                // `isOther: true` gives it a control that is neither a
-                // numeral nor a checkbox; see `ChoiceRow.isOther`'s own doc
-                // comment for why (§10.2's rule, read the other way round,
-                // resolves the §10.1/§10.2 contradiction a numbered `Other…`
-                // would otherwise be). `index` is unread with `isOther`.
-                //
-                // Deliberately not wired to `beginOther()` in this round:
-                // typing into the field it opens needs keyboard input, which
-                // needs the panel to become key — Task 9's own unresolved
-                // hardware question, not this fix's ordinary mouse plumbing.
-                // Opening a field nobody can type into or back out of would
-                // be a worse dead end than the row simply doing nothing, so
-                // it stays inert until that lands.
-                ChoiceRow(choice: Choice(id: "__other__", label: "Other…"),
-                          index: 0, isMulti: false,
-                          isSelected: false, isRecommended: false, accent: accent,
-                          isOther: true)
-            }
+            // §10.1 says "`Other…` is the last row" — deliberately not
+            // rendered here. Final whole-branch review (2026-08-02): the row
+            // was already inert going in (see the fix-round-1 comment this
+            // replaces — typing into the field it opens needs the panel to
+            // hold key status, Task 9's own unresolved hardware question) and
+            // could not be backed out of once tapped, which reads as broken
+            // rather than as not-yet-built once every *other* row in the same
+            // list responds visibly. Cutting it also gives back the height
+            // this file's own 44pt footer reservation (`DrawerView
+            // .footerHeight`) needs: the confirmation banner below invaded
+            // and then clipped that footer with the row still costing its
+            // own space (see `theDrawerStaysClearOfTheFooterAfterPicking
+            // ADestructiveAnswerAtProductionWidth` in DrawerGoldenTests.swift).
+            // A deliberate deviation from §10.1, recorded as the reviewer's
+            // decision rather than a bug it merely missed — Plan 6 (real
+            // keyboard input) is where `ChoiceRow.isOther`/`beginOther()`
+            // still exist for restoring it. Do not re-add this blind.
             if question.needsConfirmation {
                 confirmBanner
             }
@@ -163,11 +179,27 @@ struct QuestionFace: View {
         !question.isMulti && index == 0
     }
 
+    /// The confirmation banner's own copy, factored out from the view so a
+    /// test can pin the exact wording without rendering — `internal`, not
+    /// `private`, the same reasoning `tapped(_:)`/`sendTapped()` give.
+    ///
+    /// A whole-branch review minor: this used to be one fixed string naming
+    /// "the highlighted choice," which is only true for single select
+    /// (§10.1: the row tap itself confirms). Multi select's own confirming
+    /// control is Send (§10.2: a row only ever toggles, never answers on its
+    /// own — see `sendTapped()`), so a multi-select person reading the
+    /// single-select wording would be told to tap a control that will not
+    /// confirm anything they tap.
+    static func confirmationBannerText(isMulti: Bool) -> String {
+        isMulti ? "This can't be undone — tap Send again to confirm."
+                : "This can't be undone — tap the highlighted choice again to confirm."
+    }
+
     @ViewBuilder private var confirmBanner: some View {
         // §10.3: a second ask, not a second colour — this stays the state's
         // own accent rather than a new "danger" hue (§4.3: colour means
         // state, and only state).
-        Text("This can't be undone — tap the highlighted choice again to confirm.")
+        Text(Self.confirmationBannerText(isMulti: question.isMulti))
             .font(.system(size: 11))
             .foregroundStyle(accent)
             .fixedSize(horizontal: false, vertical: true)

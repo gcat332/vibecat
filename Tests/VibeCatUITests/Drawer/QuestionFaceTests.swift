@@ -158,3 +158,23 @@ private func threeChoices(multi: Bool, destructive: Bool = false) -> VibeEvent {
     #expect(box.value?.choices == ["allow"],
             "Send did not confirm and send in one tap once confirmation was already pending")
 }
+
+// MARK: - Confirmation banner copy
+
+/// A whole-branch review minor: the banner's copy used to be one fixed
+/// string naming "the highlighted choice," which is wrong for multi select —
+/// there, a row tap only ever toggles (§10.2) and Send is the control that
+/// actually confirms (`sendTapped()`, pinned by the test above). Checked
+/// directly against the pure function rather than by rendering: a rendered
+/// pixel comparison could show the banner's *position* changing without ever
+/// confirming which words it actually says.
+@Test func theConfirmationBannerNamesTheControlThatActuallyConfirms() {
+    let single = QuestionFace.confirmationBannerText(isMulti: false)
+    let multi = QuestionFace.confirmationBannerText(isMulti: true)
+
+    #expect(single.contains("highlighted choice"))
+    #expect(multi.contains("Send"))
+    #expect(multi.contains("highlighted choice") == false,
+            "multi select's banner still names the row tap, which never confirms a multi-select answer")
+    #expect(single != multi, "single and multi select must not share identical confirmation copy")
+}

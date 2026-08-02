@@ -250,8 +250,12 @@ private func footerMargin(_ raster: Raster, footerHeight: Int) -> Int {
 
 /// The single-select fixture likeliest to run the footer reservation close:
 /// a long label that wraps (§10.1's own example, reused from the brief's
-/// tests above) alongside two short ones, plus `Other…` — four rows total
-/// against `.question`'s 288pt budget.
+/// tests above) alongside two short ones — three rows total against
+/// `.question`'s 288pt budget. Used to carry a fourth row, `Other…`; the
+/// final whole-branch review cut it (see `QuestionFace.rows`'s own comment),
+/// which is part of what the post-pick tests below need to clear the footer
+/// at all — the other part being `destructiveQuestion`'s own confirmation
+/// banner, which this non-destructive fixture never shows.
 private func tightestPackingSingleSelect() -> VibeEvent {
     VibeEvent(id: "q", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
               title: "Bash command", body: "pnpm install",
@@ -306,6 +310,74 @@ private func tightestPackingSingleSelect() -> VibeEvent {
     let margin = footerMargin(raster, footerHeight: 44)
     #expect(margin >= 0,
             "content reaches \(-margin)pt into the reserved footer at the narrowest real width \(width)pt")
+}
+
+/// Finding 2 of the final whole-branch review: every footer test above only
+/// ever renders the *unpicked* state. The confirmation banner
+/// (`QuestionFace.confirmBanner`) only appears once `needsConfirmation` is
+/// true — a destructive body, picked but not yet confirmed — which none of
+/// them reach. This is the exact flow Task 8's hardware verification
+/// exercised end to end: `rm -rf build/`, "Allow once" picked.
+private func destructiveQuestion(body: String = "rm -rf build/") -> VibeEvent {
+    VibeEvent(id: "q", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
+              title: "Bash command", body: body,
+              choices: [Choice(id: "allow", label: "Allow once"),
+                        Choice(id: "always", label: "Allow all Bash calls this session"),
+                        Choice(id: "deny", label: "Deny")],
+              wantsReply: true)
+}
+
+/// Measured before this fix, at this exact production width: +6pt margin
+/// with nothing picked (what `theDrawerStaysClearOfTheFooterAtThe
+/// RealisticProductionWidth` above already covers) collapsed to -37pt — 37
+/// of the reserved 44pt consumed — the instant "Allow once" is picked and
+/// the confirmation banner appears below the rows. Deleting the inert
+/// `Other…` row moved this to +7pt.
+@MainActor @Test func theDrawerStaysClearOfTheFooterAfterPickingADestructiveAnswerAtProductionWidth() throws {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    model.state = .waiting
+    model.sessionCount = 1
+    let width = model.frames.body.width
+
+    let m = QuestionModel(event: destructiveQuestion())
+    m.pick("allow")
+    #expect(m.needsConfirmation,
+            "setup: picking a permissive choice on a destructive body must need confirmation")
+
+    let raster = try rasterise(DrawerView(question: m, accent: IslandState.waiting.accent, width: width))
+    let margin = footerMargin(raster, footerHeight: 44)
+    #expect(margin >= 0,
+            "the confirmation banner reaches \(-margin)pt into the reserved footer after picking, at production width \(width)pt")
+}
+
+/// The same flow with a command long enough to actually wrap — measured
+/// before this fix, this reached row 287 of a 288pt-tall drawer: the banner
+/// was sliced mid-line, not merely tight against the footer.
+/// `QuestionFace.header`'s command `Text` had no `lineLimit`, so an unusually
+/// long command could grow the header without bound and push everything
+/// below it — rows, banner, footer — down with it. A 2-line cap alone was
+/// measured still 8pt short at this width with three rows and a banner
+/// present; `QuestionFace.header`'s own comment records why 1 line is what
+/// actually clears it.
+@MainActor @Test func theDrawerStaysClearOfTheFooterWithALongCommandBodyAfterPicking() throws {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    model.state = .waiting
+    model.sessionCount = 1
+    let width = model.frames.body.width
+
+    let longBody = "rm -rf /Users/dev/projects/vibecat-worktrees/feat-drawer-and-answering/build/intermediates/output"
+    #expect(longBody.count > 80, "setup: the body must be long enough to actually wrap onto several lines")
+    let m = QuestionModel(event: destructiveQuestion(body: longBody))
+    m.pick("allow")
+    #expect(m.needsConfirmation,
+            "setup: picking a permissive choice on a destructive body must need confirmation")
+
+    let raster = try rasterise(DrawerView(question: m, accent: IslandState.waiting.accent, width: width))
+    let margin = footerMargin(raster, footerHeight: 44)
+    #expect(margin >= 0,
+            "content reaches \(-margin)pt into the reserved footer with a long command body after picking, at production width \(width)pt")
 }
 
 /// The drawer is the island's, so it wears the island's colour (§4.3).
