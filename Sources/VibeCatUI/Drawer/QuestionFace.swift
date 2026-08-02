@@ -14,6 +14,18 @@ struct QuestionFace: View {
     let question: QuestionModel
     let accent: Color
 
+    /// Distance from the drawer's own left edge to where a row's own
+    /// content — and so its accent border, when it has one — actually
+    /// starts. Named rather than left as a bare `16` so a test can derive
+    /// the drawer's expected left edge from this exact value instead of a
+    /// second copy of the literal that could silently drift from it: see
+    /// `islandViewComposesTheDrawerFlushBelowAndAlignedWithTheCollapsedBody`,
+    /// which needs this to tell a correctly-aligned drawer apart from one
+    /// whose leading offset quietly went to zero — a blanket pixel
+    /// tolerance wide enough to absorb this padding as slop turned out to
+    /// be wide enough to also absorb that bug.
+    static let leadingPadding: CGFloat = 16
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
@@ -23,7 +35,7 @@ struct QuestionFace: View {
                 rows
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, Self.leadingPadding)
         .padding(.top, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }

@@ -343,6 +343,13 @@ private func isNear(_ p: Raster.Pixel, _ colour: RGBA, tolerance: Int = 6) -> Bo
 /// alignment centring two children of very different widths (`IslandBody`'s
 /// own outer frame is the full, wider panel; `DrawerView` is only the live
 /// body's width). Screenshotted before and after in the task report.
+///
+/// The alignment check below asserts against a *derived* expected position,
+/// not a wide tolerance around the collapsed body's own edge — a first
+/// version used a blanket ±20pt band and it passed even with
+/// `drawerLeadingOffset` zeroed out (residual −8pt against the correct
+/// +16pt, both inside ±20), because `QuestionFace.leadingPadding` is itself
+/// close to that width. See that check's own comment.
 @MainActor @Test func islandViewComposesTheDrawerFlushBelowAndAlignedWithTheCollapsedBody() throws {
     let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
                             motion: MotionPreference(chosen: .full, systemWantsReduced: false))
@@ -387,8 +394,20 @@ private func isNear(_ p: Raster.Pixel, _ colour: RGBA, tolerance: Int = 6) -> Bo
     let collapsed = try rasterise(IslandBody(model: model, now: Date(timeIntervalSince1970: 1_000_000)))
     let collapsedPainted = try #require(IslandGoldenTests.paintedColumns(collapsed),
                                         "the collapsed body painted nothing")
-    #expect(abs(left - collapsedPainted.first) <= 20,
-            "drawer's leftmost accent at \(left) does not align with the collapsed body's own leftmost painted column at \(collapsedPainted.first) — the drawer has drifted sideways")
+
+    // A ±20pt band here would pass both the correct render *and* a
+    // zeroed-out leading offset: `QuestionFace.leadingPadding` (16pt) is
+    // itself close to that width, so a genuinely misaligned drawer
+    // (residual −8pt, measured directly) still lands inside a tolerance
+    // sized only to shrug off the padding as noise. The padding is a known,
+    // derivable quantity, not noise — read back through
+    // `QuestionFace.leadingPadding` rather than a second copy of the
+    // literal — so the expected left edge is computed explicitly and the
+    // remaining tolerance covers only antialiasing at the border's own
+    // 1pt stroke, not an unrelated bug hiding behind the same number.
+    let expectedLeft = collapsedPainted.first + Int(QuestionFace.leadingPadding)
+    #expect(abs(left - expectedLeft) <= 3,
+            "drawer's leftmost accent at \(left), expected \(expectedLeft) (collapsed body's own left edge \(collapsedPainted.first) + QuestionFace.leadingPadding \(QuestionFace.leadingPadding)) — the drawer has drifted sideways")
 
     #expect(Double(right - left) < model.frames.body.width,
             "accent spans \(right - left)pt — at or past the live body width \(model.frames.body.width); the drawer may be sized off the fixed panel's wider frame instead")
