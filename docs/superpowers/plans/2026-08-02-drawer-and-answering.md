@@ -121,7 +121,7 @@ import VibeCatCore
 @testable import VibeCatUI
 
 private func question(id: String = "q1") -> VibeEvent {
-    VibeEvent(id: id, cli: "claude-code", kind: .permission, session: "s1",
+    VibeEvent(id: id, cli: "claude-code", kind: .permission, session: "s1", cwd: "/tmp/proj",
               choices: [Choice(id: "allow", label: "Allow once"),
                         Choice(id: "deny", label: "Deny")],
               wantsReply: true)
@@ -316,7 +316,7 @@ Read "The answer deadline is not 300ms" above before starting. The 300ms deliver
 
     let c = SocketClient(path: path, deadline: 0.3, answerDeadline: 0.8)
     let line = try WireCodec.encode(VibeEvent(id: "q", cli: "claude-code",
-                                              kind: .permission, session: "s",
+                                              kind: .permission, session: "s", cwd: "/tmp/proj",
                                               wantsReply: true))
     let start = Date()
     let out = c.sendExpectingReply(line, deadline: c.answerDeadline)
@@ -416,7 +416,7 @@ git commit -m "feat: bound a human answer separately from delivery"
 @MainActor @Test func aQuestionEventParksUntilItIsAnswered() async throws {
     let m = AppModel(socketPath: "/tmp/unused.sock")
     let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission,
-                          session: "s1",
+                          session: "s1", cwd: "/tmp/proj",
                           choices: [Choice(id: "allow", label: "Allow once")],
                           wantsReply: true, answerDeadline: 5)
     let ingest = Task.detached { m.ingest(event) }
@@ -434,7 +434,7 @@ git commit -m "feat: bound a human answer separately from delivery"
 @MainActor @Test func anEventThatWantsNoReplyReturnsImmediately() {
     let m = AppModel(socketPath: "/tmp/unused.sock")
     let start = Date()
-    let reply = m.ingest(VibeEvent(id: "e", cli: "claude-code", kind: .running, session: "s"))
+    let reply = m.ingest(VibeEvent(id: "e", cli: "claude-code", kind: .running, session: "s", cwd: "/tmp/proj"))
     #expect(reply == nil)
     #expect(Date().timeIntervalSince(start) < 0.1)
     #expect(m.pending == nil)
@@ -445,7 +445,7 @@ git commit -m "feat: bound a human answer separately from delivery"
 @MainActor @Test func asecondQuestionLapsesTheFirst() async throws {
     let m = AppModel(socketPath: "/tmp/unused.sock")
     func q(_ id: String) -> VibeEvent {
-        VibeEvent(id: id, cli: "claude-code", kind: .permission, session: "s",
+        VibeEvent(id: id, cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
                   choices: [Choice(id: "allow", label: "Allow")],
                   wantsReply: true, answerDeadline: 5)
     }
@@ -461,7 +461,7 @@ git commit -m "feat: bound a human answer separately from delivery"
 
 @MainActor @Test func dismissingAQuestionFailsOpen() async throws {
     let m = AppModel(socketPath: "/tmp/unused.sock")
-    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s",
+    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
                           choices: [Choice(id: "deny", label: "Deny")],
                           wantsReply: true, answerDeadline: 5)
     let ingest = Task.detached { m.ingest(event) }
@@ -558,7 +558,7 @@ exists for and which a synchronous hop could not satisfy.
 ```swift
 @MainActor @Test func theQuestionIsVisibleBeforeTheSocketThreadIsReleased() async throws {
     let m = AppModel(socketPath: "/tmp/unused.sock")
-    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s",
+    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
                           choices: [Choice(id: "allow", label: "Allow")],
                           wantsReply: true, answerDeadline: 5)
     let ingest = Task.detached { m.ingest(event) }
@@ -733,7 +733,7 @@ Pure state, no view. Everything the drawer needs to decide what to draw, decided
 
 ```swift
 private func event(multi: Bool, choices: [String] = ["allow", "always", "deny"]) -> VibeEvent {
-    VibeEvent(id: "q", cli: "claude-code", kind: .permission, session: "s",
+    VibeEvent(id: "q", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
               title: "Bash command", body: "rm -rf build/",
               choices: choices.map { Choice(id: $0, label: $0.capitalized) },
               multi: multi, wantsReply: true)
@@ -937,7 +937,7 @@ git commit -m "feat: decide what a question's answer is, without a view"
 
 /// The guard has to gate the *reply*, not just light up the UI.
 @MainActor @Test func aDestructiveAnswerIsNotAnAnswerUntilConfirmed() {
-    let e = VibeEvent(id: "q", cli: "claude-code", kind: .permission, session: "s",
+    let e = VibeEvent(id: "q", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
                       title: "Bash command", body: "rm -rf build/",
                       choices: [Choice(id: "allow", label: "Allow once")],
                       wantsReply: true)
@@ -951,7 +951,7 @@ git commit -m "feat: decide what a question's answer is, without a view"
 
 /// Denying something destructive is not itself destructive.
 @MainActor @Test func refusingADestructiveCommandNeedsNoConfirmation() {
-    let e = VibeEvent(id: "q", cli: "claude-code", kind: .permission, session: "s",
+    let e = VibeEvent(id: "q", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
                       body: "rm -rf build/",
                       choices: [Choice(id: "deny", label: "Deny")], wantsReply: true)
     let m = QuestionModel(event: e)
@@ -1060,7 +1060,7 @@ git commit -m "feat: ask twice before rm -rf, force-push or drop table"
 /// test uses one.
 @MainActor @Test func longLabelsGetTheirOwnRowAndAreNotTruncated() throws {
     let long = "Allow all pnpm commands in ~/dev/api for this session"
-    let e = VibeEvent(id: "q", cli: "claude-code", kind: .permission, session: "s",
+    let e = VibeEvent(id: "q", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
                       title: "Bash command", body: "pnpm install",
                       choices: [Choice(id: "allow", label: "Allow once"),
                                 Choice(id: "always", label: long),
