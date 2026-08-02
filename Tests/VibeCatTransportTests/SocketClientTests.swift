@@ -82,6 +82,16 @@ private func tempSocketPath(_ name: String) -> String {
             == SocketClient.floorDeadline)
 }
 
+/// The clamp arithmetic itself, isolated from any socket, deadline object,
+/// or wait — pure and deterministic, so this runs in sub-millisecond time
+/// instead of needing an end-to-end run past the 60s ceiling to observe the
+/// unbounded-wait failure mode the clamp exists to prevent.
+@Test func theClampPassesInRangeValuesThroughAndBoundsTheRest() {
+    #expect(SocketClient.clamped(9999) == SocketClient.ceilingDeadline)
+    #expect(SocketClient.clamped(-1) == SocketClient.floorDeadline)
+    #expect(SocketClient.clamped(5) == 5)
+}
+
 /// The mechanism, not just the constant: a server that never answers must
 /// return nil after roughly the answer deadline, not after the 300ms one.
 @Test func waitingForAnAnswerOutlastsTheDeliveryDeadline() throws {

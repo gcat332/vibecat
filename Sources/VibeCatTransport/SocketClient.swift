@@ -20,10 +20,23 @@ public struct SocketClient: Sendable {
     /// hook that traps is a hook that failed closed.
     static let ceilingDeadline: TimeInterval = 60
 
+    /// The one clamp, shared by every place a caller-supplied interval
+    /// becomes a deadline: both `init` parameters, `sendExpectingReply`'s
+    /// read override, and `setTimeout`'s last-line-of-defence re-clamp. Used
+    /// to be the same two-line expression copied at each of those four
+    /// sites — one function means one place to get it right, and one place
+    /// a test can reach directly instead of only through an observable
+    /// property or an end-to-end socket wait.
+    static func clamped(_ value: TimeInterval) -> TimeInterval {
+        Swift.min(ceilingDeadline, Swift.max(floorDeadline, value))
+    }
+
     /// The default bound on a human answer. Hoisted into a named constant
-    /// rather than left as a bare `20` in `init` so later code (see
-    /// `HookRunner`) can refer to "the answer deadline" without repeating the
-    /// number.
+    /// rather than left as a bare `20` in `init` because Task 3 depends on
+    /// this exact symbol name existing — not because anything in this file
+    /// refers to it by name. `HookRunner` never mentions
+    /// `defaultAnswerDeadline`; it reaches the same value through the
+    /// instance property `client.answerDeadline`.
     public static let defaultAnswerDeadline: TimeInterval = 20
 
     public let path: String
@@ -44,10 +57,8 @@ public struct SocketClient: Sendable {
     public init(path: String, deadline: TimeInterval = 0.3,
                 answerDeadline: TimeInterval = defaultAnswerDeadline) {
         self.path = path
-        self.deadline = Swift.min(Self.ceilingDeadline,
-                                  Swift.max(Self.floorDeadline, deadline))
-        self.answerDeadline = Swift.min(Self.ceilingDeadline,
-                                        Swift.max(Self.floorDeadline, answerDeadline))
+        self.deadline = Self.clamped(deadline)
+        self.answerDeadline = Self.clamped(answerDeadline)
     }
 
     public func send(_ line: Data) {
@@ -62,16 +73,14 @@ public struct SocketClient: Sendable {
         // one: a socket that will not accept bytes is dead, and waiting 20s to
         // learn that is 20s of hung terminal for nothing.
         //
-        // Clamped here the same way `init` clamps deadline/answerDeadline —
-        // this parameter takes an arbitrary caller-supplied override (Task 3
-        // builds on this type), and setTimeout's own re-clamp only protects
-        // the per-syscall SO_RCVTIMEO. It does not protect readExpiry below:
-        // an unclamped value there is a wall clock with no upper bound, and a
-        // peer that trickles at least one byte before every SO_RCVTIMEO
-        // window closes can ride that forever — the unbounded wait §2.3
-        // forbids outright.
-        let readTimeout = Swift.min(Self.ceilingDeadline,
-                                    Swift.max(Self.floorDeadline, deadline ?? self.deadline))
+        // Clamped via the same `clamped` helper `init` uses — this parameter
+        // takes an arbitrary caller-supplied override (Task 3 builds on this
+        // type), and setTimeout's own re-clamp only protects the per-syscall
+        // SO_RCVTIMEO. It does not protect readExpiry below: an unclamped
+        // value there is a wall clock with no upper bound, and a peer that
+        // trickles at least one byte before every SO_RCVTIMEO window closes
+        // can ride that forever — the unbounded wait §2.3 forbids outright.
+        let readTimeout = Self.clamped(deadline ?? self.deadline)
         let writeExpiry = Date().addingTimeInterval(self.deadline)
         let readExpiry = Date().addingTimeInterval(readTimeout)
         // readTimeout, not self.deadline: SO_RCVTIMEO bounds each read()
@@ -123,14 +132,15 @@ public struct SocketClient: Sendable {
 
     /// Belt to the absolute deadline's braces: keeps a single syscall from
     /// parking forever. `duration` is always already clamped by the time it
-    /// reaches here — `deadline` in `init`, `readTimeout` at its point of
-    /// computation in `sendExpectingReply` — so this never asks for the "no
-    /// timeout" timeval and never traps converting to a timeval's fields.
-    /// Re-clamped anyway, since this is the last line of defence before the
-    /// syscall and callers of connectSocket/setTimeout should not have to
-    /// re-derive that guarantee to stay safe.
+    /// reaches here — via `clamped` in `init` or in `sendExpectingReply` —
+    /// so this never asks for the "no timeout" timeval and never traps
+    /// converting to a timeval's fields. Re-clamped anyway: this is the last
+    /// line before setsockopt, where an unclamped zero would silently mean
+    /// "no timeout" rather than fail closed. That makes this call
+    /// deliberately redundant with every caller's own clamp, not leftover
+    /// duplication — do not delete it as a copy of `clamped`.
     private func setTimeout(_ fd: Int32, _ option: Int32, duration: TimeInterval) {
-        let whole = Swift.min(Self.ceilingDeadline, Swift.max(Self.floorDeadline, duration))
+        let whole = Self.clamped(duration)
         let fraction = (whole - floor(whole)) * 1_000_000
         #if canImport(Darwin)
         var tv = timeval(tv_sec: Int(whole), tv_usec: Int32(fraction))
