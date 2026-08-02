@@ -105,18 +105,42 @@ public struct IslandView: View {
     }
 
     public var body: some View {
-        // A real branch, not a paused timeline. Measured: a paused-but-present
-        // TimelineView still costs ~6% of a core; removing it costs 0.0%, and
-        // that is the only way an idle machine actually stays idle.
-        if model.needsTimeline {
-            TimelineView(.animation(minimumInterval: Self.minimumInterval(for: model.activeProfile),
-                                    paused: false)) { ctx in
-                IslandBody(model: model, now: ctx.date)
+        VStack(spacing: 0) {
+            // A real branch, not a paused timeline. Measured: a paused-but-present
+            // TimelineView still costs ~6% of a core; removing it costs 0.0%, and
+            // that is the only way an idle machine actually stays idle.
+            if model.needsTimeline {
+                TimelineView(.animation(minimumInterval: Self.minimumInterval(for: model.activeProfile),
+                                        paused: false)) { ctx in
+                    IslandBody(model: model, now: ctx.date)
+                }
+            } else {
+                IslandBody(model: model, now: Date())
             }
-        } else {
-            IslandBody(model: model, now: Date())
+
+            // Design §6.1's third tier: the drawer hangs below the collapsed
+            // body, inside this same view rather than a second window.
+            // `IslandBody` itself is untouched by this — its own `.frame`
+            // stays sized off `model.panelFrames`, still hardcoded to
+            // `.rest` (see `DrawerGeometryTests`'s own note on this exact
+            // gap) — so growing the *live* window to actually show this is
+            // a later task's wiring (`NotchController`/`NotchPanel`, neither
+            // touched here), not this one's. What belongs here already: the
+            // drawer appearing and disappearing along the spring §9.1 names.
+            if let question = model.question {
+                DrawerView(question: question, accent: model.state.accent,
+                           width: model.frames.body.width)
+            }
         }
+        .animation(.spring(response: 0.42, dampingFraction: 0.78), value: drawerHeight)
     }
+
+    /// 0 with the drawer closed, else the open face's own height — the one
+    /// value the §9.1 spring above is keyed to. Mirrors
+    /// `IslandBody.restingWidth`/`.hoverRevealWidth`: one property per
+    /// independent animation, so this spring cannot be overridden by one
+    /// keyed to something that did not change, and vice versa.
+    private var drawerHeight: CGFloat { model.question?.face.height ?? 0 }
 
     /// `1 / framesPerSecond` — never the display rate (measured: an
     /// unpaced `.animation` timeline runs at the display's own refresh rate,
@@ -149,7 +173,12 @@ public struct IslandView: View {
 /// an `RGBA(hex:)` value rather than a bare `Color(red:green:blue:)` triple
 /// so it is greppable by its spec name, the same way every other colour in
 /// this module is.
-private let islandGroundColour = RGBA(hex: "#05070B")!
+///
+/// Not `private`: the drawer hangs below this same silhouette and has to
+/// match it exactly (`DrawerView.swift`, a different file in this module),
+/// so this stays module-visible rather than being re-declared a second time
+/// with its own copy of the literal to drift from.
+let islandGroundColour = RGBA(hex: "#05070B")!
 
 /// The collapsed island. Left flank, dead zone, right flank.
 ///

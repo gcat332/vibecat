@@ -1,5 +1,6 @@
 import SwiftUI
 import Testing
+import VibeCatCore
 @testable import VibeCatUI
 
 /// A developer tool, not a gate. Renders every badge and every coat × mood to
@@ -47,9 +48,85 @@ struct ContactSheetTool {
                     }
                 }
             }
+
+            Text("Drawer").font(.system(size: 8)).foregroundStyle(.white)
+            // Task 7's own four scenarios, named in its brief: single select
+            // with a label long enough to need wrapping, multi select
+            // mid-pick, the reply field open, and the destructive
+            // confirmation. Rendered together so one look at the PNG can
+            // judge all four rather than trusting four passing assertions.
+            HStack(alignment: .top, spacing: 14) {
+                DrawerView(question: singleSelectLongLabel(),
+                          accent: IslandState.waiting.accent, width: 300)
+                DrawerView(question: multiSelectMidPick(),
+                          accent: IslandState.waiting.accent, width: 300)
+                DrawerView(question: replyFieldOpen(),
+                          accent: IslandState.waiting.accent, width: 300)
+                DrawerView(question: destructiveConfirmation(),
+                          accent: IslandState.failed.accent, width: 300)
+            }
         }
         .padding(12)
         .background(Color(red: 0.02, green: 0.027, blue: 0.043))
+    }
+
+    /// §10.1: a label real permission prompts actually produce, long enough
+    /// that truncating it would hide which directory it grants. Also picks
+    /// the *non*-recommended row (`deny`, not row 0): this is the scenario
+    /// that caught `ChoiceRow`'s single-select badge ignoring `isSelected`
+    /// entirely — every other fixture in this file only ever leaves the
+    /// recommended row as the pick, where a stale render happens to look
+    /// plausible anyway.
+    @MainActor private static func singleSelectLongLabel() -> QuestionModel {
+        let m = QuestionModel(event: VibeEvent(
+            id: "sheet-1", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
+            title: "Bash command", body: "pnpm install",
+            choices: [Choice(id: "allow", label: "Allow once"),
+                      Choice(id: "always", label: "Allow all pnpm commands in ~/dev/api for this session"),
+                      Choice(id: "deny", label: "Deny")],
+            wantsReply: true))
+        m.pick("deny")
+        return m
+    }
+
+    /// §10.2: one file already ticked, so the checkbox fill, the tally and
+    /// Send's enabled look are all on screen at once.
+    @MainActor private static func multiSelectMidPick() -> QuestionModel {
+        let m = QuestionModel(event: VibeEvent(
+            id: "sheet-2", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
+            title: "Stage which files?", body: "git add",
+            choices: [Choice(id: "a", label: "Sources/main.swift"),
+                      Choice(id: "b", label: "Tests/Fixture.swift"),
+                      Choice(id: "c", label: "README.md")],
+            multi: true, wantsReply: true))
+        m.toggle("a")
+        return m
+    }
+
+    /// §10.1: `Other…` collapses the row list into this field.
+    @MainActor private static func replyFieldOpen() -> QuestionModel {
+        let m = QuestionModel(event: VibeEvent(
+            id: "sheet-3", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
+            title: "Bash command", body: "pnpm install",
+            choices: [Choice(id: "allow", label: "Allow once"),
+                      Choice(id: "deny", label: "Deny")],
+            wantsReply: true))
+        m.beginOther()
+        m.otherText = "use pnpm instead"
+        return m
+    }
+
+    /// §10.3: a permissive pick against a destructive body, before
+    /// `confirm()` — the state the second ask has to make legible.
+    @MainActor private static func destructiveConfirmation() -> QuestionModel {
+        let m = QuestionModel(event: VibeEvent(
+            id: "sheet-4", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
+            title: "Bash command", body: "rm -rf build/",
+            choices: [Choice(id: "allow", label: "Allow once"),
+                      Choice(id: "deny", label: "Deny")],
+            wantsReply: true))
+        m.pick("allow")
+        return m
     }
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment["VIBECAT_CONTACT_SHEET"] != nil))

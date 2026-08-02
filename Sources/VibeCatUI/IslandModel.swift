@@ -25,6 +25,12 @@ import Observation
     /// Light while the captured strip came back at luminance 48.
     public var backdrop: Backdrop?
 
+    /// The question the drawer is showing, if any. `nil` is the only "closed"
+    /// state this model has — `IslandView` reads this one property to decide
+    /// both whether to draw a drawer at all and how tall it is, rather than a
+    /// separate open/closed flag that could disagree with it.
+    public var question: QuestionModel?
+
     public init(geometry: IslandGeometry, coat: Coat = .tabby, motion: MotionPreference) {
         self.geometry = geometry
         self.coat = coat
