@@ -995,7 +995,12 @@ public enum DestructiveGuard {
     private static let patterns = [
         // rm with a recursive AND a force flag, in either order, together or
         // apart: -rf, -fr, -r -f, --recursive --force.
-        #"\brm\b(?=(?:\s+-{1,2}\w+)*\s+-{0,2}\w*[rR])(?=(?:\s+-{1,2}\w+)*\s+-{0,2}\w*[fF])"#,
+        #"\brm\b(?=(?:\s+-{1,2}\w+)*\s+-{1,2}\w*[rR])(?=(?:\s+-{1,2}\w+)*\s+-{1,2}\w*[fF])"#
+        // -{1,2} and NOT -{0,2}: an optional dash makes this fire on any rm
+        // whose arguments merely contain r and f — `rm refactor.py`,
+        // `rm transfer.log`, `rm -r folder`. Found by Task 6's implementer
+        // against the real ICU engine; all six of the brief's tests passed
+        // with the broken version.,
         #"\bgit\s+push\b(?=.*--force)"#,
         #"\bdrop\s+table\b"#,
     ]
