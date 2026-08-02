@@ -45,11 +45,28 @@ private let mbp14 = ScreenMetrics(
 /// Plan 3 sized the panel once and never resized it, which is safe only while
 /// the island is click-through. The drawer is not, so the panel has to cover
 /// exactly what takes clicks — no more.
+///
+/// The four equalities below mirror `IslandGeometryTests.thePanelIsInflatedForTheAuraOnThreeSidesOnly`'s
+/// pattern at this tier (and give the brief's own `panel.maxY == body.maxY`
+/// no-top-margin check), but by themselves they are not enough: `panel` is
+/// *always* derived as `body` inflated by a constant `auraMargin` — see
+/// `IslandGeometry.frames` — so these hold for whatever `body.height` turns
+/// out to be, correct or not. Confirmed: mutating `IslandTier.extraHeight` to
+/// always return `0` (the drawer silently contributing no height at all)
+/// still satisfies all four. The first line below is the one that actually
+/// depends on the drawer height reaching `body` in the first place: it
+/// compares against an independently-tiered `collapsed`, rather than
+/// restating `open`'s own (possibly wrong) arithmetic back at itself.
 @Test func thePanelGrowsToHoldTheDrawer() {
     let g = IslandGeometry(screen: mbp14)
+    let collapsed = g.frames(rightFlank: 35, tier: .rest)
     let open = g.frames(rightFlank: 35, tier: .drawer(height: 288))
-    #expect(open.panel.height >= open.body.height)
-    #expect(open.panel.minY <= open.body.minY)
+    #expect(open.panel.height - collapsed.panel.height == 288,
+            "the panel did not grow by the drawer's own requested height")
+    #expect(open.panel.maxY == open.body.maxY)                       // no top margin
+    #expect(open.panel.minX == open.body.minX - IslandGeometry.auraMargin)
+    #expect(open.panel.maxX == open.body.maxX + IslandGeometry.auraMargin)
+    #expect(open.panel.minY == open.body.minY - IslandGeometry.auraMargin)
 }
 
 @MainActor @Test func thePanelOnlyTakesClicksWhenAskedTo() {
@@ -75,9 +92,27 @@ private let mbp14 = ScreenMetrics(
 /// only). So this renders the same production silhouette — `IslandShape`,
 /// filled with the same ground colour, positioned by the same
 /// `IslandFrames.bodyInPanel` — at the frames `IslandGeometry` itself now
-/// produces for `.drawer`, which is exactly what this task changed. It cannot
-/// yet prove the cat/badge/session-count content stays clear of the cutout at
-/// this height too; that closes once a later task gives the model a tier.
+/// produces for `.drawer`.
+///
+/// **What this does not prove, stated plainly so it isn't mistaken for more:**
+/// the scene contains exactly one possible non-transparent colour — the
+/// ground fill itself — so the `p == ground` check below cannot be violated
+/// by any geometry bug that doesn't paint a genuinely different colour into
+/// these columns, which nothing here does. It is not a proof that the
+/// silhouette "clears" the cutout in any general sense; ground spanning the
+/// cutout is correct by §5.1 ("the cutout is a hole... the black shape may
+/// span it"). Concretely: the one mutation found that reddens this test
+/// (`IslandGeometry.bottomRadius` 15→200, which `IslandShape`'s own `min`
+/// clamps to 139 at this body's proportions) did so through a partially
+/// transparent antialiasing artifact at the shape's boundary falling inside
+/// the checked rows — not by demonstrating that distinct "content" entered
+/// the hole. What this test actually establishes is narrower: that
+/// `ImageRenderer` renders `IslandShape` + `IslandGeometry.frames(tier: .drawer)`
+/// at a size never rendered before without error, and that the ground colour
+/// and panel-relative column arithmetic agree at that size. It cannot yet
+/// prove the cat/badge/session-count content stays clear of the cutout at
+/// this height too — that needs real content in the scene, which needs
+/// `IslandModel` to have a tier; that closes once a later task gives it one.
 @MainActor @Test func nothingIsDrawnInsideTheCutoutWithTheDrawerOpen() throws {
     let ground = Raster.Pixel(r: 5, g: 7, b: 11, a: 255)     // islandGroundColour, §7.1
     let g = IslandGeometry(screen: mbp14)
