@@ -113,6 +113,16 @@ import SwiftUI
     /// non-nil.
     var panelForTesting: NotchPanel? { panel }
 
+    /// The live hover monitor, for `NotchControllerTests` only — same
+    /// visibility reasoning as `panelForTesting`. Final whole-branch review,
+    /// finding 3: `reflow()`'s `hover?.frame = model.frames.body` is the one
+    /// line that makes the drawer clickable at all — pinning that rect to a
+    /// `.rest`-tiered frame instead left every test green, because nothing
+    /// before this read the hover monitor's own frame once a drawer was
+    /// open. Without this accessor there is no way for a test to see that
+    /// rect at all.
+    var hoverForTesting: HoverMonitor? { hover }
+
     public func refreshGeometry() {
         geometry = metrics().map(IslandGeometry.init(screen:))
         guard let geometry else { return }

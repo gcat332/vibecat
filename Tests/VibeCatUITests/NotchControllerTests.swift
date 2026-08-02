@@ -394,6 +394,42 @@ private let externalDisplay = ScreenMetrics(
             "the panel did not shrink back to its collapsed size once the drawer closed")
 }
 
+/// Finding 3 of the final whole-branch review: `reflow()`'s `hover?.frame =
+/// model.frames.body` is the one line that makes the drawer clickable at
+/// all. `acceptsClicks = model.hovering && model.question != nil`, and
+/// `model.hovering` only ever flips true because `HoverMonitor.sample()`
+/// finds the cursor inside `hover.frame` — so if that rect stayed pinned to
+/// the collapsed body alone, moving the cursor down from the island onto a
+/// drawer row would fall outside it, `hovering` would clear, and the drawer
+/// would go click-through while still open and still unanswered. Nothing
+/// before this test read `hover.frame` at all; pinning `reflow()`'s
+/// assignment to a `.rest`-tiered frame (confirmed below) left every
+/// existing test green.
+///
+/// The expected height is derived independently — the notch's own height
+/// plus the open question's face height, the same arithmetic
+/// `IslandGeometry.frames` uses for `body.height` at the `.drawer` tier —
+/// rather than read back off `c.model.frames.body` itself, which is exactly
+/// the value under test.
+@MainActor @Test func theHoverRectGrowsToCoverTheOpenDrawer() throws {
+    let c = makeController()
+    let hover = try #require(c.hoverForTesting)
+    let geometry = try #require(c.geometry)
+
+    let question = aQuestion()
+    let restHeight = hover.frame.height
+    #expect(restHeight == geometry.notch.height,
+            "setup: the hover rect should start at the collapsed body's own height")
+
+    c.setQuestion(question)
+    c.click()
+    #expect(c.model.tier != .rest, "setup: the drawer never opened, so this test proves nothing")
+
+    let expected = geometry.notch.height + QuestionModel(event: question.event).face.height
+    #expect(hover.frame.height == expected,
+            "hover.frame is \(hover.frame.height)pt tall with the drawer open, expected \(expected) — moving the cursor onto a row would clear hovering and make the drawer click-through")
+}
+
 // MARK: - Fix round 1: wiring the click
 
 /// `model.onIslandClick` is what a real tap on the collapsed island would
