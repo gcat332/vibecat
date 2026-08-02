@@ -103,6 +103,30 @@ private func tempSocketPath(_ name: String) -> String {
     #expect(elapsed < 2.0, "waited \(elapsed)s — the answer deadline is not bounding it")
 }
 
+/// `aTricklingPeerCannotOutlastTheDeadline` above never overrides `deadline:`,
+/// so `readTimeout == self.deadline` there and it cannot tell a correctly
+/// threaded wall clock apart from one pinned to the short delivery deadline —
+/// a peer that trickles one byte every 100ms keeps every individual read()
+/// well inside either value. This test sets `answerDeadline` strictly longer
+/// than `deadline`, so the two genuinely differ: the trickle must be allowed
+/// to run past the short delivery deadline, and must still be cut off at
+/// roughly the (longer) answer deadline, not left to hang on the server's
+/// eventual close five bytes later.
+@Test func aTricklingPeerOutlastsDeliveryButIsStillBoundedByTheAnswerDeadline() throws {
+    let path = tempSocketPath("trickle-answer")
+    let server = TricklingServer(path: path)
+    defer { server.stop() }
+
+    let c = SocketClient(path: path, deadline: 0.2, answerDeadline: 0.6)
+    let start = Date()
+    let reply = c.sendExpectingReply(Data("{}\n".utf8), deadline: c.answerDeadline)
+    let elapsed = Date().timeIntervalSince(start)
+
+    #expect(reply == nil, "no newline ever arrives, so this must fail open")
+    #expect(elapsed > 0.4, "gave up after \(elapsed)s — bounded by the short delivery deadline, not the answer deadline")
+    #expect(elapsed < 1.0, "waited \(elapsed)s — the answer deadline is not bounding it")
+}
+
 /// Accepts a connection and then says nothing, to exercise the deadline.
 private final class SilentServer: @unchecked Sendable {
     private let fd: Int32

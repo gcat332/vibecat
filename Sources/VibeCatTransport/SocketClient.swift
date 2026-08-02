@@ -61,7 +61,17 @@ public struct SocketClient: Sendable {
         // Delivery keeps the short deadline even when the answer gets a long
         // one: a socket that will not accept bytes is dead, and waiting 20s to
         // learn that is 20s of hung terminal for nothing.
-        let readTimeout = deadline ?? self.deadline
+        //
+        // Clamped here the same way `init` clamps deadline/answerDeadline —
+        // this parameter takes an arbitrary caller-supplied override (Task 3
+        // builds on this type), and setTimeout's own re-clamp only protects
+        // the per-syscall SO_RCVTIMEO. It does not protect readExpiry below:
+        // an unclamped value there is a wall clock with no upper bound, and a
+        // peer that trickles at least one byte before every SO_RCVTIMEO
+        // window closes can ride that forever — the unbounded wait §2.3
+        // forbids outright.
+        let readTimeout = Swift.min(Self.ceilingDeadline,
+                                    Swift.max(Self.floorDeadline, deadline ?? self.deadline))
         let writeExpiry = Date().addingTimeInterval(self.deadline)
         let readExpiry = Date().addingTimeInterval(readTimeout)
         // readTimeout, not self.deadline: SO_RCVTIMEO bounds each read()
@@ -112,11 +122,13 @@ public struct SocketClient: Sendable {
     }
 
     /// Belt to the absolute deadline's braces: keeps a single syscall from
-    /// parking forever. `duration` is always either `deadline` or
-    /// `answerDeadline`-derived, both already clamped above zero and below
-    /// the ceiling in `init`, so this never asks for the "no timeout" timeval
-    /// and never traps converting to a timeval's fields. Re-clamped anyway,
-    /// since this is the last line of defence before the syscall.
+    /// parking forever. `duration` is always already clamped by the time it
+    /// reaches here — `deadline` in `init`, `readTimeout` at its point of
+    /// computation in `sendExpectingReply` — so this never asks for the "no
+    /// timeout" timeval and never traps converting to a timeval's fields.
+    /// Re-clamped anyway, since this is the last line of defence before the
+    /// syscall and callers of connectSocket/setTimeout should not have to
+    /// re-derive that guarantee to stay safe.
     private func setTimeout(_ fd: Int32, _ option: Int32, duration: TimeInterval) {
         let whole = Swift.min(Self.ceilingDeadline, Swift.max(Self.floorDeadline, duration))
         let fraction = (whole - floor(whole)) * 1_000_000
