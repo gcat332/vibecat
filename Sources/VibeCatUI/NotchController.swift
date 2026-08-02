@@ -34,6 +34,22 @@ import SwiftUI
     private var hover: HoverMonitor?
     private var bloomEnd: Task<Void, Never>?
     private var observer: NSObjectProtocol?
+    private let sampler = BackdropSampler()
+    private var backdropSample: Task<Void, Never>?
+
+    /// The strip the aura blooms into, which is what has to be measured — not
+    /// the island itself, which is our own ground colour and would always read
+    /// dark. The panel rect is exactly that region plus the island, and
+    /// `BackdropSampler` excludes our own window from the capture, so what
+    /// comes back is whatever is behind both.
+    private func backdropRegion() -> CGRect {
+        let panel = model.frames.panel
+        guard let screen = metrics()?.frame else { return panel }
+        // ScreenCaptureKit's sourceRect has a top-left origin; ours is
+        // bottom-left, as AppKit's is.
+        return CGRect(x: panel.minX, y: screen.maxY - panel.maxY,
+                      width: panel.width, height: panel.height)
+    }
 
     public init(model appModel: AppModel, metrics: @escaping @MainActor () -> ScreenMetrics?) {
         self.appModel = appModel
@@ -177,6 +193,18 @@ import SwiftUI
         // AuraTrigger does its own change detection, so this is called
         // unconditionally and only reports true on an actual change.
         if model.aura.observe(model.state, now: now) {
+            // Only the aura reads the backdrop, so only a bloom pays for
+            // measuring it — ~35ms, which is nothing a few times a minute and
+            // ruinous per frame. Detached rather than awaited: the bloom
+            // starts now and peaks at 450ms, so a sample landing at 35ms is
+            // in place well before the moment it matters, and a slow or
+            // refused capture just leaves the previous answer standing.
+            backdropSample?.cancel()
+            backdropSample = Task { [weak self] in
+                guard let self else { return }
+                await sampler.refresh(region: backdropRegion())
+                model.backdrop = sampler.current
+            }
             // needsTimeline reads the aura, so the view must be nudged once
             // more when the bloom ends, or its TimelineView never stops —
             // reassigning model.aura is that nudge: @Observable notifies on

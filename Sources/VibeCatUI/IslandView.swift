@@ -163,20 +163,26 @@ struct IslandBody: View {
     let model: IslandModel
     let now: Date
 
-    /// Which menu bar the island is sitting on. The aura's colour depends on
-    /// it — a glow that lifts a dark bar has nowhere to go on a light one, and
-    /// measured on a real screen in Light mode the bloom lifted the halo by 8
-    /// levels against 26 on dark. See `AuraTint`.
-    ///
-    /// Taken from the environment rather than read from `NSApp`, so a test can
-    /// render both and a preview can show both. The system appearance is the
-    /// signal rather than the actual pixels behind the island: sampling those
-    /// would mean screen-recording permission, which is far too much to ask
-    /// for a glow.
+    /// The system's answer to "what is behind the island", used only when
+    /// nothing better is available. Taken from the environment rather than
+    /// read off `NSApp` so a test can render both and a preview can show both.
     @Environment(\.colorScheme) private var colorScheme
 
+    /// Which backdrop the aura has to be seen against.
+    ///
+    /// A measurement when there is one, and the system appearance otherwise.
+    /// The two disagree in a case that is not rare: with the menu bar
+    /// auto-hidden the island sits over the wallpaper, and on a real machine a
+    /// dark wallpaper under a Light system captured at luminance 48 while
+    /// `colorScheme` said `.light`. The glow would have been deepened when it
+    /// needed to be bright.
     var auraTint: AuraTint {
-        AuraTint(accent: model.state.accent, onLightBackdrop: colorScheme == .light)
+        let light = switch model.backdrop {
+        case .light: true
+        case .dark: false
+        case nil: colorScheme == .light
+        }
+        return AuraTint(accent: model.state.accent, onLightBackdrop: light)
     }
 
     /// The left flank's anatomy, named instead of inlined so a test can pin

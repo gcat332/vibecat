@@ -16,6 +16,15 @@ import Observation
     public var coat: Coat
     public var motion: MotionPreference
 
+    /// What is actually behind the island, when it can be measured. Nil means
+    /// "not measured", not "dark" — the view falls back to the system
+    /// appearance rather than to a default that looks like a reading.
+    ///
+    /// Only the aura uses it. See `BackdropSampler`: on a real machine, with
+    /// the menu bar auto-hidden over a dark wallpaper, the system reported
+    /// Light while the captured strip came back at luminance 48.
+    public var backdrop: Backdrop?
+
     public init(geometry: IslandGeometry, coat: Coat = .tabby, motion: MotionPreference) {
         self.geometry = geometry
         self.coat = coat
