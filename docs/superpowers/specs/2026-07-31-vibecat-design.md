@@ -108,12 +108,22 @@ it, so the core never learns a vendor's terminology.
 
 ### 2.3 Fail-open is a hard requirement
 
-**A crashed island must never be able to hang a terminal.** The hook uses a short
-deadline (default `300ms`, configurable) and, on timeout or a missing socket,
-returns the CLI's own default and exits 0.
+**A crashed island must never be able to hang a terminal.** Every wait the hook
+makes is bounded, and on timeout or a missing socket, it returns the CLI's own
+default and exits 0.
 
-This is settable in Settings but defaults on, and the copy says turning it off is
-not recommended. It is the single most important safety property in the design.
+There are two deadlines, not one, because they bound two different things.
+*Delivery* — confirming the app is even listening — keeps a short `300ms`
+default: nothing is waiting on an answer yet at that point, so any delay there
+is pure cost. A `wantsReply` event is different: the CLI would otherwise block
+on its own prompt indefinitely, so a bounded wait is not a regression against
+that — it is a ceiling that did not exist before. That one uses `answerDeadline`
+(§2.2), defaulting to 20 seconds: long enough for a person to actually read and
+answer, still bounded, still failing open the same way delivery does.
+
+Both are settable in Settings but default on, and the copy says turning either
+off is not recommended. Fail-open is the single most important safety property
+in the design.
 
 ---
 
@@ -548,7 +558,10 @@ Not sandboxed — it must drive terminals, open a Unix socket, and edit CLI conf
 files. **Developer ID + notarisation**, not the App Store.
 
 `LSUIElement = true` (no Dock icon). Login item via `SMAppService`.
-Permissions requested: **Automation**, **Notifications**.
+Permissions requested: **Automation**, **Notifications**, **Screen Recording**
+(used by `BackdropSampler` to measure what is actually behind the island, so
+the aura's light/dark tint matches the real backdrop rather than guessing from
+the system appearance alone — see §9.2).
 
 ---
 
