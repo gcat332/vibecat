@@ -387,7 +387,23 @@ Expected: PASS. Every existing `SocketClient` test still passes — the new para
 
 - [ ] **Step 5: Prove the split is load-bearing**
 
-Change `readExpiry` to use `self.deadline`, re-run. Expected: `waitingForAnAnswerOutlastsTheDeliveryDeadline` FAILS with an elapsed near 0.3. Restore.
+**The snippet above is not sufficient on its own, and this step is how that was
+found.** `SO_RCVTIMEO` is set once in `connectSocket`, from `deadline`, and
+nothing above changes that — so the read still times out at 300ms whatever the
+wall clock says, and Step 4 fails at ~0.302s. The read deadline has to be
+threaded into `connectSocket`/`setTimeout` as well.
+
+Once it is: the mutation that reproduces the ~0.3s failure is reverting *that*
+threading, not the wall-clock line. Confirmed both ways during implementation
+(commit `b6de1f5`).
+
+Also missing from the snippet: `SocketClientTests.swift` needs
+`import VibeCatCore`.
+
+And one interface line in this task had no test behind it — "HookRunner passes
+`answerDeadline` to `sendExpectingReply`" could be reverted with all 265 tests
+still green. `aReplySlowerThanDeliveryButWithinTheAnswerDeadlineIsStillHonoured`
+now covers it.
 
 - [ ] **Step 6: Commit**
 
