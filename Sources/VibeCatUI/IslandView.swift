@@ -165,8 +165,14 @@ public struct IslandView: View {
         // describes fixing once.
         .overlay(alignment: .topLeading) {
             if case .drawer = model.tier, let question = model.question {
+                // model.drawerWidth, not model.frames.body.width (finding 5
+                // of the final whole-branch review): the latter carries the
+                // collapsed pill's own hover reveal, which nothing in the
+                // drawer's content needs — see `IslandModel.drawerWidth`'s
+                // own doc comment for why the drawer's width holds steady
+                // regardless of where the cursor drifts while it is open.
                 DrawerView(question: question, accent: model.state.accent,
-                           width: model.frames.body.width,
+                           width: model.drawerWidth,
                            onAnswer: { model.onAnswer?($0) })
                     .padding(.leading, drawerLeadingOffset)
                     .padding(.top, model.geometry.notch.height)

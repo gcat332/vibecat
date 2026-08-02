@@ -103,6 +103,35 @@ import VibeCatCore
     /// resizes the live window to match this once tier changes.
     public var panelFrames: IslandFrames { geometry.maxCollapsedFrames(tier: tier) }
 
+    /// The drawer's own width — deliberately independent of `hovering`,
+    /// unlike `frames.body.width`. Final whole-branch review, finding 5:
+    /// `frames.body.width` carries the collapsed pill's own 150pt hover
+    /// reveal (§9.1's `CollapsedLayout.hoverReveal`), which exists so the
+    /// *pill* can show a session's name and elapsed time once hovered.
+    /// Nothing in the drawer's own content (`QuestionFace`'s title, body, or
+    /// rows) reads either of those, so widening the drawer for the same
+    /// reason serves it no purpose — and doing so anyway meant every row
+    /// reflowed instantly the moment the cursor drifted off `hover.frame`
+    /// (measured before this fix: 423.1pt while hovering, 273.1pt while not,
+    /// on the identical open question), while the collapsed silhouette above
+    /// it eased the identical width change over 280ms
+    /// (`IslandBody.hoverRevealWidth`'s own `.easeOut(duration: 0.28)`).
+    ///
+    /// Decision: the drawer's width does not depend on hover at all, rather
+    /// than animating the snap with the island's own reveal timing — there is
+    /// no content in the drawer that timing would ever need to reveal, so
+    /// matching the *other* animation's duration would just be dressing up a
+    /// change that should not happen in the first place. Computed the same
+    /// way `IslandBody.restingWidth` is (same session count, `hovering:
+    /// false` always), rather than reusing that private-to-`IslandView`
+    /// property directly, so `IslandModel` stays the one place a non-view
+    /// caller (a future settings surface, a test) can ask "how wide is the
+    /// drawer" without constructing a view first.
+    public var drawerWidth: CGFloat {
+        let resting = CollapsedLayout(right: layout.right, hovering: false)
+        return geometry.frames(rightFlank: resting.rightFlankWidth, tier: .rest).body.width
+    }
+
     public var mood: CatMood { CatMood(state: state) }
     public var badge: Badge { Badge(state: state) }
 

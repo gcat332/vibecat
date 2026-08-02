@@ -590,3 +590,72 @@ private func isNear(_ p: Raster.Pixel, _ colour: RGBA, tolerance: Int = 6) -> Bo
     #expect(closed != open,
             "drawerHeight did not change between drawerOpen == false and true — the §9.1 spring has nothing to animate on click")
 }
+
+/// Finding 5 of the final whole-branch review: `IslandView` used to hand
+/// `DrawerView` `model.frames.body.width` directly, which carries the
+/// collapsed pill's own 150pt hover reveal (§9.1) — measured before this
+/// fix, 423.1pt while hovering against 273.1pt while not, on the identical
+/// open question. An open drawer spends most of its life with the cursor
+/// somewhere else entirely, so every row reflowed the instant it left,
+/// unannounced. Decision: the drawer's width does not depend on hover at all
+/// (`IslandModel.drawerWidth`) — nothing in `QuestionFace` needs the extra
+/// room hover reveals (a session's name and elapsed time, neither of which
+/// this face shows), so there is no reason for its layout to change with it.
+///
+/// Checked on the render, not just the property: `panelFrames.panel.width`
+/// is fixed regardless of hovering (`IslandGeometry.maxCollapsedFrames`
+/// always assumes the theoretical widest), so both renders below are the
+/// same canvas size regardless of which width the drawer itself used —
+/// comparing pixels below the collapsed body directly is what actually
+/// proves the drawer's own content held still, rather than merely that some
+/// property nothing reads stayed constant.
+///
+/// Scoped to the drawer's own painted columns (`0..<model.drawerWidth`), not
+/// the full raster width — a known, minor, and deliberately unfixed residual:
+/// `IslandBody`'s own silhouette is one shape spanning the *whole* body
+/// height (collapsed content and drawer both, since `body.height` already
+/// includes the open drawer's own height), drawn at `restingWidth +
+/// hoverRevealWidth` regardless of what `DrawerView` does with its own
+/// width. While hovering, that shape is wider than the now hover-independent
+/// drawer sitting on top of it, so a same-coloured sliver of it (with its
+/// own, differently-positioned rounded bottom corner) is visible to the
+/// right of the drawer, only while hovering. Fixing that would mean teaching
+/// `IslandBody`'s own hover reveal to stop widening while a drawer happens
+/// to be open — a real change to a different, more heavily-relied-on
+/// mechanism (Task 9/10's collapsed-pill width split) for a same-colour,
+/// off-to-the-side cosmetic detail, and out of scope for what this finding
+/// asked: the drawer's *own* content must hold still, which this proves.
+@MainActor @Test func theDrawersContentDoesNotShiftWhenOnlyHoverChanges() throws {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    model.state = .waiting
+    model.sessionCount = 3
+    // `tightestPackingSingleSelect`'s long label, not `recommendedEvent`'s
+    // short ones: a label short enough to fit either width unwrapped shows
+    // nothing when the available width changes, which is exactly why this
+    // needs one long enough to wrap *differently* at 273pt than at 423pt —
+    // confirmed below (`heightDifference` before this fix) that it does.
+    model.question = QuestionModel(event: tightestPackingSingleSelect())
+    model.drawerOpen = true
+
+    model.hovering = false
+    let atRest = try rasterise(IslandView(model: model))
+    let drawerWidth = model.drawerWidth
+    model.hovering = true
+    let hovered = try rasterise(IslandView(model: model))
+    #expect(atRest.width == hovered.width && atRest.height == hovered.height,
+            "setup: the two renders are different sizes, so a row-for-row comparison below proves nothing")
+    #expect(model.drawerWidth == drawerWidth,
+            "setup: drawerWidth itself moved when hovering changed, which is exactly what this test exists to catch")
+
+    let drawerTop = Int(model.geometry.notch.height.rounded(.up))
+    let drawerRight = Int(drawerWidth.rounded(.down))
+    var differing = 0
+    for y in drawerTop..<atRest.height {
+        for x in 0..<drawerRight where atRest[x, y] != hovered[x, y] {
+            differing += 1
+        }
+    }
+    #expect(differing == 0,
+            "\(differing) pixels within the drawer's own width changed when only `hovering` toggled — the drawer's own content moved with the hover reveal")
+}

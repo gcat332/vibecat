@@ -104,3 +104,27 @@ private let mbp14 = ScreenMetrics(
     m.hovering = true
     #expect(m.layout.rightFlankWidth == rest + CollapsedLayout.hoverReveal)
 }
+
+/// Finding 5 of the final whole-branch review, at the data level:
+/// `drawerWidth` must not move when `hovering` does, unlike `frames.body
+/// .width` right above it — the whole point being that the drawer's own
+/// width holds steady regardless of where the cursor drifts while a
+/// question is open, which is the state an open drawer spends most of its
+/// life in. `theDrawersContentDoesNotShiftWhenOnlyHoverChanges` in
+/// DrawerGoldenTests.swift is the render-level version of the same claim.
+@MainActor @Test func drawerWidthDoesNotDependOnHovering() {
+    let m = model(.running, count: 3)
+    let atRest = m.drawerWidth
+    m.hovering = true
+    #expect(m.drawerWidth == atRest,
+            "drawerWidth moved from \(atRest) to \(m.drawerWidth)pt when only hovering changed")
+
+    // Independently derived — the same arithmetic IslandGeometry.frames uses
+    // for body.width, composed with a hovering: false CollapsedLayout built
+    // directly here — rather than read back off m.drawerWidth itself, which
+    // is exactly the value under test.
+    let expected = IslandGeometry.leftFlank + m.geometry.notch.width
+                 + CollapsedLayout(right: m.layout.right, hovering: false).rightFlankWidth
+    #expect(m.drawerWidth == expected,
+            "drawerWidth is \(m.drawerWidth), expected \(expected) — a hovering: false right-flank width, at the current session count")
+}
