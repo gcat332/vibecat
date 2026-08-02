@@ -6,21 +6,6 @@ import Foundation
 public struct AuraTrigger: Sendable, Equatable {
     public static let duration: TimeInterval = 0.9
 
-    /// Measured, not chosen. At the design's original 0.14 the bloom fired
-    /// perfectly and could not be seen: sampling the screen 24 times across a
-    /// real state change produced the exact `sin(phase · π)` hump, ~960ms
-    /// wide, whose peak lifted the band outside the island by **6 levels
-    /// summed across R, G and B** — two per channel. Plan 2's follow-up called
-    /// this before it was measured: "if it looks absent, check
-    /// `AuraTrigger.peakOpacity` before suspecting the trigger."
-    ///
-    /// Halo lift is linear in this value at about 76 levels per unit, so 0.34
-    /// buys ~26 — four times what shipped. Rendered side by side against 0.24
-    /// and 0.44 (see `auraOpacitySweep`), it is the first one that reads as a
-    /// glow rather than as dither, and stops short of shouting. A bloom that
-    /// only touches its peak for an instant needs the headroom.
-    public static let peakOpacity: Double = 0.34
-
     private var lastState: IslandState?
     private var firedAt: Date?
 
@@ -53,10 +38,21 @@ public struct AuraTrigger: Sendable, Equatable {
         return instant >= firedAt && instant < firedAt.addingTimeInterval(Self.duration)
     }
 
-    /// A symmetric rise and fall. Zero at both ends, so nothing is left behind.
-    public func opacity(at instant: Date) -> Double {
+    /// A symmetric rise and fall, normalised to 0…1. Zero at both ends, so
+    /// nothing is left behind.
+    ///
+    /// The *shape* of the bloom only. How strong it actually is depends on the
+    /// menu bar it lands on, and `AuraTint` owns that — one peak for both
+    /// backdrops is what left the aura invisible in Light mode.
+    public func intensity(at instant: Date) -> Double {
         guard isBlooming(at: instant), let firedAt else { return 0 }
         let phase = instant.timeIntervalSince(firedAt) / Self.duration     // 0…1
-        return Self.peakOpacity * sin(phase * .pi)
+        return sin(phase * .pi)
+    }
+
+    /// The rendered opacity for one backdrop: the curve, scaled by that
+    /// backdrop's measured peak.
+    public func opacity(at instant: Date, tint: AuraTint) -> Double {
+        intensity(at: instant) * tint.peakOpacity
     }
 }

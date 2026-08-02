@@ -7,7 +7,7 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
 @Test func theFirstObservationDoesNotFire() {
     var a = AuraTrigger()
     #expect(a.observe(.running, now: t0) == false)
-    #expect(a.opacity(at: t0) == 0)
+    #expect(a.intensity(at: t0) == 0)
 }
 
 @Test func aChangeFires() {
@@ -34,11 +34,11 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     let fired = t0.addingTimeInterval(1)
     _ = a.observe(.waiting, now: fired)
 
-    #expect(a.opacity(at: fired) == 0)
-    let peak = a.opacity(at: fired.addingTimeInterval(AuraTrigger.duration / 2))
-    #expect(abs(peak - AuraTrigger.peakOpacity) < 0.001)
-    #expect(a.opacity(at: fired.addingTimeInterval(AuraTrigger.duration)) == 0)
-    #expect(a.opacity(at: fired.addingTimeInterval(AuraTrigger.duration + 5)) == 0)
+    #expect(a.intensity(at: fired) == 0)
+    let peak = a.intensity(at: fired.addingTimeInterval(AuraTrigger.duration / 2))
+    #expect(abs(peak - 1.0) < 0.001, "the curve should peak at 1 — its strength is AuraTint's to scale")
+    #expect(a.intensity(at: fired.addingTimeInterval(AuraTrigger.duration)) == 0)
+    #expect(a.intensity(at: fired.addingTimeInterval(AuraTrigger.duration + 5)) == 0)
 }
 
 /// It is punctuation, not a status light — nothing is left behind.
@@ -47,7 +47,7 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     _ = a.observe(.idle, now: t0)
     _ = a.observe(.failed, now: t0.addingTimeInterval(1))
     let after = t0.addingTimeInterval(1 + AuraTrigger.duration + 0.001)
-    #expect(a.opacity(at: after) == 0)
+    #expect(a.intensity(at: after) == 0)
 }
 
 /// Drives whether the view needs per-frame redraws. True across the whole
@@ -70,5 +70,5 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     _ = a.observe(.running, now: t0.addingTimeInterval(1))
     let second = t0.addingTimeInterval(1.4)         // mid-bloom
     _ = a.observe(.waiting, now: second)
-    #expect(a.opacity(at: second) == 0)
+    #expect(a.intensity(at: second) == 0)
 }

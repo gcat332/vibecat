@@ -163,6 +163,22 @@ struct IslandBody: View {
     let model: IslandModel
     let now: Date
 
+    /// Which menu bar the island is sitting on. The aura's colour depends on
+    /// it — a glow that lifts a dark bar has nowhere to go on a light one, and
+    /// measured on a real screen in Light mode the bloom lifted the halo by 8
+    /// levels against 26 on dark. See `AuraTint`.
+    ///
+    /// Taken from the environment rather than read from `NSApp`, so a test can
+    /// render both and a preview can show both. The system appearance is the
+    /// signal rather than the actual pixels behind the island: sampling those
+    /// would mean screen-recording permission, which is far too much to ask
+    /// for a glow.
+    @Environment(\.colorScheme) private var colorScheme
+
+    var auraTint: AuraTint {
+        AuraTint(accent: model.state.accent, onLightBackdrop: colorScheme == .light)
+    }
+
     /// The left flank's anatomy, named instead of inlined so a test can pin
     /// their sum against `IslandGeometry.leftFlank` (see
     /// `leftAndRightFlankLiteralsAgreeWithTheGeometryConstants` in
@@ -333,7 +349,8 @@ struct IslandBody: View {
                 // A shadow on the shape traces its rendered alpha, rounded
                 // corners included, so the aura follows the silhouette rather
                 // than a bounding box — and follows the drawer down for free.
-                .shadow(color: accent.opacity(model.aura.opacity(at: now)),
+                .shadow(color: Color(auraTint.colour)
+                            .opacity(model.aura.opacity(at: now, tint: auraTint)),
                         radius: 18, x: 0, y: 2)
                 .frame(width: restingWidth + hoverRevealWidth, height: body.height)
                 .offset(x: localOrigin.x, y: localOrigin.y)
