@@ -448,6 +448,32 @@ private let externalDisplay = ScreenMetrics(
     #expect(c.model.tier != .rest, "model.onIslandClick did not reach click()")
 }
 
+/// Finding 4 of the final whole-branch review: `click()` used to set
+/// `model.drawerOpen = true` unconditionally, so the only way to close an
+/// opened drawer was `dismissOnEscape` — and that depends on the panel
+/// becoming key, Task 9's own still-open hardware question. A second click
+/// now closes the drawer again, and a third reopens it — but it must not
+/// touch the underlying question at all: closing the drawer this way is not
+/// the same decision as Escape's deliberate, fail-open dismiss, so the
+/// question stays parked rather than being lapsed early just because a
+/// person clicked the island twice.
+@MainActor @Test func clickTogglesTheDrawerOpenAndClosedWithoutAnsweringOrDismissing() {
+    let c = makeController()
+    c.setQuestion(aQuestion())
+    #expect(c.model.tier == .rest, "setup: a question alone must not open the drawer")
+
+    c.click()
+    #expect(c.model.tier != .rest, "the first click must open the drawer")
+
+    c.click()
+    #expect(c.model.tier == .rest, "the second click must close the drawer again")
+    #expect(c.model.question != nil,
+            "a second click discarded the question instead of merely closing the drawer")
+
+    c.click()
+    #expect(c.model.tier != .rest, "a third click did not reopen the same, still-pending question")
+}
+
 /// `dismiss()` must clear `onIslandClick` the same way it already clears
 /// `appModel.onChange`/`.onQuestion` — otherwise a click reaching a stale
 /// closure after the controller is torn down would still mutate `model`
@@ -496,6 +522,23 @@ private let externalDisplay = ScreenMetrics(
 }
 
 // MARK: - Task 9: Escape dismisses; number keys wait on the hardware question
+
+/// Finding 4 of the final whole-branch review: every behavioural Escape test
+/// below drives `dismissOnEscape(_:)` directly, which is correct — there is
+/// no window server in `swift test` to deliver a real `NSEvent` — but that
+/// also means none of them notice if `present()` stopped installing the
+/// monitor that would ever call it for a real keystroke. Deleting that
+/// installation block failed no test before this one. `dismiss()` must
+/// remove it for the same reason it removes the screen-parameters observer
+/// just above it in `NotchController.swift` — a monitor left behind after
+/// teardown would keep calling into a controller nothing else references.
+@MainActor @Test func presentInstallsTheEscapeMonitorAndDismissRemovesIt() {
+    let c = makeController()
+    #expect(c.escapeMonitorForTesting != nil, "present() did not install the local Escape monitor")
+
+    c.dismiss()
+    #expect(c.escapeMonitorForTesting == nil, "dismiss() did not remove the local Escape monitor")
+}
 
 /// Escape while the drawer is open dismisses the question without answering
 /// it. Driven directly through `dismissOnEscape`, the same way

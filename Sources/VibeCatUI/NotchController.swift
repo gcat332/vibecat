@@ -123,6 +123,19 @@ import SwiftUI
     /// rect at all.
     var hoverForTesting: HoverMonitor? { hover }
 
+    /// The live local Escape monitor, for `NotchControllerTests` only — same
+    /// visibility reasoning as `panelForTesting`. Final whole-branch review,
+    /// finding 4: Escape is the only user-initiated dismiss this app has, and
+    /// nothing before this test read `escapeMonitor` at all — deleting the
+    /// whole installation block in `present()` failed no test, because every
+    /// behavioural Escape test in this file drives `dismissOnEscape(_:)`
+    /// directly rather than through a real, delivered `NSEvent` (there is no
+    /// window server in `swift test` to deliver one). This closes the gap one
+    /// level down from that: not "does Escape dismiss," which those tests
+    /// already cover, but "is the monitor that would ever receive a real
+    /// Escape actually installed at all."
+    var escapeMonitorForTesting: Any? { escapeMonitor }
+
     public func refreshGeometry() {
         geometry = metrics().map(IslandGeometry.init(screen:))
         guard let geometry else { return }
@@ -351,11 +364,26 @@ import SwiftUI
 
     /// The island was clicked while it could take clicks (see
     /// `NotchPanel.acceptsClicks`) — opens the drawer on whichever question
-    /// is currently showing. A no-op if there is none: `model.tier`'s own
-    /// guard also requires a question, so setting this with nothing pending
-    /// leaves the tier at `.rest`/`.hover` regardless.
+    /// is currently showing, or closes it again on the next click. A no-op
+    /// either way if there is no question: `model.tier`'s own guard also
+    /// requires one, so toggling this with nothing pending leaves the tier
+    /// at `.rest`/`.hover` regardless.
+    ///
+    /// `.toggle()`, not an unconditional `= true` (final whole-branch
+    /// review, finding 4): Escape is otherwise the only way to back out of
+    /// an opened drawer, and Escape's own delivery depends on the panel
+    /// becoming key — Task 9's still-open hardware question. Without a
+    /// second click closing it, a person who opens the drawer and changes
+    /// their mind has no way to collapse it if that delivery never happens,
+    /// short of answering or waiting out the lapse. This only flips the
+    /// *drawer's* own visibility, deliberately — it does not touch
+    /// `appModel`'s pending question at all, unlike `dismissOnEscape`'s
+    /// deliberate, fail-open dismiss below: a second click closing the
+    /// drawer must not silently abandon a question the hook is still
+    /// waiting on. The question stays parked, still running its own
+    /// deadline, and a third click reopens the same one.
     func click() {
-        model.drawerOpen = true
+        model.drawerOpen.toggle()
         reflow()
     }
 
