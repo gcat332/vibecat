@@ -35,10 +35,24 @@ private let mbp14 = ScreenMetrics(
 
 /// §5.1, at the tier that could break it: the drawer hangs below the notch
 /// line, so its own top edge starts at the cutout's bottom, never inside it.
+///
+/// The whole-branch review's minor: `open.body.maxY == g.notch.maxY` (this
+/// test's own first assertion, before this fix) is a confirmed tautology —
+/// `body` is always built as `y: screen.frame.maxY - height` (see
+/// `IslandGeometry.frames`), so `body.maxY` reduces to `screen.frame.maxY`
+/// for *any* height at all, and `notch.maxY` reduces to the same constant
+/// the same way (`notch`'s own `y: frame.maxY - safeAreaTop`, `height:
+/// safeAreaTop`). Confirmed directly: mutating `IslandTier.extraHeight` to
+/// always return 0 — silently dropping the drawer's own requested height —
+/// left that assertion green while only the second one (`body.height ==
+/// notch.height + 288`, kept below unchanged) caught it. Replaced with the
+/// actual claim: the gap between the notch's own top and the body's top is
+/// exactly the drawer's requested height, which the same mutation does move
+/// (to 0, against an expected 288).
 @Test func theDrawerHangsBelowTheNotchLine() {
     let g = IslandGeometry(screen: mbp14)
     let open = g.frames(rightFlank: 35, tier: .drawer(height: 288))
-    #expect(open.body.maxY == g.notch.maxY)
+    #expect(g.notch.minY - open.body.minY == 288)
     #expect(open.body.height == g.notch.height + 288)
 }
 
