@@ -180,11 +180,34 @@ public struct IslandView: View {
     /// `IslandBody.restingWidth`/`.hoverRevealWidth`: one property per
     /// independent animation, so this spring cannot be overridden by one
     /// keyed to something that did not change, and vice versa.
-    private var drawerHeight: CGFloat {
+    ///
+    /// Keyed to `model.tier`, not `model.question?.face.height ?? 0` (what
+    /// this read before the final whole-branch review): a question arriving
+    /// changes `model.question` — and so the old expression — the instant it
+    /// arrives, before any click, which is exactly the moment §6.1/Task 8
+    /// says nothing visual may happen yet (see `IslandModel.tier`'s own doc
+    /// comment, and `aQuestionWithoutAClickRendersIdenticallyToNoQuestionAtAll`
+    /// below). And it does NOT change when `drawerOpen` flips true, because
+    /// the question that was already there is still there — so the one
+    /// gesture this spring exists for (§9.1) never actually triggered it.
+    /// `model.tier` is the one property that already enforces "closed until
+    /// clicked, closed again once cleared" (`drawerOpen` together with
+    /// `question`), so reading it here instead is what makes the spring key
+    /// on the right event.
+    ///
+    /// Not `private`: pinned by `drawerHeightTracksTheTierOpeningNotTheQuestionArriving`
+    /// in DrawerGoldenTests.swift, the same reasoning `restingWidth`'s own
+    /// doc comment gives for why that property isn't `private` either — a
+    /// test needs the actual computed value, not just whether it was *read*
+    /// (which `drawerHeightReadCount` below already covers, and which stayed
+    /// green throughout the defect this describes: `model.question?.face
+    /// .height ?? 0` is also "a property," just the wrong one).
+    var drawerHeight: CGFloat {
         #if DEBUG
         Self.drawerHeightReadCount += 1
         #endif
-        return model.question?.face.height ?? 0
+        if case let .drawer(height) = model.tier { return height }
+        return 0
     }
 
     #if DEBUG

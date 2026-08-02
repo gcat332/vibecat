@@ -489,3 +489,32 @@ private func isNear(_ p: Raster.Pixel, _ colour: RGBA, tolerance: Int = 6) -> Bo
     #expect(IslandView.drawerHeightReadCount > 0,
             "body never read drawerHeight — the drawer spring's input may not be wired")
 }
+
+/// Finding 1 of the final whole-branch review: the test above only proves
+/// *some* property is read while `body` is built — it stayed green
+/// throughout the actual defect, because `model.question?.face.height ?? 0`
+/// (what `drawerHeight` read before this fix) is also "a property." That
+/// expression changes the moment a question ARRIVES (`model.question` goes
+/// non-nil) and does not change when `drawerOpen` flips — the exact inverse
+/// of what §9.1's spring exists to animate. Confirmed directly: reverting
+/// `drawerHeight` to that shape keeps `bodyActuallyReadsDrawerHeightWhileBeingBuilt`
+/// green (some property is still read every time) while every assertion
+/// below fails, because a still-open question makes `closed` and `open`
+/// compute the identical, already-nonzero value.
+@MainActor @Test func drawerHeightTracksTheTierOpeningNotTheQuestionArriving() {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    model.question = QuestionModel(event: recommendedEvent())
+
+    model.drawerOpen = false
+    let closed = IslandView(model: model).drawerHeight
+    model.drawerOpen = true
+    let open = IslandView(model: model).drawerHeight
+
+    #expect(closed == 0,
+            "a question that has not been clicked open must contribute no height to the spring's input")
+    #expect(open == model.question!.face.height,
+            "an open drawer's height did not reach drawerHeight")
+    #expect(closed != open,
+            "drawerHeight did not change between drawerOpen == false and true — the §9.1 spring has nothing to animate on click")
+}
