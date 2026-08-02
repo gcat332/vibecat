@@ -86,3 +86,44 @@ import VibeCatCore
     m.confirm()
     #expect(m.reply()?.choice == "always")
 }
+
+/// `-f` is `--force` spelled shorter, and the more common spelling in
+/// practice — §10.3 names a behaviour, not a literal string to grep for.
+@Test func theShortFlagSpellingAlsoAsksTwice() {
+    #expect(DestructiveGuard.matches("git push -f origin main"))
+    #expect(DestructiveGuard.matches("git push origin -f"))
+    #expect(DestructiveGuard.matches("git push -f"))
+}
+
+/// `-f` must stand as its own token, or it becomes a false-positive magnet:
+/// a branch/remote literally named `f`, a hyphenated name that merely
+/// *contains* "-f" (its dash is preceded by a letter, not whitespace), and
+/// unrelated short flags must all pass straight through. Verified against
+/// the real regex engine with a standalone probe script before this landed,
+/// not by inspection alone.
+@Test func theShortFlagDoesNotBecomeAFalsePositiveMagnet() {
+    for safe in ["git push origin feature", "git push origin my-feature-branch",
+                 "git push origin f", "git push f main",
+                 "git push -u origin main", "git push -v origin main",
+                 "git push -n origin main", "git push -foo origin main"] {
+        #expect(DestructiveGuard.matches(safe) == false, "\(safe) was flagged as destructive")
+    }
+}
+
+/// `beginOther()` clears `selected`, and `needsConfirmation` only ever reads
+/// `selected` — so a free-text reply against a destructive body is never
+/// gated. Pinned deliberately, per `needsConfirmation`'s doc comment: writing
+/// something else in place of the proposed command *is* a refusal of it, the
+/// same shape as picking `deny`, and refusals are already exempt (see
+/// `refusingADestructiveCommandNeedsNoConfirmation`).
+@MainActor @Test func aFreeTextReplyToADestructiveBodyNeedsNoConfirmation() {
+    let e = VibeEvent(id: "q", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
+                      body: "rm -rf build/",
+                      choices: [Choice(id: "allow", label: "Allow once")],
+                      wantsReply: true)
+    let m = QuestionModel(event: e)
+    m.beginOther()
+    m.otherText = "use pnpm instead"
+    #expect(m.needsConfirmation == false)
+    #expect(m.reply()?.text == "use pnpm instead")
+}

@@ -21,6 +21,13 @@ public final class QuestionModel {
     /// True once a *permissive* answer has been picked for a body §10.3 names.
     /// Refusing a destructive command carries no danger, so a `deny` pick
     /// never trips this — only `allow`/`always` do.
+    ///
+    /// The same reasoning covers `Other…`: `beginOther()` clears `selected`,
+    /// and this reads only `selected`, so a free-text reply can never trip it
+    /// either. That is a decision, not an oversight — writing something else
+    /// in place of the proposed command *is* a refusal of it, the same shape
+    /// as picking `deny`, not an authorisation that merely took a different
+    /// form. Pinned by `aFreeTextReplyToADestructiveBodyNeedsNoConfirmation`.
     public var needsConfirmation: Bool {
         guard DestructiveGuard.matches(event.body) else { return false }
         guard !isConfirming else { return false }

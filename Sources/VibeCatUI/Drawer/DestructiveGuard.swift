@@ -15,7 +15,17 @@ public enum DestructiveGuard {
         // `refactor.py`, or even a plain recursive delete like `rm -r folder`
         // (whose argument merely starts with an 'f').
         #"\brm\b(?=(?:\s+-{1,2}\w+)*\s+-{1,2}\w*[rR])(?=(?:\s+-{1,2}\w+)*\s+-{1,2}\w*[fF])"#,
-        #"\bgit\s+push\b(?=.*--force)"#,
+        // `--force` as a substring (deliberately unbounded, so `--force-with-
+        // lease` and `--force-if-includes` still count), or the short spelling
+        // `-f` — the same flag, not a different one, and the more common
+        // spelling in practice. `-f` is required to stand as its own token
+        // (`\s` before, `\b` after): that excludes a branch/remote literally
+        // named `f`, a hyphenated name like `my-feature-branch` (its "-f" is
+        // preceded by a letter, not whitespace), and a longer flag like
+        // `-foo` (no boundary between "f" and "oo"). It does not extend to a
+        // bundled cluster like `-uf`/`-fu` — a deliberate scope limit, not an
+        // oversight; see DestructiveGuardTests.
+        #"\bgit\s+push\b(?=.*(?:--force|\s-f\b))"#,
         #"\bdrop\s+table\b"#,
     ]
 
