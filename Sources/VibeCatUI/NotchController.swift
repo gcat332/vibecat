@@ -142,8 +142,15 @@ import SwiftUI
         // .contentView as? NSHostingView<IslandView>` — which is what this
         // restores, just without the `else` branch that used to mutate
         // `.rootView` on every render.
+        //
+        // IslandHostingView, not a bare NSHostingView: `is NSHostingView
+        // <IslandView>` still recognises it (a subclass instance satisfies an
+        // `is` check for its superclass), so the guard and
+        // `theHostingRootIsAssignedOnceAndSurvivesStateChanges`'s own check
+        // are both unaffected — the only difference is `acceptsFirstMouse`,
+        // see that type's own doc comment.
         if !(panel.contentView is NSHostingView<IslandView>) {
-            panel.contentView = NSHostingView(rootView: IslandView(model: model))
+            panel.contentView = IslandHostingView(rootView: IslandView(model: model))
         }
 
         let hover = self.hover ?? HoverMonitor()
@@ -162,6 +169,13 @@ import SwiftUI
         // AppModel.present/clearQuestion) — so it gets its own callback
         // rather than being folded into onChange above.
         appModel.onQuestion = { [weak self] pending in self?.setQuestion(pending) }
+        // The click that opens the drawer, and the answer that closes it —
+        // see IslandModel.onIslandClick/.onAnswer's own doc comments. Both
+        // set unconditionally on every present(), the same as onChange/
+        // onQuestion above, so a second present() without an intervening
+        // dismiss() re-wires them rather than leaving stale closures.
+        model.onIslandClick = { [weak self] in self?.click() }
+        model.onAnswer = { [weak self] reply in self?.appModel.answer(reply) }
 
         render()
         // Never makeKeyAndOrderFront — the app must not steal focus.
@@ -183,6 +197,8 @@ import SwiftUI
     public func dismiss() {
         appModel.onChange = nil
         appModel.onQuestion = nil
+        model.onIslandClick = nil
+        model.onAnswer = nil
         bloomEnd?.cancel()
         bloomEnd = nil
         lapseCheck?.cancel()

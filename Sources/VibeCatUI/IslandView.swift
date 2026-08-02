@@ -166,7 +166,8 @@ public struct IslandView: View {
         .overlay(alignment: .topLeading) {
             if case .drawer = model.tier, let question = model.question {
                 DrawerView(question: question, accent: model.state.accent,
-                           width: model.frames.body.width)
+                           width: model.frames.body.width,
+                           onAnswer: { model.onAnswer?($0) })
                     .padding(.leading, drawerLeadingOffset)
                     .padding(.top, model.geometry.notch.height)
             }
@@ -479,6 +480,20 @@ struct IslandBody: View {
                 // be overridden by the spring above, because both would then
                 // be keyed to the same changing `body.width`.
                 .animation(.easeOut(duration: 0.28), value: hoverRevealWidth)
+                // Fix round 1: the click that opens the drawer. Scoped to
+                // this shape's own rect (`restingWidth + hoverRevealWidth` ×
+                // `body.height`, offset within the panel) via `.contentShape`
+                // — not the outer `.frame` below, which is the full,
+                // oversized panel width and would otherwise make the entire
+                // unused margin tappable too. `model.onIslandClick`, not a
+                // direct `NotchController` reference: `IslandBody` only ever
+                // holds `model`, and `NotchController.present()` is what
+                // wires this closure to `click()` — see that property's own
+                // doc comment. A no-op via `?()` if nothing is listening yet
+                // (a fresh model with no controller behind it, as most
+                // renders in this test suite are).
+                .contentShape(IslandShape())
+                .onTapGesture { model.onIslandClick?() }
         }
         .frame(width: panel.panel.width, height: panel.panel.height,
                alignment: .topLeading)

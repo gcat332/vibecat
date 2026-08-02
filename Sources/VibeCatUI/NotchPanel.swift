@@ -1,4 +1,28 @@
 import AppKit
+import SwiftUI
+
+/// `NSHostingView<IslandView>`, plus one AppKit override: `acceptsFirstMouse`.
+///
+/// This panel is deliberately `.nonactivatingPanel` + `becomesKeyOnlyIfNeeded`
+/// (below) so a click can open the drawer without stealing focus from
+/// whatever the person was doing — but AppKit's own default for *any*
+/// `NSView` is "the first click while the window is not key wakes the window
+/// up; the view only sees a *second* click." That is the opposite of what a
+/// click-to-open gesture needs: the very first click after this app
+/// launches, or after any other window last held focus, has to act
+/// immediately rather than being swallowed as a wake-up tap that never
+/// reaches SwiftUI's own gesture recognition underneath.
+///
+/// `true` unconditionally — this view has nothing that should ever refuse
+/// first-mouse — is what makes the first click already act. This does not
+/// touch window activation or key status itself (`isFloatingPanel`/`level`,
+/// `becomesKeyOnlyIfNeeded` and the `.nonactivatingPanel` style mask already
+/// govern that, unchanged); it only decides whether *this view* is told
+/// about a click that arrives while the window is not key, which is a
+/// narrower and unrelated question from AppKit's perspective.
+@MainActor public final class IslandHostingView: NSHostingView<IslandView> {
+    public override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
 
 /// The window that sits in the notch.
 ///

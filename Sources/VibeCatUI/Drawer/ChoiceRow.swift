@@ -6,11 +6,10 @@ import VibeCatCore
 /// checkbox for multi — never in the label, so a single- and a multi-select
 /// row must not read the same at a glance.
 ///
-/// Purely presentational: whether a tap here does anything is Task 8's
-/// wiring ("click to open, and the round trip end to end"), not this file's.
-/// Nothing in this plan tests a click landing on a row — only the model
-/// methods a future click would call (`pick`/`toggle`, already green in
-/// `QuestionModelTests`) and the pixels this file itself produces.
+/// Presentational plus one plain callback: *what* a tap here means (pick,
+/// toggle, or confirm) is `QuestionFace.tapped(_:)`'s decision, not this
+/// file's — this only reports that a tap landed, for whichever choice this
+/// row was built for.
 struct ChoiceRow: View {
     let choice: Choice
     /// 0-based row position. Used for the single-select badge's numeral
@@ -34,6 +33,10 @@ struct ChoiceRow: View {
     /// excludes this synthetic row, so the badge would be a dead key by
     /// construction. Set for exactly one row, never with `isMulti`.
     var isOther: Bool = false
+    /// Fires on a tap anywhere in the row. Defaulted so every existing
+    /// test/preview call site (rendering only, no interaction) keeps
+    /// compiling unchanged; `QuestionFace.rows` passes a real one per row.
+    var onTap: () -> Void = {}
 
     private static let controlSize: CGFloat = 20
     private static let cornerRadius: CGFloat = 8
@@ -75,6 +78,12 @@ struct ChoiceRow: View {
             RoundedRectangle(cornerRadius: Self.cornerRadius)
                 .strokeBorder(isRecommended ? accent : Color.clear, lineWidth: 1)
         )
+        // The whole row is tappable, not just its drawn content — an
+        // explicit `.contentShape` because the label's `Spacer` and the
+        // unfilled background (`Color.clear` on every non-recommended row)
+        // would otherwise leave gaps a tap could fall through.
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
     }
 
     @ViewBuilder private var control: some View {

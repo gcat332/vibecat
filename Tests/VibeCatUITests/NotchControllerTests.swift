@@ -393,3 +393,68 @@ private let externalDisplay = ScreenMetrics(
     #expect(panel.frame == collapsedFrame,
             "the panel did not shrink back to its collapsed size once the drawer closed")
 }
+
+// MARK: - Fix round 1: wiring the click
+
+/// `model.onIslandClick` is what a real tap on the collapsed island would
+/// invoke (`IslandBody`'s own `.onTapGesture`, untestable directly — see
+/// this test's own use of the callback instead of a synthesised `NSEvent`).
+/// This confirms `present()` actually wires it to `click()`, the same way
+/// `presentingWiresTheModelsOnChangeAndDismissingClearsIt` confirms
+/// `appModel.onChange` reaches `reflow()`.
+@MainActor @Test func theIslandClickCallbackReachesClick() {
+    let c = makeController()
+    c.setQuestion(aQuestion())
+    #expect(c.model.tier == .rest, "setup: a question alone must not open the drawer")
+
+    c.model.onIslandClick?()
+
+    #expect(c.model.tier != .rest, "model.onIslandClick did not reach click()")
+}
+
+/// `dismiss()` must clear `onIslandClick` the same way it already clears
+/// `appModel.onChange`/`.onQuestion` — otherwise a click reaching a stale
+/// closure after the controller is torn down would still mutate `model`
+/// (harmless here only because `model` itself is retained by this test, not
+/// because the wiring is correct).
+@MainActor @Test func dismissClearsTheIslandClickCallback() {
+    let c = makeController()
+    c.dismiss()
+    #expect(c.model.onIslandClick == nil)
+    #expect(c.model.onAnswer == nil)
+}
+
+/// `model.onAnswer` is what a real tap on a drawer row/Send would invoke
+/// (`QuestionFace.tapped(_:)`/`.sendTapped()`, see `QuestionFaceTests`).
+/// This confirms `present()` wires it all the way to `appModel.answer(_:)` —
+/// checked via `appModel.pending` actually clearing, which only `.answer(_:)`
+/// resolving a *real*, id-matched question can do. `AppModel.ingest` parks
+/// its calling thread until answered, so it runs on a real `Thread` here
+/// (mirroring `PipelineTests`' own end-to-end tests), never `Task.detached`.
+@MainActor @Test func theAnswerCallbackReachesAppModelAnswer() async throws {
+    let (c, appModel) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+
+    let event = VibeEvent(id: "q-onanswer", cli: "claude-code", kind: .permission,
+                          session: "s", cwd: "/tmp/proj",
+                          choices: [Choice(id: "allow", label: "Allow once")],
+                          wantsReply: true, answerDeadline: 5)
+    Thread.detachNewThread { _ = appModel.ingest(event) }
+
+    let arrived = Date().addingTimeInterval(2)
+    while appModel.pending == nil, Date() < arrived {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(appModel.pending?.id == "q-onanswer", "the question never reached the model")
+
+    c.model.onAnswer?(Reply(id: "q-onanswer", choice: "allow"))
+
+    let resolved = Date().addingTimeInterval(2)
+    while appModel.pending != nil, Date() < resolved {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(appModel.pending == nil,
+            "model.onAnswer did not reach appModel.answer — the question is still parked")
+    c.dismiss()
+}

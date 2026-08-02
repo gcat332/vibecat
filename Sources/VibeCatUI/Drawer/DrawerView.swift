@@ -1,4 +1,5 @@
 import SwiftUI
+import VibeCatCore
 
 /// The drawer's frame: the island's own ground colour, sized to whichever
 /// face `question` is showing, with the same rounded-bottom silhouette the
@@ -9,6 +10,12 @@ struct DrawerView: View {
     let question: QuestionModel
     let accent: RGBA
     let width: CGFloat
+    /// Fires with the `Reply` a tap inside `QuestionFace` produced. Threaded
+    /// straight through to it — `DrawerView` itself makes no answering
+    /// decision, `QuestionModel` already does (see its own doc comment).
+    /// Defaulted so every existing test/preview call site (none of which
+    /// cares whether a tap answers anything) keeps compiling unchanged.
+    var onAnswer: (Reply) -> Void = { _ in }
 
     /// §6.4: the footer (mute + settings) is Plan 6's, not this plan's — a
     /// button that opens nothing is worse than no button (see this plan's
@@ -25,7 +32,7 @@ struct DrawerView: View {
             .fill(Color(islandGroundColour))
             .overlay(alignment: .top) {
                 VStack(spacing: 0) {
-                    QuestionFace(question: question, accent: accentColor)
+                    QuestionFace(question: question, accent: accentColor, onAnswer: onAnswer)
                     // The reservation itself: an explicitly empty, fixed-
                     // height spacer rather than plain absence, so its height
                     // is checkable and its presence is a decision a later

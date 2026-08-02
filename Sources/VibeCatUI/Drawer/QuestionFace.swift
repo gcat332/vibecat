@@ -7,12 +7,20 @@ import VibeCatCore
 /// why all of this content-specific knowledge lives here rather than in
 /// `DrawerView`, which stays face-agnostic.
 ///
-/// Purely a function of `question`'s current state, the same as
-/// `ChoiceRow` — see that file's own doc comment for why nothing here wires
-/// a tap to `pick`/`toggle`/`confirm` yet.
+/// A function of `question`'s current state, the same as `ChoiceRow` — but
+/// unlike that file, this one *does* decide what a tap means (`tapped(_:)`/
+/// `sendTapped()` below), because §10's rules about *when* a tap finishes
+/// answering (single select sends immediately unless §10.3 asks twice;
+/// multi select never auto-sends) are about the question as a whole, not
+/// about any one row in isolation.
 struct QuestionFace: View {
     let question: QuestionModel
     let accent: Color
+    /// Fires with the `Reply` a tap actually produced — never called for a
+    /// tap that only picks, toggles, or opens the reply field without
+    /// finishing the answer. Defaulted so every existing test/preview call
+    /// site keeps compiling unchanged; `DrawerView` passes a real one.
+    var onAnswer: (Reply) -> Void = { _ in }
 
     /// Distance from the drawer's own left edge to where a row's own
     /// content — and so its accent border, when it has one — actually
@@ -60,7 +68,8 @@ struct QuestionFace: View {
             ForEach(Array(question.rows.enumerated()), id: \.element.id) { index, choice in
                 ChoiceRow(choice: choice, index: index, isMulti: question.isMulti,
                           isSelected: question.selected.contains(choice.id),
-                          isRecommended: isRecommended(index), accent: accent)
+                          isRecommended: isRecommended(index), accent: accent,
+                          onTap: { tapped(choice.id) })
             }
             if !question.isMulti {
                 // §10.1: "`Other…` is the last row." A synthetic `Choice` so
@@ -73,6 +82,14 @@ struct QuestionFace: View {
                 // comment for why (§10.2's rule, read the other way round,
                 // resolves the §10.1/§10.2 contradiction a numbered `Other…`
                 // would otherwise be). `index` is unread with `isOther`.
+                //
+                // Deliberately not wired to `beginOther()` in this round:
+                // typing into the field it opens needs keyboard input, which
+                // needs the panel to become key — Task 9's own unresolved
+                // hardware question, not this fix's ordinary mouse plumbing.
+                // Opening a field nobody can type into or back out of would
+                // be a worse dead end than the row simply doing nothing, so
+                // it stays inert until that lands.
                 ChoiceRow(choice: Choice(id: "__other__", label: "Other…"),
                           index: 0, isMulti: false,
                           isSelected: false, isRecommended: false, accent: accent,
@@ -84,6 +101,54 @@ struct QuestionFace: View {
             if question.isMulti {
                 sendRow
             }
+        }
+    }
+
+    /// A row was tapped. Multi select only ever toggles (§10.2: the row is
+    /// never itself the answer). Single select is where §10.1's "the click
+    /// is the answer" and §10.3's "asks twice" meet: tapping an
+    /// already-selected row that still needs confirmation is the *second*
+    /// tap the confirmation banner asks for — it confirms rather than
+    /// re-picking the same id — and either branch then attempts to send,
+    /// which is a no-op via `reply()`'s own guard whenever confirmation is
+    /// still outstanding (a fresh pick on a destructive+permissive choice).
+    ///
+    /// `internal`, not `private`: this is the entry point
+    /// `QuestionFaceTests` calls directly to verify tap semantics without a
+    /// real gesture — see that file's own doc comment on why a synthesised
+    /// `NSEvent` cannot reach a SwiftUI `.onTapGesture` in this test suite.
+    func tapped(_ id: String) {
+        if question.isMulti {
+            question.toggle(id)
+            return
+        }
+        if question.selected.contains(id) && question.needsConfirmation {
+            question.confirm()
+        } else {
+            question.pick(id)
+        }
+        if let reply = question.reply() {
+            onAnswer(reply)
+        }
+    }
+
+    /// Send was tapped. Multi select's own "click IS the answer" moment —
+    /// checkboxes only toggle, so this is the one gesture that can actually
+    /// finish a multi-select answer. `canSend`'s own guard already keeps a
+    /// disabled-looking Send inert; `reply()`'s guard keeps a tap while
+    /// confirmation is still outstanding from finishing anything, the same
+    /// as `tapped(_:)` above. `internal` for the same reason `tapped(_:)` is.
+    func sendTapped() {
+        // Confirmed redundant with reply()'s own `!selected.isEmpty` guard
+        // for multi select (deleting this line alone changes no test's
+        // outcome) — kept anyway so a reader sees "disabled Send does
+        // nothing" here directly, without tracing into reply()'s internals.
+        guard question.canSend else { return }
+        if question.needsConfirmation {
+            question.confirm()
+        }
+        if let reply = question.reply() {
+            onAnswer(reply)
         }
     }
 
@@ -115,18 +180,21 @@ struct QuestionFace: View {
                 .foregroundStyle(Color.white.opacity(0.55))
             Spacer()
             // §10.2: "Send is disabled at zero" — and disabled has to look
-            // disabled, not merely refuse a tap nobody is wiring yet: a
-            // muted capsule and dimmed label versus a filled, black-on-
-            // accent one. This is a call-to-action button, not one of the
-            // rows §10.1's "tinted, not filled" rule is about, so a solid
-            // fill here when it *can* be pressed is the correct treatment,
-            // not a violation of it.
+            // disabled, which stays true regardless of the tap gesture below:
+            // `sendTapped()` re-checks `canSend` itself, so an unconditional
+            // gesture on a visually-disabled Send is still inert, the same
+            // as a real disabled control would be. This is a call-to-action
+            // button, not one of the rows §10.1's "tinted, not filled" rule
+            // is about, so a solid fill here when it *can* be pressed is the
+            // correct treatment, not a violation of it.
             Text("Send")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(question.canSend ? Color.black : Color.white.opacity(0.35))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .background(Capsule().fill(question.canSend ? accent : Color.white.opacity(0.08)))
+                .contentShape(Capsule())
+                .onTapGesture { sendTapped() }
         }
     }
 

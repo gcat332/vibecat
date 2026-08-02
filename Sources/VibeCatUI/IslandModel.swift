@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import VibeCatCore
 
 /// Everything the island view reads, in one observable place.
 ///
@@ -40,6 +41,24 @@ import Observation
     /// or lapsed) so a *later* question does not inherit a stale "open" from
     /// one that already closed.
     public var drawerOpen: Bool = false
+
+    /// Fires when the island itself — the collapsed silhouette, not the
+    /// drawer — is clicked. Wired by `NotchController.present()` to call
+    /// `click()`. `@ObservationIgnored`: this is wiring, the same reasoning
+    /// as `AppModel.onChange`'s own doc comment — nothing should re-render
+    /// because this closure was reassigned.
+    @ObservationIgnored
+    public var onIslandClick: (@MainActor () -> Void)?
+
+    /// Fires when the drawer produces an answer: a single-select pick (once
+    /// confirmed, if §10.3 asked twice) or a multi-select Send. Wired by
+    /// `NotchController.present()` to call `appModel.answer(_:)`. Read by
+    /// `IslandView`, threaded down to `DrawerView`/`QuestionFace` as a plain
+    /// closure parameter rather than passing `IslandModel` itself into the
+    /// drawer's own view tree — `DrawerView` stays face-agnostic and
+    /// `QuestionModel`-only, the same reasoning its own doc comment gives.
+    @ObservationIgnored
+    public var onAnswer: (@MainActor (Reply) -> Void)?
 
     public init(geometry: IslandGeometry, coat: Coat = .tabby, motion: MotionPreference) {
         self.geometry = geometry
