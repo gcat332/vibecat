@@ -40,6 +40,19 @@ widening, and menu click-through.
 > even the control point reads 0), and the island's footprint does not overlap
 > a clickable menu item at rest anyway. It needs a real click.
 >
+> **Confirmed 2026-08-02 — click-through works.** The premise above was wrong:
+> the *panel* is much wider than the visible island, spanning x 581…1069 while
+> the island itself ends at 863, and a status item sits at 1046…1079. A
+> synthesised click at (1060, 12) — inside the panel, over that item —
+> activated the item underneath. `ignoresMouseEvents` does what it says.
+>
+> Two things worth carrying forward. The panel's real extent, not the island's,
+> is what determines what gets covered; Plan 4's Task 4 turns clicks *on* while
+> hovering, and that same 200pt of panel to the right of the island is what it
+> will start intercepting. And a synthesised click on unfamiliar UI has real
+> consequences — this one made a menu bar app request keychain access. Ask
+> before clicking someone's menu bar.
+>
 > Worth knowing for later: this machine runs with the **menu bar auto-hidden**,
 > so the island often sits over the wallpaper rather than a dark bar.
 >
