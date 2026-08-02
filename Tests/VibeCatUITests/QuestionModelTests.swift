@@ -2,10 +2,16 @@ import Testing
 import VibeCatCore
 @testable import VibeCatUI
 
+/// `body` deliberately stays clear of the three patterns Task 6's
+/// `DestructiveGuard` names (`rm -rf`, `git push --force`, `drop table`):
+/// this file's tests are about selection mechanics, not §10.3, and every
+/// test here picks `allow`/`always` freely — a destructive-looking body
+/// would silently make `reply()` wait on confirmation it never asks for,
+/// which is exactly what happened when this fixture read `"rm -rf build/"`.
 private func event(multi: Bool, choices: [String] = ["allow", "always", "deny"],
                     id: String = "q") -> VibeEvent {
     VibeEvent(id: id, cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
-              title: "Bash command", body: "rm -rf build/",
+              title: "Bash command", body: "npm test",
               choices: choices.map { Choice(id: $0, label: $0.capitalized) },
               multi: multi, wantsReply: true)
 }

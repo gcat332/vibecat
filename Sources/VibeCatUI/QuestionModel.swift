@@ -14,8 +14,20 @@ public final class QuestionModel {
     public private(set) var selected: Set<String> = []
     public private(set) var isWritingOther = false
     public var otherText = ""
+    public private(set) var isConfirming = false
 
     public init(event: VibeEvent) { self.event = event }
+
+    /// True once a *permissive* answer has been picked for a body §10.3 names.
+    /// Refusing a destructive command carries no danger, so a `deny` pick
+    /// never trips this — only `allow`/`always` do.
+    public var needsConfirmation: Bool {
+        guard DestructiveGuard.matches(event.body) else { return false }
+        guard !isConfirming else { return false }
+        return selected.contains(where: DestructiveGuard.isPermissive)
+    }
+
+    public func confirm() { isConfirming = true }
 
     public var rows: [Choice] { event.choices ?? [] }
     public var isMulti: Bool { event.multi }
@@ -48,6 +60,10 @@ public final class QuestionModel {
     public var tally: Int { selected.count }
 
     public func reply() -> Reply? {
+        // One gate, above all three branches — §10.3's guard has to bind the
+        // answer itself, not just the drawer's own UI state, or an agent
+        // reading only the returned Reply would never see it withheld.
+        guard !needsConfirmation else { return nil }
         if isWritingOther {
             let text = otherText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return nil }
