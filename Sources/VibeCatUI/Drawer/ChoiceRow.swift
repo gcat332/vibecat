@@ -16,7 +16,7 @@ struct ChoiceRow: View {
     /// 0-based row position. Used for the single-select badge's numeral
     /// (shown as `index + 1`) and, later, for the number key that picks it
     /// (§10.1, Task 9) — the same position, so the badge never shows a digit
-    /// the keyboard would disagree with.
+    /// the keyboard would disagree with. Ignored entirely when `isOther`.
     let index: Int
     let isMulti: Bool
     let isSelected: Bool
@@ -24,6 +24,16 @@ struct ChoiceRow: View {
     /// decides which row this is; never true for more than one row at once.
     let isRecommended: Bool
     let accent: Color
+    /// `Other…`: §10.1 lists it right after "a number badge marks each row,"
+    /// but §10.2 is the rule that actually settles what it looks like —
+    /// "a number badge means the click is the answer... a checkbox means it
+    /// is not" — and clicking `Other…` does not answer, it opens the reply
+    /// field. A numbered `Other…` would also promise a keystroke Task 9
+    /// cannot honour: `KeyRouting.pick` is scoped to route `1`–`9` through
+    /// `QuestionModel.rows`, which is `event.choices` and structurally
+    /// excludes this synthetic row, so the badge would be a dead key by
+    /// construction. Set for exactly one row, never with `isMulti`.
+    var isOther: Bool = false
 
     private static let controlSize: CGFloat = 20
     private static let cornerRadius: CGFloat = 8
@@ -82,6 +92,19 @@ struct ChoiceRow: View {
                             .foregroundStyle(Color.black)
                     }
                 }
+                .frame(width: Self.controlSize, height: Self.controlSize)
+        } else if isOther {
+            // Neither a numeral nor a checkbox, and deliberately not
+            // accent-tinted either — colour means state (§4.3), and this
+            // row is not one of the states an answer can carry. An ellipsis
+            // reads as "something else," not "option N."
+            Circle()
+                .strokeBorder(Color.white.opacity(0.25), lineWidth: 1.5)
+                .overlay(
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.5))
+                )
                 .frame(width: Self.controlSize, height: Self.controlSize)
         } else {
             // `isSelected` used to go unread on this branch entirely: a

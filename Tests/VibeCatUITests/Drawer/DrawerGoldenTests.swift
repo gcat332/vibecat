@@ -1,3 +1,5 @@
+import CoreGraphics
+import Foundation
 import SwiftUI
 import Testing
 import VibeCatCore
@@ -221,6 +223,91 @@ private func contentBands(_ raster: Raster) -> [Range<Int>] {
             "picking \"deny\" (not the recommended row) changed nothing — a single-select pick is invisible unless it lands on row 0")
 }
 
+/// The width every test above uses (420) is wider than the drawer is ever
+/// actually asked to render at — `IslandView` passes `model.frames.body
+/// .width`, and this checks the reservation at that real width instead.
+///
+/// Only a fully-opaque, non-ground pixel counts as real content: a
+/// partially-transparent one is the shape's own rounded-bottom antialiasing
+/// (which sits inside this same 44pt band), stored premultiplied, so its RGB
+/// no longer reads as raw ground even where the notional colour is ground —
+/// the same trap `contentBands` above sidesteps by treating any non-opaque
+/// pixel as "nothing drawn," but this needs the sharper opaque-only test
+/// because it is measuring a boundary in pixels, not just counting bands.
+private func footerMargin(_ raster: Raster, footerHeight: Int) -> Int {
+    func isRealContent(_ p: Raster.Pixel) -> Bool {
+        guard p.a == 255 else { return false }
+        return !(abs(Int(p.r) - 5) <= 6 && abs(Int(p.g) - 7) <= 6 && abs(Int(p.b) - 11) <= 6)
+    }
+    let boundary = raster.height - footerHeight
+    for y in stride(from: raster.height - 1, through: 0, by: -1) {
+        if (0..<raster.width).contains(where: { isRealContent(raster[$0, y]) }) {
+            return boundary - (y + 1)
+        }
+    }
+    return footerHeight
+}
+
+/// The single-select fixture likeliest to run the footer reservation close:
+/// a long label that wraps (§10.1's own example, reused from the brief's
+/// tests above) alongside two short ones, plus `Other…` — four rows total
+/// against `.question`'s 288pt budget.
+private func tightestPackingSingleSelect() -> VibeEvent {
+    VibeEvent(id: "q", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
+              title: "Bash command", body: "pnpm install",
+              choices: [Choice(id: "allow", label: "Allow once"),
+                        Choice(id: "always", label: "Allow all pnpm commands in ~/dev/api for this session"),
+                        Choice(id: "deny", label: "Deny")],
+              wantsReply: true)
+}
+
+/// §6.4's reservation, checked at the width `IslandView` actually passes —
+/// one real session, not hovering, on the same `mbp14` fixture every
+/// geometry test in this suite already fixes on (273.1pt, computed through
+/// the real `IslandGeometry`/`IslandModel` pipeline rather than a literal
+/// that could drift from it as either changes).
+///
+/// Measured: this holds with only 6pt of margin, not a comfortable buffer —
+/// worth a reviewer's attention (see the task report) — but not currently
+/// broken.
+@MainActor @Test func theDrawerStaysClearOfTheFooterAtTheRealisticProductionWidth() throws {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    model.state = .waiting
+    model.sessionCount = 1
+    let width = model.frames.body.width
+
+    let m = QuestionModel(event: tightestPackingSingleSelect())
+    let raster = try rasterise(DrawerView(question: m, accent: IslandState.waiting.accent, width: width))
+    let margin = footerMargin(raster, footerHeight: 44)
+    #expect(margin >= 0,
+            "content reaches \(-margin)pt into the reserved footer at the realistic production width \(width)pt")
+}
+
+/// The narrowest the body ever actually is: dormant, with nothing in the
+/// right flank at all. Not an arbitrary probe — `IslandGeometry
+/// .minimumRightFlank` is a hard floor for the corner seam (see its own doc
+/// comment), so no real configuration is narrower than this.
+///
+/// Pinned here rather than left to be found later: measured directly, a
+/// width only 3pt narrower than this one already overflows the footer by
+/// 10pt, so this is the actual edge of safety, not a margin with room in it.
+/// If a future change to fonts, padding, or spacing erodes the 6pt this
+/// holds by today, this is the test that goes red first.
+@MainActor @Test func theDrawerStaysClearOfTheFooterAtTheNarrowestRealisticWidth() throws {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    model.state = .dormant
+    model.sessionCount = 0
+    let width = model.frames.body.width
+
+    let m = QuestionModel(event: tightestPackingSingleSelect())
+    let raster = try rasterise(DrawerView(question: m, accent: IslandState.waiting.accent, width: width))
+    let margin = footerMargin(raster, footerHeight: 44)
+    #expect(margin >= 0,
+            "content reaches \(-margin)pt into the reserved footer at the narrowest real width \(width)pt")
+}
+
 /// The drawer is the island's, so it wears the island's colour (§4.3).
 @MainActor @Test func theDrawerWearsTheStatesAccent() throws {
     for state in [IslandState.waiting, .failed] {
@@ -228,4 +315,98 @@ private func contentBands(_ raster: Raster) -> [Range<Int>] {
                                               accent: state.accent, width: 420))
         #expect(raster.pixelCount(near: state.accent) > 0, "\(state): no accent anywhere in the drawer")
     }
+}
+
+// MARK: - IslandView's own composition
+
+/// A pixel-level match for `Raster.pixelCount(near:)`'s own tolerance, kept
+/// local because this needs *positions*, not a count.
+private func isNear(_ p: Raster.Pixel, _ colour: RGBA, tolerance: Int = 6) -> Bool {
+    guard p.a > 0 else { return false }
+    let target = (Int((colour.r * 255).rounded()), Int((colour.g * 255).rounded()), Int((colour.b * 255).rounded()))
+    return abs(Int(p.r) - target.0) <= tolerance
+        && abs(Int(p.g) - target.1) <= tolerance
+        && abs(Int(p.b) - target.2) <= tolerance
+}
+
+/// Every test above rasterises `DrawerView` directly; none renders
+/// `IslandView`'s own composition — the accent and width handed down, the
+/// stacking order, and the leading offset that keeps the drawer flush with
+/// the collapsed silhouette above it. A wrong width property, a reversed
+/// stack order, or an unaligned drawer would pass every test above and be
+/// caught by nothing except eyeballing.
+///
+/// Confirmed directly while writing this test: before `IslandView.
+/// drawerLeadingOffset` existed, rendering `IslandView` with a real
+/// `IslandGeometry` and `model.question` set showed the drawer sitting
+/// visibly right of the collapsed body — `VStack`'s default `.center`
+/// alignment centring two children of very different widths (`IslandBody`'s
+/// own outer frame is the full, wider panel; `DrawerView` is only the live
+/// body's width). Screenshotted before and after in the task report.
+@MainActor @Test func islandViewComposesTheDrawerFlushBelowAndAlignedWithTheCollapsedBody() throws {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    model.state = .waiting
+    model.sessionCount = 1
+    model.question = QuestionModel(event: recommendedEvent())
+
+    let raster = try rasterise(IslandView(model: model))
+    let drawerTop = Int(model.panelFrames.panel.height.rounded(.up))
+    #expect(raster.height > drawerTop,
+            "the rendered image is no taller than the collapsed panel alone — the drawer never reached the tree")
+
+    // Ordering: the cat's own fixed facial tones (see `IslandGoldenTests`'
+    // own use of them as "the sprite actually drew") belong above the
+    // drawer — catching a reversed `VStack`, which the horizontal-only
+    // checks below could not, since the drawer's own internal alignment
+    // does not depend on where it sits vertically.
+    let palette = CatPalette(accent: model.state.accent)
+    for tone in [Tone.innerEar, .nose] {
+        let inTop = (0..<drawerTop).contains { y in
+            (0..<raster.width).contains { x in isNear(raster[x, y], palette[tone]) }
+        }
+        #expect(inTop, "\(tone): not found above the drawer — the collapsed body may not be on top")
+    }
+
+    // Alignment and width: the recommended row's accent border is the only
+    // accent this scene draws *below* the collapsed body (its own badge and
+    // session count sit above `drawerTop`, excluded by only scanning below
+    // it).
+    var leftmostAccent: Int?
+    var rightmostAccent: Int?
+    for y in drawerTop..<raster.height {
+        for x in 0..<raster.width where isNear(raster[x, y], IslandState.waiting.accent) {
+            leftmostAccent = min(leftmostAccent ?? x, x)
+            rightmostAccent = max(rightmostAccent ?? x, x)
+        }
+    }
+    let left = try #require(leftmostAccent,
+                            "no accent pixel below the collapsed body — the drawer's accent never reached the pixels")
+    let right = try #require(rightmostAccent)
+
+    let collapsed = try rasterise(IslandBody(model: model, now: Date(timeIntervalSince1970: 1_000_000)))
+    let collapsedPainted = try #require(IslandGoldenTests.paintedColumns(collapsed),
+                                        "the collapsed body painted nothing")
+    #expect(abs(left - collapsedPainted.first) <= 20,
+            "drawer's leftmost accent at \(left) does not align with the collapsed body's own leftmost painted column at \(collapsedPainted.first) — the drawer has drifted sideways")
+
+    #expect(Double(right - left) < model.frames.body.width,
+            "accent spans \(right - left)pt — at or past the live body width \(model.frames.body.width); the drawer may be sized off the fixed panel's wider frame instead")
+}
+
+/// `IslandView.body`'s `.animation(value: drawerHeight)` can't be read back
+/// from the tree a render produces — the same reason `IslandBody`'s own two
+/// springs are each backed by a read-counter rather than trusted to a render
+/// alone (see `IslandBody.restingWidthReadCount`'s doc comment for exactly
+/// what that does and does not prove). This pins the one thing the render
+/// test above cannot: that `body` actually reads `drawerHeight` while being
+/// built, so the §9.1 spring has a live input to key on rather than a
+/// property nothing touches.
+@MainActor @Test func bodyActuallyReadsDrawerHeightWhileBeingBuilt() {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    IslandView.drawerHeightReadCount = 0
+    _ = IslandView(model: model).body
+    #expect(IslandView.drawerHeightReadCount > 0,
+            "body never read drawerHeight — the drawer spring's input may not be wired")
 }

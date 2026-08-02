@@ -52,13 +52,19 @@ struct QuestionFace: View {
             }
             if !question.isMulti {
                 // §10.1: "`Other…` is the last row." A synthetic `Choice` so
-                // it shares `ChoiceRow`'s exact visual language rather than
-                // a second, driftable copy of the same row chrome. Never
-                // recommended, never ticked — picking it is a distinct
-                // model action (`beginOther()`), not a member of `selected`.
+                // it shares `ChoiceRow`'s row chrome (padding, wrapping
+                // label) rather than a second, driftable copy of it. Never
+                // recommended, never ticked — picking it is a distinct model
+                // action (`beginOther()`), not a member of `selected` — and
+                // `isOther: true` gives it a control that is neither a
+                // numeral nor a checkbox; see `ChoiceRow.isOther`'s own doc
+                // comment for why (§10.2's rule, read the other way round,
+                // resolves the §10.1/§10.2 contradiction a numbered `Other…`
+                // would otherwise be). `index` is unread with `isOther`.
                 ChoiceRow(choice: Choice(id: "__other__", label: "Other…"),
-                          index: question.rows.count, isMulti: false,
-                          isSelected: false, isRecommended: false, accent: accent)
+                          index: 0, isMulti: false,
+                          isSelected: false, isRecommended: false, accent: accent,
+                          isOther: true)
             }
             if question.needsConfirmation {
                 confirmBanner

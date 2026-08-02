@@ -105,7 +105,18 @@ public struct IslandView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
+        // `.leading`, not the default `.center`: `IslandBody`'s own outer
+        // `.frame` is the *full panel* width (it reserves room for the
+        // widest the collapsed island ever gets, per `maxCollapsedFrames`),
+        // while its actual painted silhouette sits offset inside that at
+        // `drawerLeadingOffset`. `DrawerView` is narrower than the panel, so
+        // centring the two children by default drifted the drawer sideways,
+        // away from the body actually painted above it — confirmed by
+        // rendering this with a real `IslandGeometry` and a question set: the
+        // drawer sat visibly right of the collapsed island rather than
+        // hanging flush beneath it. `.leading` plus the matching padding
+        // below is what makes the two align edge-to-edge instead.
+        VStack(alignment: .leading, spacing: 0) {
             // A real branch, not a paused timeline. Measured: a paused-but-present
             // TimelineView still costs ~6% of a core; removing it costs 0.0%, and
             // that is the only way an idle machine actually stays idle.
@@ -126,10 +137,12 @@ public struct IslandView: View {
             // gap) — so growing the *live* window to actually show this is
             // a later task's wiring (`NotchController`/`NotchPanel`, neither
             // touched here), not this one's. What belongs here already: the
-            // drawer appearing and disappearing along the spring §9.1 names.
+            // drawer appearing and disappearing along the spring §9.1 names,
+            // aligned with the silhouette it hangs from.
             if let question = model.question {
                 DrawerView(question: question, accent: model.state.accent,
                            width: model.frames.body.width)
+                    .padding(.leading, drawerLeadingOffset)
             }
         }
         .animation(.spring(response: 0.42, dampingFraction: 0.78), value: drawerHeight)
@@ -140,7 +153,39 @@ public struct IslandView: View {
     /// `IslandBody.restingWidth`/`.hoverRevealWidth`: one property per
     /// independent animation, so this spring cannot be overridden by one
     /// keyed to something that did not change, and vice versa.
-    private var drawerHeight: CGFloat { model.question?.face.height ?? 0 }
+    private var drawerHeight: CGFloat {
+        #if DEBUG
+        Self.drawerHeightReadCount += 1
+        #endif
+        return model.question?.face.height ?? 0
+    }
+
+    #if DEBUG
+    /// Counts reads of `drawerHeight`. A static render cannot observe *which*
+    /// curve a `.animation(value:)` is keyed to — proving that needs the same
+    /// read-counter trick `IslandBody.restingWidthReadCount`/
+    /// `.hoverRevealWidthReadCount` already use for their own two springs,
+    /// for the identical reason: `body`'s *result* can't be introspected for
+    /// the correct wiring without a view-inspection dependency this project
+    /// doesn't take, but whether building `body` touched this property can be
+    /// counted directly. See `IslandBody.restingWidthReadCount`'s own doc
+    /// comment for what this does and does not prove. `#if DEBUG`-gated for
+    /// the same reason those two are.
+    @MainActor static var drawerHeightReadCount = 0
+    #endif
+
+    /// Where the collapsed body's own *painted* silhouette starts inside
+    /// `IslandBody`'s wider, panel-sized outer frame — the same value
+    /// `IslandBody.body` computes as `localOrigin.x` for its own offset, read
+    /// back through the public `IslandFrames`/`IslandModel` surface rather
+    /// than duplicated, so the two can't drift apart. `body.minX` never
+    /// depends on how much of the right flank is showing (see
+    /// `IslandGeometry.frames`'s own `left =` line), which is why this is a
+    /// single fixed offset — not something that needs recomputing whenever
+    /// the live width does.
+    private var drawerLeadingOffset: CGFloat {
+        IslandFrames(body: model.frames.body, panel: model.panelFrames.panel).bodyInPanel.origin.x
+    }
 
     /// `1 / framesPerSecond` — never the display rate (measured: an
     /// unpaced `.animation` timeline runs at the display's own refresh rate,

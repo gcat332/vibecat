@@ -55,6 +55,18 @@ struct ContactSheetTool {
             // mid-pick, the reply field open, and the destructive
             // confirmation. Rendered together so one look at the PNG can
             // judge all four rather than trusting four passing assertions.
+            //
+            // All four wear `.waiting`'s accent, not a mix — a permission
+            // event (`Kind.permission`/`.question`) always maps to
+            // `SessionState.waiting` (see `SessionState.init(kind:)`), and
+            // `.waiting`'s urgency (0) always beats `.failed`'s (1, see
+            // `SessionState.urgency`), so a real destructive confirmation
+            // cannot legitimately be red. An earlier version of this used
+            // `.failed`'s accent for the fourth scenario — `DrawerView.
+            // accent` is a pure pass-through, so §4.3 was never actually
+            // violated in code, but this fixture would have seeded a false
+            // "destructive means red" convention in the one place this
+            // artwork gets looked at.
             HStack(alignment: .top, spacing: 14) {
                 DrawerView(question: singleSelectLongLabel(),
                           accent: IslandState.waiting.accent, width: 300)
@@ -63,7 +75,7 @@ struct ContactSheetTool {
                 DrawerView(question: replyFieldOpen(),
                           accent: IslandState.waiting.accent, width: 300)
                 DrawerView(question: destructiveConfirmation(),
-                          accent: IslandState.failed.accent, width: 300)
+                          accent: IslandState.waiting.accent, width: 300)
             }
         }
         .padding(12)
