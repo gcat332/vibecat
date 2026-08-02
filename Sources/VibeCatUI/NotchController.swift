@@ -55,6 +55,21 @@ import SwiftUI
     /// the drawer has to close itself rather than keep showing a question
     /// the hook has already abandoned — see `setQuestion`.
     private var lapseCheck: Task<Void, Never>?
+    /// Whichever `PendingQuestion` the most recent `setQuestion(_:)` call was
+    /// actually told about — `lapseCheck`'s own closure compares against
+    /// this, not `appModel.pending`, so the guard is self-contained to what
+    /// `setQuestion` itself just did rather than depending on `AppModel`
+    /// being wired up at all. That distinction matters here specifically:
+    /// this file's own tests drive the state machine through `setQuestion(_:)`
+    /// directly, deliberately bypassing `AppModel` (see `aQuestion`'s own
+    /// comment in NotchControllerTests.swift), so `appModel.pending` would
+    /// stay `nil` throughout every one of them regardless of what
+    /// `setQuestion` was actually told — reading it here would make the
+    /// guard permanently false under test, not merely under a real socket.
+    /// `weak`: this file does not need to keep a `PendingQuestion` alive any
+    /// longer than whoever actually owns it (`AppModel.pending`, in
+    /// production) already does.
+    private weak var currentPending: PendingQuestion?
 
     /// The surface the aura has to be seen against: the menu bar strip the
     /// island sits in, as wide as the panel so it covers where the glow
@@ -338,6 +353,7 @@ import SwiftUI
     func setQuestion(_ pending: PendingQuestion?) {
         lapseCheck?.cancel()
         lapseCheck = nil
+        currentPending = pending
         model.question = pending.map { QuestionModel(event: $0.event) }
         // A newly-arrived question must not inherit an older one's "clicked
         // open" (see IslandModel.drawerOpen's own doc comment), and a
@@ -351,12 +367,33 @@ import SwiftUI
             lapseCheck = Task { [weak self] in
                 let remaining = max(0, pending.expiry.timeIntervalSinceNow)
                 try? await Task.sleep(for: .seconds(remaining))
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, let self else { return }
+                // Whole-branch review minor: `self.currentPending === pending`,
+                // not an unconditional dismiss. `lapseCheck?.cancel()` above
+                // already retires this exact Task the instant a displacing
+                // question arrives, so in the ordinary flow this guard should
+                // never actually change anything — but without it, nothing
+                // stops a Task that ever outlived its own cancellation (or a
+                // future edit that drops the `cancel()` above) from calling
+                // `dismissQuestion()` against whatever question happens to be
+                // current by the time its sleep finishes, which after a
+                // displacement is a completely different one — lapsing
+                // question B roughly this Task's own `remaining` early.
+                // `===`, not `==`: `PendingQuestion` has no `Equatable`
+                // conformance, and this needs identity, not value equality,
+                // regardless. `currentPending`, not `appModel.pending` — see
+                // that property's own doc comment for why: this file's tests
+                // drive `setQuestion(_:)` directly, bypassing `AppModel`
+                // entirely, and `currentPending` is kept in step by
+                // `setQuestion` itself regardless of whether `AppModel` is
+                // involved at all, while `appModel.pending` would simply
+                // never match under that same testing convention.
+                guard self.currentPending === pending else { return }
                 // Lapses the PendingQuestion — waking a socket thread still
                 // parked on it, or a no-op if it already timed out on its
                 // own — and clears appModel.pending, which reaches back here
                 // via onQuestion(nil) above.
-                self?.appModel.dismissQuestion()
+                self.appModel.dismissQuestion()
             }
         }
         reflow()

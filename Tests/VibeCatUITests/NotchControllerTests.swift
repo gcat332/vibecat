@@ -343,6 +343,62 @@ private let externalDisplay = ScreenMetrics(
     #expect(panel.acceptsClicks == false)
 }
 
+/// Whole-branch review minor: `setQuestion`'s lapse `Task` calls
+/// `appModel.dismissQuestion()` once its own sleep elapses, which — without
+/// the `currentPending` identity guard this pins — lapses whatever question
+/// happens to be current at that moment, not necessarily the one the Task
+/// was scheduled for. `lapseCheck?.cancel()` already retires a displaced
+/// question's Task immediately in the ordinary flow, so this test alone
+/// cannot distinguish "the guard saved this" from "the cancellation already
+/// did" — both present, this passes either way. Confirmed directly:
+/// disabling `cancel()` *and* the guard together reproduced the bug (the
+/// second question dismissed ~0.1s early, `appModel.pending` going back to
+/// `nil`); re-enabling only the guard, with `cancel()` still disabled,
+/// stayed green — the guard alone is sufficient.
+///
+/// The guard compares against `currentPending` (`NotchController`'s own
+/// bookkeeping, updated by `setQuestion` itself), not `appModel.pending` —
+/// an earlier version of this fix used `appModel.pending` directly and it
+/// broke `aLapsedQuestionClosesTheDrawer` above: that test, like most in
+/// this file, drives `setQuestion(_:)` directly rather than through a real
+/// `AppModel`, so `appModel.pending` never matches `pending` there and the
+/// guard would silently swallow every lapse this file's own tests exist to
+/// prove happens.
+@MainActor @Test func aDisplacedQuestionsLapseCheckNeverDismissesTheReplacement() async throws {
+    let (c, appModel) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+
+    let short = VibeEvent(id: "q-short", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
+                          choices: [Choice(id: "allow", label: "Allow")],
+                          wantsReply: true, answerDeadline: 0.1)
+    Thread.detachNewThread { _ = appModel.ingest(short) }
+    let arrivedShort = Date().addingTimeInterval(2)
+    while appModel.pending?.id != "q-short", Date() < arrivedShort {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(appModel.pending?.id == "q-short", "setup: the first question never reached the model")
+
+    // Displace it with a second, longer-lived question well before the
+    // first's own 0.1s deadline elapses.
+    let long = VibeEvent(id: "q-long", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
+                         choices: [Choice(id: "allow", label: "Allow")],
+                         wantsReply: true, answerDeadline: 5)
+    Thread.detachNewThread { _ = appModel.ingest(long) }
+    let arrivedLong = Date().addingTimeInterval(2)
+    while appModel.pending?.id != "q-long", Date() < arrivedLong {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(appModel.pending?.id == "q-long", "setup: the second question never displaced the first")
+
+    // Long enough for the first question's own 0.1s deadline to have
+    // elapsed, whether or not its lapse Task was actually cancelled.
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(appModel.pending?.id == "q-long",
+            "the first question's own lapse check dismissed the second, unrelated question")
+    c.dismiss()
+}
+
 /// `drawerOpen` must not survive past the question it was opened for.
 /// Otherwise a *second*, later question inherits the first one's "clicked
 /// open" and appears already open — the same violation
