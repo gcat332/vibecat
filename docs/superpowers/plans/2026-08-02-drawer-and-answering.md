@@ -741,7 +741,7 @@ git commit -m "feat: give the drawer a size and the panel a way to be clicked"
 - Test: `Tests/VibeCatUITests/QuestionModelTests.swift`
 
 **Interfaces:**
-- Produces: `QuestionModel(event:)`, `.face: DrawerFace`, `.rows: [Choice]`, `.isMulti`, `.selected: Set<String>`, `.toggle(_ id:)`, `.pick(_ id:)`, `.canSend: Bool`, `.reply() -> Reply?`, `.isWritingOther`, `.otherText`. Task 6 renders these; Task 3's `answer` takes `reply()`.
+- Produces: `QuestionModel(event:)`, `.face: DrawerFace`, `.rows: [Choice]`, `.isMulti`, `.selected: Set<String>`, `.toggle(_ id:)`, `.pick(_ id:)`, `.canSend: Bool`, `.reply() -> Reply?`, `.isWritingOther`, `.otherText`. Task 7 renders these (not Task 6, which is the destructive guard); Task 3's `answer` takes `reply()`.
 
 Pure state, no view. Everything the drawer needs to decide what to draw, decided here where it can be tested without rendering.
 
