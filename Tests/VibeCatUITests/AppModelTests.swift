@@ -181,10 +181,17 @@ private func event(_ kind: Kind, session: String) -> VibeEvent {
     }
     let first = Task.detached { m.ingest(q("q1")) }
     try await Task.sleep(for: .milliseconds(50))
+    let start = Date()
     let second = Task.detached { m.ingest(q("q2")) }
     try await Task.sleep(for: .milliseconds(50))
     #expect(m.pending?.id == "q2")
     #expect(await first.value == nil, "the displaced question did not fail open")
+    // Loose bound against the 5s deadline, not a fitted number: correct code
+    // wakes `first` the moment `second` displaces it (well under 1s); a
+    // missing `lapse()` only resolves `first` via its own 5s timeout, which
+    // this bound is tight enough to catch and loose enough not to flake.
+    #expect(Date().timeIntervalSince(start) < 1.0,
+            "the first question was not woken by the displacement — it fell through to its own 5s deadline instead")
     m.answer(Reply(id: "q2", choice: "allow"))
     #expect(await second.value?.choice == "allow")
 }
@@ -196,8 +203,14 @@ private func event(_ kind: Kind, session: String) -> VibeEvent {
                           wantsReply: true, answerDeadline: 5)
     let ingest = Task.detached { m.ingest(event) }
     try await Task.sleep(for: .milliseconds(50))
+    let start = Date()
     m.dismissQuestion()
     #expect(await ingest.value == nil)
+    // Same loose-bound shape as asecondQuestionLapsesTheFirst: correct code
+    // wakes the parked thread the moment dismissQuestion lapses it; a missing
+    // lapse() only resolves it via the question's own 5s deadline.
+    #expect(Date().timeIntervalSince(start) < 1.0,
+            "dismissQuestion did not wake the parked thread promptly — it fell through to its own 5s deadline instead")
     #expect(m.pending == nil)
 }
 
