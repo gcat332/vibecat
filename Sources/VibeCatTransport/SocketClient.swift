@@ -20,32 +20,65 @@ public struct SocketClient: Sendable {
     /// hook that traps is a hook that failed closed.
     static let ceilingDeadline: TimeInterval = 60
 
+    /// The default bound on a human answer. Hoisted into a named constant
+    /// rather than left as a bare `20` in `init` so later code (see
+    /// `HookRunner`) can refer to "the answer deadline" without repeating the
+    /// number.
+    public static let defaultAnswerDeadline: TimeInterval = 20
+
     public let path: String
     public let deadline: TimeInterval
+    /// The bound on a *human* answer, not on delivery. §2.3 fixes delivery at
+    /// 300ms and calls fail-open the most important property in the design; a
+    /// person cannot answer a permission prompt in 300ms, so taken literally
+    /// answering could never work.
+    ///
+    /// These bound different things. Waiting buys a fire-and-forget event
+    /// nothing, so 300ms stands there. A `wantsReply` event is one where the
+    /// CLI would *otherwise block on its own prompt indefinitely* — a bounded
+    /// wait is not a regression against that, it is a ceiling that did not
+    /// previously exist. Clamped by the same floor and ceiling, so a hook
+    /// still cannot be made to wait forever.
+    public let answerDeadline: TimeInterval
 
-    public init(path: String, deadline: TimeInterval = 0.3) {
+    public init(path: String, deadline: TimeInterval = 0.3,
+                answerDeadline: TimeInterval = defaultAnswerDeadline) {
         self.path = path
         self.deadline = Swift.min(Self.ceilingDeadline,
                                   Swift.max(Self.floorDeadline, deadline))
+        self.answerDeadline = Swift.min(Self.ceilingDeadline,
+                                        Swift.max(Self.floorDeadline, answerDeadline))
     }
 
     public func send(_ line: Data) {
-        guard let fd = connectSocket() else { return }
+        guard let fd = connectSocket(readTimeout: deadline) else { return }
         defer { close(fd) }
         _ = writeAll(fd, line, expiry: Date().addingTimeInterval(deadline))
     }
 
-    public func sendExpectingReply(_ line: Data) -> Data? {
-        let expiry = Date().addingTimeInterval(deadline)
-        guard let fd = connectSocket() else { return nil }
+    public func sendExpectingReply(_ line: Data,
+                                   deadline: TimeInterval? = nil) -> Data? {
+        // Delivery keeps the short deadline even when the answer gets a long
+        // one: a socket that will not accept bytes is dead, and waiting 20s to
+        // learn that is 20s of hung terminal for nothing.
+        let readTimeout = deadline ?? self.deadline
+        let writeExpiry = Date().addingTimeInterval(self.deadline)
+        let readExpiry = Date().addingTimeInterval(readTimeout)
+        // readTimeout, not self.deadline: SO_RCVTIMEO bounds each read()
+        // syscall below the wall clock does, so if it stayed pinned to the
+        // short delivery deadline, a peer that never sends a byte would have
+        // its very first read() time out at 300ms — returning nil well
+        // before readExpiry ever got a say, and silently defeating the
+        // longer answer deadline for exactly the case that matters most.
+        guard let fd = connectSocket(readTimeout: readTimeout) else { return nil }
         defer { close(fd) }
-        guard writeAll(fd, line, expiry: expiry) else { return nil }
-        return readLine(fd, expiry: expiry)
+        guard writeAll(fd, line, expiry: writeExpiry) else { return nil }
+        return readLine(fd, expiry: readExpiry)
     }
 
     // MARK: - plumbing
 
-    private func connectSocket() -> Int32? {
+    private func connectSocket(readTimeout: TimeInterval) -> Int32? {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
         // A peer that has gone away must not be able to kill us: without this,
@@ -65,8 +98,11 @@ public struct SocketClient: Sendable {
             close(fd)
             return nil
         }
-        setTimeout(fd, SO_SNDTIMEO)
-        setTimeout(fd, SO_RCVTIMEO)
+        // SO_SNDTIMEO stays on the short delivery deadline regardless of
+        // readTimeout — see the comment on writeExpiry above. Only the
+        // receive side may be widened for an answer.
+        setTimeout(fd, SO_SNDTIMEO, duration: deadline)
+        setTimeout(fd, SO_RCVTIMEO, duration: readTimeout)
         let rc = UnixAddress.withSockaddr(&addr) { connect(fd, $0, $1) }
         guard rc == 0 else {
             close(fd)
@@ -76,11 +112,13 @@ public struct SocketClient: Sendable {
     }
 
     /// Belt to the absolute deadline's braces: keeps a single syscall from
-    /// parking forever. `deadline` is already clamped above zero and below
-    /// the ceiling, so this never asks for the "no timeout" timeval and never
-    /// traps converting to a timeval's fields.
-    private func setTimeout(_ fd: Int32, _ option: Int32) {
-        let whole = Swift.min(Self.ceilingDeadline, Swift.max(Self.floorDeadline, deadline))
+    /// parking forever. `duration` is always either `deadline` or
+    /// `answerDeadline`-derived, both already clamped above zero and below
+    /// the ceiling in `init`, so this never asks for the "no timeout" timeval
+    /// and never traps converting to a timeval's fields. Re-clamped anyway,
+    /// since this is the last line of defence before the syscall.
+    private func setTimeout(_ fd: Int32, _ option: Int32, duration: TimeInterval) {
+        let whole = Swift.min(Self.ceilingDeadline, Swift.max(Self.floorDeadline, duration))
         let fraction = (whole - floor(whole)) * 1_000_000
         #if canImport(Darwin)
         var tv = timeval(tv_sec: Int(whole), tv_usec: Int32(fraction))

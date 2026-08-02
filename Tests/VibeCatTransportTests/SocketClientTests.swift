@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import VibeCatCore
 @testable import VibeCatTransport
 #if canImport(Darwin)
 import Darwin
@@ -61,6 +62,45 @@ private func tempSocketPath(_ name: String) -> String {
 
     let client = SocketClient(path: path, deadline: 0.2)
     #expect(client.sendExpectingReply(Data("{}\n".utf8)) == nil)
+}
+
+/// §2.3's 300ms is the right bound for delivery and the wrong one for a human
+/// answer. They are separate deadlines because they bound separate things.
+@Test func theAnswerDeadlineIsSeparateFromTheDeliveryDeadline() {
+    let c = SocketClient(path: "/tmp/x.sock")
+    #expect(c.deadline == 0.3)
+    #expect(c.answerDeadline == 20)
+    #expect(c.answerDeadline > c.deadline)
+}
+
+/// Bounded, still. A hook that waits forever is a hook that hangs a terminal,
+/// which is the one thing §2.3 forbids outright.
+@Test func theAnswerDeadlineIsClampedLikeTheOther() {
+    #expect(SocketClient(path: "/tmp/x.sock", answerDeadline: 9999).answerDeadline
+            == SocketClient.ceilingDeadline)
+    #expect(SocketClient(path: "/tmp/x.sock", answerDeadline: -1).answerDeadline
+            == SocketClient.floorDeadline)
+}
+
+/// The mechanism, not just the constant: a server that never answers must
+/// return nil after roughly the answer deadline, not after the 300ms one.
+@Test func waitingForAnAnswerOutlastsTheDeliveryDeadline() throws {
+    let path = "/tmp/vibecat-answer-\(UUID().uuidString).sock"
+    let server = SocketServer(path: path)
+    // Accept, then never reply.
+    try server.start { _ in Thread.sleep(forTimeInterval: 1.0); return nil }
+    defer { server.stop() }
+
+    let c = SocketClient(path: path, deadline: 0.3, answerDeadline: 0.8)
+    let line = try WireCodec.encode(VibeEvent(id: "q", cli: "claude-code",
+                                              kind: .permission, session: "s", cwd: "/tmp/proj",
+                                              wantsReply: true))
+    let start = Date()
+    let out = c.sendExpectingReply(line, deadline: c.answerDeadline)
+    let elapsed = Date().timeIntervalSince(start)
+    #expect(out == nil, "no reply came, so this must fail open")
+    #expect(elapsed > 0.5, "gave up after \(elapsed)s — it used the 300ms delivery deadline, not the answer deadline")
+    #expect(elapsed < 2.0, "waited \(elapsed)s — the answer deadline is not bounding it")
 }
 
 /// Accepts a connection and then says nothing, to exercise the deadline.

@@ -93,6 +93,29 @@ private let permissionPayload = Data("""
     #expect(runner.run(cli: "claude-code", stdin: permissionPayload) == nil)
 }
 
+/// HookRunner's one call to `sendExpectingReply` must forward
+/// `client.answerDeadline`, not let the read fall back to `client.deadline`.
+/// Every other test in this file uses a server that replies almost
+/// instantly, so a reply slower than delivery but still inside the answer
+/// deadline is the only thing that would notice HookRunner failing to pass
+/// it through — without this, that one-line regression is invisible to the
+/// whole suite.
+@Test func aReplySlowerThanDeliveryButWithinTheAnswerDeadlineIsStillHonoured() throws {
+    let path = tempPath("slowreply")
+    let server = SocketServer(path: path)
+    try server.start { event in
+        Thread.sleep(forTimeInterval: 0.4)   // slower than the delivery deadline below
+        return Reply(id: event.id, choice: "allow")
+    }
+    defer { server.stop() }
+
+    let runner = HookRunner(registry: registry,
+                            client: SocketClient(path: path, deadline: 0.2, answerDeadline: 0.6),
+                            env: [:])
+    let out = try #require(runner.run(cli: "claude-code", stdin: permissionPayload))
+    #expect(out.contains("\"permissionDecision\":\"allow\""))
+}
+
 /// Exercises the real binary, not HookRunner — main.swift's argument
 /// handling, stdin read and exit code are otherwise untested.
 private func runHookBinary(arguments: [String],
