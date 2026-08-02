@@ -137,18 +137,27 @@ public struct IslandGeometry: Sendable, Equatable {
     /// come from `CollapsedLayout.sessionCountText`, which enforces that
     /// clamp on every count, however large.
     ///
-    /// The panel is created once at this size and never resized — measured,
-    /// animating the silhouette inside a fixed window has a p95 of 10.34ms
-    /// against 15.16ms for moving the window itself, and a far shorter tail.
+    /// The panel is created once at this *width* and never resized for
+    /// collapsed content — measured, animating the silhouette inside a fixed
+    /// window has a p95 of 10.34ms against 15.16ms for moving the window
+    /// itself, and a far shorter tail. `rightFlank` is always the theoretical
+    /// widest here, regardless of `tier`, which is what keeps that guarantee:
+    /// nothing about opening the drawer should make the panel resize
+    /// sideways too.
     ///
-    /// This is only safe while the island is click-through: an oversized
-    /// transparent window intercepts nothing. Plan 4's drawer takes mouse
-    /// events, so it must size the panel to what it actually covers.
-    public func maxCollapsedFrames() -> IslandFrames {
+    /// Widening this to cover the drawer stopped being optional the moment
+    /// the island could be clicked: an oversized transparent window
+    /// intercepts nothing, but `NotchPanel.acceptsClicks` (Task 4) turns that
+    /// off exactly while a drawer could be clicked open, and the whole span
+    /// starts taking input at that point. `tier` is what lets the *height*
+    /// grow for exactly that case — `NotchController.reflow()` is what
+    /// actually re-applies the grown frame, once per tier change, not this
+    /// method itself.
+    public func maxCollapsedFrames(tier: IslandTier = .rest) -> IslandFrames {
         let widest = CollapsedLayout(
             right: .sessionCount(CollapsedLayout.maxDisplayedSessions),
             hovering: true)
-        return frames(rightFlank: widest.rightFlankWidth, tier: .rest)
+        return frames(rightFlank: widest.rightFlankWidth, tier: tier)
     }
 }
 

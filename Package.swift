@@ -32,8 +32,12 @@ let package = Package(
                           dependencies: ["VibeCatUI", "VibeCatCore", "VibeCatTransport"],
                           exclude: ["Info.plist"]),
         .testTarget(name: "VibeCatCoreTests", dependencies: ["VibeCatCore"]),
+        // VibeCatUI is needed directly (not merely importable through some
+        // other target) so PipelineTests can drive the real AppModel — "the
+        // island answers it" — over a real socket, the end-to-end test Task 8
+        // adds beside the existing hook round-trip.
         .testTarget(name: "VibeCatTransportTests",
-                    dependencies: ["VibeCatTransport", "VibeCatCore", "VibeCatHookKit"]),
+                    dependencies: ["VibeCatTransport", "VibeCatCore", "VibeCatHookKit", "VibeCatUI"]),
         // VibeCatTransport is needed directly (not just transitively through
         // VibeCatUI) so AppModelTests can reference
         // SocketClient.defaultAnswerDeadline — the one place the fallback

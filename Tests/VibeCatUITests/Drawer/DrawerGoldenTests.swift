@@ -350,21 +350,42 @@ private func isNear(_ p: Raster.Pixel, _ colour: RGBA, tolerance: Int = 6) -> Bo
 /// `drawerLeadingOffset` zeroed out (residual −8pt against the correct
 /// +16pt, both inside ±20), because `QuestionFace.leadingPadding` is itself
 /// close to that width. See that check's own comment.
+///
+/// **Updated for Task 8.** Two things changed once `IslandModel` gained a
+/// real tier: `model.drawerOpen = true` is now required — `IslandView` only
+/// composes `DrawerView` in at all when `model.tier` is actually `.drawer`,
+/// not merely when `model.question` is set (see `IslandView.body`'s own
+/// comment on why gating on the question alone stopped being enough). And
+/// `drawerTop`, the boundary this test scans around, moved from
+/// `model.panelFrames.panel.height` to `model.geometry.notch.height`:
+/// `panelFrames` is itself tier-aware now, so with the drawer open it *equals*
+/// the full rendered height rather than marking where the collapsed content
+/// ends — `notch.height` is what actually still does that (see
+/// `IslandBody.content`'s own hard clip to it).
 @MainActor @Test func islandViewComposesTheDrawerFlushBelowAndAlignedWithTheCollapsedBody() throws {
     let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
                             motion: MotionPreference(chosen: .full, systemWantsReduced: false))
     model.state = .waiting
     model.sessionCount = 1
     model.question = QuestionModel(event: recommendedEvent())
+    model.drawerOpen = true
 
     let raster = try rasterise(IslandView(model: model))
-    let drawerTop = Int(model.panelFrames.panel.height.rounded(.up))
-    #expect(raster.height > drawerTop,
+    // The true "collapsed only" reference, independent of the model's own
+    // (now tier-aware) `panelFrames` — computed at a fixed `.rest` so this
+    // still means what it always meant, regardless of what tier the model
+    // under test happens to be in.
+    let collapsedPanelHeight = Int(model.geometry.maxCollapsedFrames(tier: .rest).panel.height.rounded(.up))
+    #expect(raster.height > collapsedPanelHeight,
             "the rendered image is no taller than the collapsed panel alone — the drawer never reached the tree")
+
+    // Where the collapsed content ends and the drawer begins — `notch.height`,
+    // not `panelFrames.panel.height` (see the doc comment above).
+    let drawerTop = Int(model.geometry.notch.height.rounded(.up))
 
     // Ordering: the cat's own fixed facial tones (see `IslandGoldenTests`'
     // own use of them as "the sprite actually drew") belong above the
-    // drawer — catching a reversed `VStack`, which the horizontal-only
+    // drawer — catching a reversed stacking order, which the horizontal-only
     // checks below could not, since the drawer's own internal alignment
     // does not depend on where it sits vertically.
     let palette = CatPalette(accent: model.state.accent)
@@ -411,6 +432,45 @@ private func isNear(_ p: Raster.Pixel, _ colour: RGBA, tolerance: Int = 6) -> Bo
 
     #expect(Double(right - left) < model.frames.body.width,
             "accent spans \(right - left)pt — at or past the live body width \(model.frames.body.width); the drawer may be sized off the fixed panel's wider frame instead")
+}
+
+/// The render-level version of "a question must not open the drawer on its
+/// own" (design §6.1's Click tier; `NotchControllerTests
+/// .aQuestionDoesNotOpenTheDrawerOnItsOwn` pins the same property at the
+/// model level, checking `model.tier` rather than pixels).
+///
+/// `IslandView.body` gates `DrawerView` on `model.tier` being `.drawer`, not
+/// merely on `model.question` being non-nil — confirmed to matter, not
+/// belt-and-braces: reverting that gate back to `if let question =
+/// model.question` (dropping the tier check) leaves this scene's *rendered
+/// size* unchanged (`ImageRenderer` does not expand a view's reported size to
+/// fit an `.overlay` taller than its base — ImageRenderer sizes to
+/// `IslandBody`'s own outer frame, which stays at the small collapsed size
+/// while `model.tier` is `.rest`), but does still paint
+/// `DrawerView`'s own ground-coloured fill into the sliver of rows both the
+/// collapsed frame and the (clipped, oversized) overlay share — a real,
+/// pixel-level leak of "drawer content" into a render that must show none.
+@MainActor @Test func aQuestionWithoutAClickRendersIdenticallyToNoQuestionAtAll() throws {
+    func scene(withQuestion: Bool) throws -> Raster {
+        let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                                motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+        model.state = .waiting
+        model.sessionCount = 1
+        if withQuestion {
+            model.question = QuestionModel(event: recommendedEvent())
+            // drawerOpen deliberately left false — a question arriving must
+            // not open the drawer by itself.
+        }
+        return try rasterise(IslandView(model: model))
+    }
+
+    let withQuestion = try scene(withQuestion: true)
+    let withoutQuestion = try scene(withQuestion: false)
+
+    #expect(withQuestion.height == withoutQuestion.height,
+            "a question nobody clicked open changed the rendered height (\(withQuestion.height) vs \(withoutQuestion.height)pt) — the drawer reached the tree before any click")
+    #expect(withQuestion.differingPixelCount(from: withoutQuestion) == 0,
+            "a question nobody clicked open changed what is rendered — the drawer reached the tree (or painted into it) before any click")
 }
 
 /// `IslandView.body`'s `.animation(value: drawerHeight)` can't be read back

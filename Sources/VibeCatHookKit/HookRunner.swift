@@ -4,7 +4,14 @@ import VibeCatTransport
 
 /// Everything the hook does except touching stdin, stdout and the process exit
 /// code — which is what makes it testable.
-public struct HookRunner {
+///
+/// `Sendable`: every stored property already is (`SourceRegistry`,
+/// `SocketClient`, `[String: String]`), so this was a missing annotation
+/// rather than a real gap — surfaced by `PipelineTests`' own end-to-end
+/// tests, which hand a `HookRunner` to a real `Thread` (mirroring
+/// `SocketServer`'s own per-connection threads) rather than blocking the
+/// test's own main-actor task on `run`'s wait for a human answer.
+public struct HookRunner: Sendable {
     let registry: SourceRegistry
     let client: SocketClient
     let env: [String: String]

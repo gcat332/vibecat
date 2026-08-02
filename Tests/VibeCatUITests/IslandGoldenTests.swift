@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import SwiftUI
 import Testing
+import VibeCatCore
 @testable import VibeCatUI
 
 /// What the island actually paints.
@@ -171,6 +172,89 @@ struct IslandGoldenTests {
                     #expect(p == ground,
                             "\(state) count=\(count): \(p) at panel column \(x) is inside the cutout — content has slid under the hole")
                 }
+            }
+        }
+    }
+
+    /// Design §5.1 at the tier that was previously unguarded: Task 4's
+    /// substitute check (`nothingIsDrawnInsideTheCutoutWithTheDrawerOpen` in
+    /// `DrawerGeometryTests.swift`) rendered a scene with exactly one possible
+    /// non-transparent colour — the ground fill itself, with no cat, no
+    /// badge, nothing — so no realistic geometry bug could have turned it
+    /// red. Now that `IslandModel` can actually hold an open drawer
+    /// (`IslandModel.tier`, `.drawerOpen`), this is the real version: modelled
+    /// directly on `nothingIsDrawnInsideTheCutout` just above — same
+    /// ground-colour comparison, same panel-relative column arithmetic, same
+    /// `IslandBody` render — except the model here has a real question open,
+    /// so `IslandBody`'s own silhouette (and `panelFrames`, which its outer
+    /// frame is sized against) is genuinely taller, with the cat/badge/count
+    /// drawn at the top the same as every other test in this file — "actual
+    /// content present," not a blank canvas.
+    ///
+    /// `IslandShape`'s two rounded corners live at its extreme left/right
+    /// edges regardless of height (see its own `path(in:)` — the radius is
+    /// `min(bottomRadius, rect.height, rect.width / 2)`, and `bottomRadius`
+    /// is 15pt against every fixture's width here), so growing the shape
+    /// downward for the drawer does not bring any antialiased corner pixel
+    /// nearer the cutout's own columns, which sit in the middle of the
+    /// width — the one artifact `DrawerGeometryTests`' own comment warns
+    /// about stays confined to where it always was.
+    @MainActor @Test func nothingIsDrawnInsideTheCutoutWithTheDrawerOpen() throws {
+        let ground = Raster.Pixel(r: 5, g: 7, b: 11, a: 255)     // islandGroundColour
+        let event = VibeEvent(id: "q", cli: "claude-code", kind: .permission,
+                              session: "s", cwd: "/tmp/proj", title: "Bash command", body: "pnpm install",
+                              choices: [Choice(id: "allow", label: "Allow once"),
+                                        Choice(id: "deny", label: "Deny")],
+                              wantsReply: true)
+        for (state, count) in [(IslandState.running, 999), (.waiting, 3), (.dormant, 0)] {
+            let m = Self.model(state, count: count)
+            m.question = QuestionModel(event: event)
+            m.drawerOpen = true
+            guard case .drawer = m.tier else {
+                Issue.record("\(state) count=\(count): the fixture never reached the drawer tier — this test proves nothing")
+                continue
+            }
+
+            let raster = try rasterise(IslandBody(model: m, now: Date(timeIntervalSince1970: 1_000_000)))
+            let notch = IslandGeometry(screen: Self.mbp14).notch
+
+            // The render actually reached the drawer's own height — not
+            // merely that `m.tier` (an `IslandModel` property, computed
+            // independently of `IslandGeometry.maxCollapsedFrames`) *reports*
+            // `.drawer`. Confirmed to matter: mutating
+            // `maxCollapsedFrames(tier:)` to ignore its parameter (always
+            // `.rest` internally) leaves `m.tier` and `m.frames.body.height`
+            // (which does not route through `maxCollapsedFrames`) untouched,
+            // but silently shrinks `m.panelFrames` — and with it,
+            // `IslandBody`'s own outer frame and this render's height —
+            // straight back to the collapsed-only size. The loop below scans
+            // `0..<raster.height`, so a render that quietly got shorter
+            // checks *less*, not something that fails: every assertion below
+            // still passed against that mutant. This is what actually caught
+            // it.
+            let expectedHeight = Int((notch.height + m.question!.face.height
+                                       + IslandGeometry.auraMargin).rounded(.up))
+            #expect(raster.height == expectedHeight,
+                    "\(state) count=\(count): rendered \(raster.height)pt tall, expected \(expectedHeight) — the panel did not actually grow to cover the open drawer")
+
+            let from = Int(notch.minX - m.frames.panel.minX)
+            let to = Int(notch.maxX - m.frames.panel.minX)
+            for x in from..<to {
+                for y in 0..<raster.height {
+                    let p = raster[x, y]
+                    guard p.isTransparent == false else { continue }
+                    #expect(p == ground,
+                            "\(state) count=\(count), drawer open: \(p) at panel column \(x) is inside the cutout — content has slid under the hole")
+                }
+            }
+
+            // "Actual content present": confirms the render is not a blank
+            // canvas that would make the loop above vacuously true — the same
+            // fixed facial-tone check `everyStateRendersAVisibleIsland` uses.
+            let palette = CatPalette(accent: state.accent)
+            for tone in [Tone.innerEar, .nose] {
+                #expect(raster.pixelCount(near: palette[tone]) > 0,
+                        "\(state): no \(tone) pixel anywhere — the cat sprite did not draw with the drawer open")
             }
         }
     }

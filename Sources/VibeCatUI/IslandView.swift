@@ -105,18 +105,19 @@ public struct IslandView: View {
     }
 
     public var body: some View {
-        // `.leading`, not the default `.center`: `IslandBody`'s own outer
-        // `.frame` is the *full panel* width (it reserves room for the
-        // widest the collapsed island ever gets, per `maxCollapsedFrames`),
-        // while its actual painted silhouette sits offset inside that at
-        // `drawerLeadingOffset`. `DrawerView` is narrower than the panel, so
-        // centring the two children by default drifted the drawer sideways,
-        // away from the body actually painted above it — confirmed by
-        // rendering this with a real `IslandGeometry` and a question set: the
-        // drawer sat visibly right of the collapsed island rather than
-        // hanging flush beneath it. `.leading` plus the matching padding
-        // below is what makes the two align edge-to-edge instead.
-        VStack(alignment: .leading, spacing: 0) {
+        // `IslandBody`'s own outer `.frame` is the *full panel* width (it
+        // reserves room for the widest the collapsed island ever gets, per
+        // `maxCollapsedFrames`), while its actual painted silhouette sits
+        // offset inside that at `drawerLeadingOffset` — `DrawerView` is only
+        // ever as wide as the live body, so the overlay below applies that
+        // same offset as its own leading padding rather than the two drifting
+        // apart. (Originally a `VStack(alignment: .leading)`, whose *default*
+        // `.center` was confirmed by rendering to drift the drawer sideways,
+        // centring it under the wider panel instead of the narrower body
+        // above it — `.leading` fixed that. The overlay below replaced the
+        // VStack entirely for a different reason, see its own comment, and
+        // carries the explicit leading padding forward from that fix.)
+        Group {
             // A real branch, not a paused timeline. Measured: a paused-but-present
             // TimelineView still costs ~6% of a core; removing it costs 0.0%, and
             // that is the only way an idle machine actually stays idle.
@@ -128,21 +129,46 @@ public struct IslandView: View {
             } else {
                 IslandBody(model: model, now: Date())
             }
-
-            // Design §6.1's third tier: the drawer hangs below the collapsed
-            // body, inside this same view rather than a second window.
-            // `IslandBody` itself is untouched by this — its own `.frame`
-            // stays sized off `model.panelFrames`, still hardcoded to
-            // `.rest` (see `DrawerGeometryTests`'s own note on this exact
-            // gap) — so growing the *live* window to actually show this is
-            // a later task's wiring (`NotchController`/`NotchPanel`, neither
-            // touched here), not this one's. What belongs here already: the
-            // drawer appearing and disappearing along the spring §9.1 names,
-            // aligned with the silhouette it hangs from.
-            if let question = model.question {
+        }
+        // Design §6.1's third tier: the drawer hangs below the collapsed
+        // body, inside this same view rather than a second window.
+        //
+        // An overlay, not a VStack sibling — Task 8 changed what has to
+        // happen here. `IslandBody`'s own outer `.frame` reads
+        // `model.panelFrames`, which is now tier-aware and already grows to
+        // cover an open drawer's own height (see `IslandModel.tier` — the
+        // live `NSPanel` has to grow by exactly that much too, which is the
+        // whole reason `panelFrames` had to stop being a hardcoded `.rest`).
+        // A VStack sibling would add `DrawerView`'s height a *second* time on
+        // top of that — confirmed by rendering it that way: the rasterised
+        // scene came out exactly `panelFrames.panel.height +
+        // question.face.height` tall, with a dead gap of ground colour and
+        // nothing else sitting between the collapsed body and where the
+        // drawer's own title text actually started. `.topLeading` plus an
+        // explicit top offset of the collapsed content's own height is what
+        // makes this overlay start exactly where `IslandBody`'s own shape
+        // keeps going for the drawer, instead of at the *panel's* bottom
+        // edge, which sits `auraMargin` further down than the shape itself
+        // ever paints.
+        //
+        // Gated on `model.tier` being `.drawer`, not merely `model.question`
+        // being non-nil (what this read before Task 8 introduced the tier):
+        // a question must not open the drawer on its own, and `model.tier`
+        // is now the one place that already enforces exactly that (it stays
+        // `.rest`/`.hover` until `NotchController.click()` sets
+        // `drawerOpen`). Gating on `question` alone here would show
+        // `DrawerView` (and, per the paragraph above, expect `IslandBody`'s
+        // *un*grown frame to somehow already contain it) the moment a
+        // question arrived, before any click — relying on nothing but the
+        // live window happening to stay too small to reveal it, the same
+        // fragile-by-omission shape as the bug this comment already
+        // describes fixing once.
+        .overlay(alignment: .topLeading) {
+            if case .drawer = model.tier, let question = model.question {
                 DrawerView(question: question, accent: model.state.accent,
                            width: model.frames.body.width)
                     .padding(.leading, drawerLeadingOffset)
+                    .padding(.top, model.geometry.notch.height)
             }
         }
         .animation(.spring(response: 0.42, dampingFraction: 0.78), value: drawerHeight)

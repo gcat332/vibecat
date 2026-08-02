@@ -36,6 +36,37 @@ private let externalDisplay = ScreenMetrics(
     return (NotchController(model: model, metrics: metrics), model)
 }
 
+/// A controller with real geometry and a real panel already up — what every
+/// test below needs before it can read `c.panel` or drive `setHovering`/
+/// `setQuestion`/`click`. `AppModel` is discarded rather than returned:
+/// these tests drive the state machine directly through `NotchController`'s
+/// own entry points, deliberately bypassing `AppModel` — see `aQuestion`'s
+/// own comment on why.
+@MainActor private func makeController() -> NotchController {
+    let (c, _) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+    return c
+}
+
+@MainActor private var questionSerial = 0
+
+/// A `PendingQuestion` to hand `setQuestion` directly. Not routed through
+/// `AppModel.ingest` — that would park the calling thread inside
+/// `PendingQuestion.await()` until answered or expired, which on the main
+/// actor (every test here is `@MainActor`) is a deadlock, not a test. This is
+/// also why `reflow()` reads `model.question` for the clicks rule rather
+/// than `appModel.pending`: these tests never touch `AppModel` at all, so
+/// only the model side is reachable from here.
+@MainActor private func aQuestion(deadline: TimeInterval = 5) -> PendingQuestion {
+    questionSerial += 1
+    let event = VibeEvent(id: "q\(questionSerial)", cli: "claude-code", kind: .permission,
+                          session: "s", cwd: "/tmp/proj",
+                          choices: [Choice(id: "allow", label: "Allow once")],
+                          wantsReply: true)
+    return PendingQuestion(event: event, deadline: deadline)
+}
+
 @MainActor @Test func itAdoptsTheCurrentScreensGeometry() {
     let (c, _) = controller { mbp14 }
     c.refreshGeometry()
@@ -238,4 +269,127 @@ private let externalDisplay = ScreenMetrics(
     // this backwards would sample the bottom of the screen.
     #expect(region.minY == mbp14.frame.maxY - frames.body.maxY)
     #expect(region.minY == 0, "the island is at the top of the screen, so the strip starts at row 0")
+}
+
+/// The property `theBackdropRegionStopsAtTheMenuBar` above pins, at the one
+/// tier that could newly break it: `model.frames`/`model.panelFrames` now
+/// grow with an open drawer (`IslandModel.tier`), so `backdropRegion()` has
+/// to recompute its own `.rest`-tiered frame rather than read `model.frames`
+/// directly, or the aura would start sampling down through the drawer's own
+/// screen area the moment one was open — reintroducing the exact
+/// too-tall-a-strip bug the type-level comment above already describes once.
+@MainActor @Test func theBackdropRegionStaysAtTheMenuBarEvenWithTheDrawerOpen() {
+    let c = makeController()
+    c.setQuestion(aQuestion())
+    c.click()
+    #expect(c.model.tier != .rest, "the drawer never actually opened, so this test proves nothing")
+
+    let region = c.backdropRegion()
+    // Independently recomputed at .rest, not read off c.model.frames (which
+    // is deliberately tier-aware now) — this is the collapsed body's own
+    // height, whatever the drawer is doing.
+    let collapsedHeight = IslandGeometry(screen: mbp14).frames(rightFlank: 0, tier: .rest).body.height
+    #expect(region.height == collapsedHeight,
+            "the sampled strip is \(region.height)pt tall with the drawer open, against \(collapsedHeight)pt at rest — it reached into the drawer")
+}
+
+// MARK: - Task 8: click to open, and the round trip end to end
+
+/// The rule from "The panel takes mouse events only when there is something to
+/// open". Both halves matter: a permanently clickable island swallows menu bar
+/// clicks, and an island that never takes them cannot be answered.
+@MainActor @Test func thePanelTakesClicksOnlyWhenHoveredWithAQuestionWaiting() throws {
+    let c = makeController()
+    let panel = try #require(c.panelForTesting)
+
+    c.setHovering(false); c.setQuestion(nil)
+    #expect(panel.acceptsClicks == false)
+    c.setHovering(true); c.setQuestion(nil)
+    #expect(panel.acceptsClicks == false, "hovering an island with nothing to open swallowed a menu bar click")
+    c.setHovering(false); c.setQuestion(aQuestion())
+    #expect(panel.acceptsClicks == false, "a question the pointer is nowhere near swallowed a menu bar click")
+    c.setHovering(true); c.setQuestion(aQuestion())
+    #expect(panel.acceptsClicks)
+}
+
+/// A question arriving must not open the drawer by itself — that would steal
+/// the screen from whatever the person is doing. It changes the cat and waits.
+@MainActor @Test func aQuestionDoesNotOpenTheDrawerOnItsOwn() {
+    let c = makeController()
+    c.setQuestion(aQuestion())
+    #expect(c.model.tier == .rest)
+}
+
+@MainActor @Test func aLapsedQuestionClosesTheDrawer() async throws {
+    let c = makeController()
+    let panel = try #require(c.panelForTesting)
+
+    c.setQuestion(aQuestion(deadline: 0.05))
+    c.click()
+    #expect(c.model.tier != .rest)
+    // Polled, not a single fixed sleep: the lapse Task's own 50ms sleep
+    // finishes on schedule regardless, but its continuation still has to be
+    // scheduled onto Swift's small shared cooperative pool, which every
+    // other concurrently-running test in a full-suite run is also
+    // contending for — confirmed directly: a single 400ms sleep here passed
+    // every filtered run but failed a full-suite run with `tier` still
+    // `.drawer`. Loose 2s ceiling, same shape as this codebase's other
+    // cross-thread waits (e.g. PipelineTests.waitUntil).
+    let ceiling = Date().addingTimeInterval(2)
+    while c.model.tier != .rest, Date() < ceiling {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(c.model.tier == .rest, "the drawer is still showing a question the hook has abandoned")
+    #expect(panel.acceptsClicks == false)
+}
+
+/// `drawerOpen` must not survive past the question it was opened for.
+/// Otherwise a *second*, later question inherits the first one's "clicked
+/// open" and appears already open — the same violation
+/// `aQuestionDoesNotOpenTheDrawerOnItsOwn` exists to catch for a single
+/// question, but reachable a different way: not by opening a drawer with no
+/// question, but by a new question arriving after an old, already-opened one
+/// closed. None of the three tests the brief itself gives ever sets a
+/// *second* question after answering or lapsing the first, so this gap
+/// survived unnoticed until mutated: deleting `setQuestion`'s
+/// `if pending == nil { model.drawerOpen = false }` left every test above
+/// green.
+@MainActor @Test func aNewQuestionDoesNotInheritAnOlderOnesOpenDrawer() {
+    let c = makeController()
+    c.setQuestion(aQuestion())
+    c.click()
+    #expect(c.model.tier != .rest, "the drawer never opened, so this test proves nothing")
+
+    c.setQuestion(nil)                // answered or dismissed
+    c.setQuestion(aQuestion())        // a second, later question arrives
+    #expect(c.model.tier == .rest,
+            "a new question inherited the previous one's open drawer")
+}
+
+/// "When the tier changes, re-apply the panel frame" — the actual, live
+/// `NSPanel`, not merely `model.tier`'s own value. Every assertion above
+/// reads `c.model.tier`, which is computed straight off `drawerOpen`/
+/// `question`/`hovering` and would report `.drawer` correctly even if
+/// nothing ever touched the real panel — confirmed by mutating the
+/// resize-comparison in `reflow()` to never call `panel.apply(_:)` at all
+/// and finding the whole suite still green. This is the test that actually
+/// exercises the panel.
+@MainActor @Test func thePanelGrowsWhenTheDrawerOpensAndShrinksWhenItCloses() throws {
+    let c = makeController()
+    let panel = try #require(c.panelForTesting)
+    let collapsedFrame = panel.frame
+
+    c.setQuestion(aQuestion())
+    c.click()
+    #expect(c.model.tier != .rest, "the drawer never opened, so this test proves nothing")
+    #expect(panel.frame.height > collapsedFrame.height,
+            "the live panel did not grow to cover the open drawer")
+    #expect(panel.frame.width == collapsedFrame.width,
+            "the panel resized sideways — the drawer should only ever grow it downward")
+    #expect(panel.frame.minX == collapsedFrame.minX,
+            "the left edge moved — design §5.3's one fixed invariant")
+
+    c.setQuestion(nil)
+    #expect(panel.frame == collapsedFrame,
+            "the panel did not shrink back to its collapsed size once the drawer closed")
 }

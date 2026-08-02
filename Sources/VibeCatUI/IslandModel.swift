@@ -31,6 +31,16 @@ import Observation
     /// separate open/closed flag that could disagree with it.
     public var question: QuestionModel?
 
+    /// Whether a click has actually opened the drawer. Deliberately separate
+    /// from `question`: a question arriving must not open the drawer by
+    /// itself (design §6.1's "Click" tier is a distinct gesture from a
+    /// question merely existing) — it changes the cat and waits. This is
+    /// what that "waits" is — `false` until `NotchController.click()` sets it,
+    /// and reset to `false` whenever `question` clears (answered, dismissed,
+    /// or lapsed) so a *later* question does not inherit a stale "open" from
+    /// one that already closed.
+    public var drawerOpen: Bool = false
+
     public init(geometry: IslandGeometry, coat: Coat = .tabby, motion: MotionPreference) {
         self.geometry = geometry
         self.coat = coat
@@ -42,12 +52,37 @@ import Observation
                         hovering: hovering)
     }
 
-    public var frames: IslandFrames {
-        geometry.frames(rightFlank: layout.rightFlankWidth, tier: .rest)
+    /// Design §6.1's three tiers, derived rather than stored redundantly:
+    /// `.drawer` only when a click actually opened one *and* there is still a
+    /// question to show (the guard's `let question` covers the question
+    /// clearing out from under an already-open drawer — the lapse path does
+    /// exactly this); otherwise whatever the hover state already was. `.rest`
+    /// and `.hover` compute identically for `frames`/`panelFrames` below
+    /// (`IslandTier.extraHeight` is 0 for both) — the case only matters to
+    /// callers that switch on it, none of which exist yet.
+    public var tier: IslandTier {
+        guard drawerOpen, let question else { return hovering ? .hover : .rest }
+        return .drawer(height: question.face.height)
     }
 
-    /// The panel never resizes, so the view lays out against this.
-    public var panelFrames: IslandFrames { geometry.maxCollapsedFrames() }
+    /// The collapsed content's own frame — the cat, the badge, the count.
+    /// Tier-aware for height so a rendered `IslandBody` can actually show an
+    /// open drawer's extra space (see `IslandGoldenTests
+    /// .nothingIsDrawnInsideTheCutoutWithTheDrawerOpen`), but this changes
+    /// nothing for any caller while the drawer is closed: `.rest` and
+    /// `.hover` both contribute zero extra height, exactly as the hardcoded
+    /// `.rest` this replaces always did.
+    public var frames: IslandFrames {
+        geometry.frames(rightFlank: layout.rightFlankWidth, tier: tier)
+    }
+
+    /// The real panel's own bounds. Tier-aware for height only — `rightFlank`
+    /// stays pinned to the theoretical widest regardless of tier, so opening
+    /// the drawer grows the panel downward and never sideways (see
+    /// `IslandGeometry.maxCollapsedFrames`'s own comment on why the width
+    /// ceiling is unconditional). `NotchController.reflow()` is what actually
+    /// resizes the live window to match this once tier changes.
+    public var panelFrames: IslandFrames { geometry.maxCollapsedFrames(tier: tier) }
 
     public var mood: CatMood { CatMood(state: state) }
     public var badge: Badge { Badge(state: state) }
