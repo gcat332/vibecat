@@ -71,9 +71,34 @@ public struct NeverQuiet: QuietHours {
     /// silently dead — it does have one, and `isQuiet`'s own doc comment records the
     /// hardware run where `authorizationStatus` went from `0` to `3` across it.
     /// Written down so the next reader does not have to grep to find that out.
+    /// **Refuses to ask without an `NSFocusStatusUsageDescription`, because asking
+    /// without one is fatal.** macOS does not fail this call, deny it, or return an
+    /// error — it `abort()`s the process with *"This app has crashed because it
+    /// attempted to access privacy-sensitive data without a usage description."*
+    ///
+    /// A bare binary has no `Info.plist` at all, so `VIBECAT_SOCKET=… swift run
+    /// vibecat` — the dev workflow `CLAUDE.md` documents and the one used to drive
+    /// this app with replayed hook payloads — died on launch with SIGABRT the moment
+    /// Plan 6.2 added the call above. `swift test` cannot see it: no test runs
+    /// `main.swift`. It was found by Plan 6.4's Task 4 trying to follow the
+    /// documented instructions, and confirmed against unmodified `main`.
+    ///
+    /// The guard is not defensive padding — it is the same shape as this project's
+    /// fail-open rule (§2.3). A missing key means Focus status is unavailable, and
+    /// unavailable must degrade to "not quiet" (the documented behaviour when
+    /// authorization is absent), never to a dead process.
     public nonisolated func requestAuthorizationIfNeeded() {
+        guard Self.hasUsageDescription else { return }
         guard INFocusStatusCenter.default.authorizationStatus == .notDetermined else { return }
         INFocusStatusCenter.default.requestAuthorization { _ in }
+    }
+
+    /// Whether this build can legally ask for Focus status. `Scripts/build-app.sh`
+    /// writes the key; a bare binary has no `Info.plist` to write it into.
+    nonisolated static var hasUsageDescription: Bool {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "NSFocusStatusUsageDescription") as? String
+        else { return false }
+        return !value.isEmpty
     }
 
     /// The raw `INFocusStatusAuthorizationStatus` value, for reporting what a
