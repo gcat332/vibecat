@@ -368,9 +368,23 @@ follows is what it deliberately left, with the reason.
   **Consequences, which matter more than the flake:** any `rasterise`-based
   assertion in this suite can in principle pass or fail for reasons that have
   nothing to do with its subject, so a green golden test is weaker evidence than
-  this project has been treating it as. Worth reproducing with a minimal
-  two-test case and, if it holds, serialising the rasterising tests (`.serialized`
-  on the suites, or one shared render queue) before adding more of them.
+  this project has been treating it as.
+
+  **Independently reproduced, so this is two observers and not one.** A second
+  probe — written from scratch, rendering `SessionBlocks(options: [])` into the same
+  fixed 388×80 frame and *printing* the count rather than asserting on it — read
+  **0 opaque pixels under `--filter`** and **`opaque=2287 distinct=587`** on one of
+  six full-suite runs. Byte-identical to the figure above, arrived at separately.
+  587 distinct colours in a frame that must be blank says the content came from
+  something rich, like a sprite sheet.
+
+  **What is and is not damaged.** Assertions run in **isolation** are unaffected,
+  which covers every mutation check in Plan 5 — all of them used `--filter`. What is
+  weakened is the standing evidentiary value of golden assertions in **full-suite**
+  runs. So the reasonable next step is not to distrust the suite wholesale: it is to
+  serialise the rasterising tests (`.serialized` on those suites, or one shared
+  render queue) **before adding more of them**, and to treat `--filter` as the only
+  trustworthy mode for a golden result until that lands.
 - **An unidentified Task 4 flake** whose data is unrecoverable. Recorded only so a
   future recurrence is not mistaken for something new.
 
