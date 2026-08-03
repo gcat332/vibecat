@@ -10,8 +10,8 @@ plan files twice; it is cheaper to keep it written down.
 | 2 | Notch geometry, the panel, the collapsed island, hover, the aura | §5, §6.1–6.2, §9.2 | done |
 | 3 | The cat, its moods and coats, badges, motion | §7, §8, §9.1, §9.3's rule | done |
 | 4 | The drawer and answering — single and multi select, the destructive second ask, the reply round-trip | §6.3, §10 | done |
-| **4.5** | **Matching the prototype** — one systematic diff of colour, radius, type scale, spacing and motion curve, and a written record of every deliberate divergence | the prototypes the spec header names | **in progress** — [the diff](2026-08-03-prototype-diff.md) |
-| 5 | The session list · plus the hover reveal's content and the sliver that shares its mechanism · plus a multi-sprite CPU measurement | §11, §9.1's reveal | after 4.5 |
+| 4.5 | Matching the prototype — one systematic diff of colour, radius, type scale, spacing and motion curve, and a written record of every deliberate divergence | the prototypes the spec header names | **done** — [the diff](2026-08-03-prototype-diff.md); two deliberate divergences recorded |
+| 5 | The session list · plus the hover reveal's content and the sliver that shares its mechanism · plus a multi-sprite CPU measurement | §11, §9.1's reveal | **written** — [the plan](2026-08-03-session-list.md), 8 tasks |
 | **6** | Sound, jump, all four Settings sections, the Full/Reduced/Off control · **plus everything gated on keyboard input** | §12, §13, §14, §9.3's UI | not written |
 | **7** | Generic adapter and custom sources | §3 | not written |
 | **8** | Matching motion cost to motion content | §9.1's rates | not written |
