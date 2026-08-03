@@ -161,6 +161,22 @@ were explicitly not measured here:
 - **Several sprites at once.** Plan 5 is the first thing that puts more than one
   cat on screen. If the cost is per-animation rather than per-island, the resting
   figure scales with the session count — which would change this decision.
+
+  **Partly answered 2026-08-03, and the answer is per-island.** Plan 4.5 moved the
+  cat's `trot` from a cell-swap to a view transform, putting *two* continuous
+  transforms on the `running` island where there had been one. The within-run
+  `running − dormant` delta — which cancels the 12 fps timeline, present in both —
+  moved from **+2.89pp to +3.64pp**. So the second whole animation cost about
+  **+0.75pp against roughly 10pp for the first.** Adding `sleep`'s drowse to
+  dormant then took it from 10.16% to **11.59%** (spread 11.31–11.78), the same
+  order again rather than another 10.
+
+  So the ~10–12% is a fixed charge for animating at all, not a per-animation fee.
+  Two consequences: matching more of the prototype's motion is nearly free once
+  anything is moving, and **Plan 5's several sprites are much less alarming than
+  this section originally assumed** — though several *separate* animating islands
+  is still not the same experiment as several sprites inside one, and has not been
+  run.
 - **Thermals under load.** A dev machine running several agents is not idle. This
   probe measured an otherwise quiet system.
 

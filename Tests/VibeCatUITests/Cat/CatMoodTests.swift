@@ -67,15 +67,16 @@ import Testing
 /// shift would satisfy it while still being the same motion. Time spent
 /// raised is the shape-sensitive part: trot is up for half its cycle in two
 /// beats, call for a sixth of it in one.
-@Test func trotAndCallMoveToDifferentRhythms() {
-    let phases = stride(from: 0.0, to: 1.0, by: 0.01).map { $0 }
-    func steps(_ mood: CatMood) -> [Int] {
-        phases.map { ResolvedCat(coat: .tabby, mood: mood, phase: $0).verticalOffset }
-    }
-    let trot = steps(.trot), call = steps(.call)
-    #expect(trot != call, "trot and call step identically — they share one motion")
-    #expect(trot.count { $0 != 0 } != call.count { $0 != 0 },
-            "trot and call spend the same share of the cycle raised — one is only a phase shift of the other, not a different motion")
+/// **Superseded 2026-08-03 by `trotAndCallStillMoveDifferently`.** This asserted
+/// on `ResolvedCat.verticalOffset`, the phase-driven whole-cell step that Plan 4.5
+/// replaced with a view-level transform — so there is no per-phase step sequence
+/// left to compare. The claim it defended is unchanged and still tested; only the
+/// mechanism it read moved.
+@Test func trotAndCallMoveToDifferentRhythms() throws {
+    let trot = try #require(CatMood.trot.pulse)
+    let call = try #require(CatMood.call.pulse)
+    #expect(trot.period != call.period || trot.rise != call.rise,
+            "trot and call move identically — they share one motion")
 }
 
 /// The mood-to-mood counterpart of `everyPairOfCoatsIsTellableApart`, and for
@@ -120,21 +121,74 @@ import Testing
     }
 }
 
-/// Pixel art steps. A fractional offset would blur the grid.
-@Test func theVerticalOffsetIsAlwaysAWholeNumberOfCells() {
-    for mood in CatMood.allCases {
-        for i in 0...20 {
-            let phase = Double(i) / 20.0
-            let cat = ResolvedCat(coat: .tabby, mood: mood, phase: phase)
-            #expect(abs(cat.verticalOffset) <= 1, "\(mood) bobs more than one cell")
-        }
-    }
+/// Plan 4.5. The prototype's own keyframes, quoted from `island-motion.html`:
+///
+/// ```css
+/// .cat.trot   {animation:trot 1s var(--ease) infinite}
+/// @keyframes trot {0%,100%{transform:translateY(0)} 50%{transform:translateY(-2px)}}
+/// ```
+///
+/// So `trot` is a **2pt** translate over a **1s** cycle, one beat, reversing.
+/// Ours was a 1-cell step with *two* beats per cycle — half the amplitude and
+/// twice the rhythm. The plan file caught the amplitude and not the rhythm.
+///
+/// `period` is the whole cycle; `CatCanvas` halves it for `autoreverses`, which
+/// is what the prototype's `0%,100% … 50%` shape means.
+@Test func trotTravelsThePrototypesTwoPointsOverItsOwnSecond() throws {
+    let trot = try #require(CatMood.trot.pulse, "trot must move at all")
+    #expect(trot.rise == -2, "the prototype translates -2px; this rises \(trot.rise)")
+    #expect(trot.period == 1.0, "the prototype's trot cycle is 1s; this is \(trot.period)")
+    #expect(trot.sway == 0, "trot is vertical only")
 }
 
-@Test func aStillMoodDoesNotMoveAcrossThePhase() {
-    let a = ResolvedCat(coat: .tabby, mood: .dead, phase: 0.0).verticalOffset
-    let b = ResolvedCat(coat: .tabby, mood: .dead, phase: 0.5).verticalOffset
-    #expect(a == b || CatMood.dead.motion.isContinuous)
+/// §7.2 names two *different* motions — a "quick bob" for `trot` and an
+/// "attention pulse" for `call` — so they must not become the same motion now
+/// that both are translates. The prototype distinguished them by transform kind
+/// (`translateY` against `scale(1.09)`); we cannot use scale (see
+/// `theCatsGridSurvivesATranslateButNotAScale`), so the distinction has to live
+/// in the numbers instead.
+@Test func trotAndCallStillMoveDifferently() throws {
+    let trot = try #require(CatMood.trot.pulse)
+    let call = try #require(CatMood.call.pulse)
+    #expect(trot != call, "trot and call share one motion — the moods differ only by the mouth again")
+    #expect(abs(call.rise) > abs(trot.rise),
+            "call is the more urgent state and must read as the larger movement: \(call.rise) against trot's \(trot.rise)")
+}
+
+/// `dead` wobbles horizontally rather than rotating, and that is deliberate —
+/// see `CatMood.pulse`'s own comment for the measurement behind it. What matters
+/// here is that it moves *sideways only*, because a vertical `dead` would be a
+/// slower `trot`.
+@Test func deadWobblesSidewaysRatherThanBobbing() throws {
+    let dead = try #require(CatMood.dead.pulse, "§7.2 gives dead a slow wobble")
+    #expect(dead.sway != 0 && dead.rise == 0,
+            "dead moves rise=\(dead.rise) sway=\(dead.sway) — a vertical wobble is just a slow trot")
+    #expect(dead.period == 2.4, "the prototype's wobble is 2.4s; this is \(dead.period)")
+}
+
+/// `sleep` drowses downward, matching the prototype's
+/// `@keyframes drowse {0%,100%{translateY(0)} 50%{translateY(2px)}}` over 3s.
+///
+/// **Down, not up** — it is the one mood that sinks, and it is the whole reading
+/// of "asleep". A sign error here would make a sleeping cat bob like a trotting
+/// one, which no cell assertion elsewhere in this file would catch.
+///
+/// That this animates at all rests on a measurement, not a preference: Plan 3
+/// made it still on a real figure that priced the cell-swapping mechanism, and a
+/// transform's marginal cost on an island already animating measured ~0.75pp. See
+/// `CatMood.pulse`.
+@Test func sleepDrowsesDownwardOnThePrototypesThreeSecondCycle() throws {
+    let sleep = try #require(CatMood.sleep.pulse, "sleep drowses — see the pulse comment")
+    #expect(sleep.rise == 2, "drowse sinks 2px; this moves \(sleep.rise) — negative would make it bob awake")
+    #expect(sleep.period == 3.0, "the prototype's drowse is 3s; this is \(sleep.period)")
+}
+
+/// `happy` carries no *repeating* pulse: §7.2 gives it "one spring pop", and
+/// `CatCanvas` renders that as a transient overshoot rather than something that
+/// runs forever. It is also the only mood allowed to scale, because a 540ms blur
+/// ends and a permanent one does not.
+@Test func happyIsAOneShotRatherThanARepeatingPulse() {
+    #expect(CatMood.happy.pulse == nil, "happy is a one-shot pop, not a repeating pulse")
 }
 
 @Test func resolvingIsStableForTheSameInput() {

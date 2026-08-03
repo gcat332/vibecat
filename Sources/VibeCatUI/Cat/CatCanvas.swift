@@ -35,14 +35,16 @@ public struct CatCanvas: View {
     /// calls.
     private var fillsByTone: [(Color, Path)] {
         guard cellSize > 0 else { return [] }
-        let dy = CGFloat(cat.verticalOffset) * cellSize
         var byTone: [Tone: Path] = [:]
         for (row, line) in cat.cells.enumerated() {
             for (col, tone) in line.enumerated() {
                 guard let tone else { continue }
-                // Integer boundaries — pixel art must land on the grid.
+                // Integer boundaries — pixel art must land on the grid. The
+                // sprite's *motion* is no longer part of this arithmetic: Plan
+                // 4.5 moved it to a view transform below, so these rects are
+                // the sprite at rest and nothing else.
                 let rect = CGRect(x: (CGFloat(col) * cellSize).rounded(),
-                                  y: (CGFloat(row) * cellSize + dy).rounded(),
+                                  y: (CGFloat(row) * cellSize).rounded(),
                                   width: cellSize, height: cellSize)
                 byTone[tone, default: Path()].addRect(rect)
             }
@@ -50,8 +52,13 @@ public struct CatCanvas: View {
         return byTone.map { (Color(palette[$0.key]), $0.value) }
     }
 
+    /// Flipped once on appear so the implicit animations have somewhere to go —
+    /// the same mechanism `BadgeCanvas` uses, for the same reason.
+    @State private var moving = false
+
     public var body: some View {
         let fills = fillsByTone
+        let pulse = cat.mood.pulse
         Canvas { ctx, _ in
             for (color, path) in fills {
                 ctx.fill(path, with: .color(color))
@@ -59,5 +66,31 @@ public struct CatCanvas: View {
         }
         .frame(width: CGFloat(CatGrid.width) * cellSize,
                height: CGFloat(CatGrid.height) * cellSize)
+        // The transform sits on the view, not inside the renderer, so the render
+        // server runs it and no `TimelineView` tick is needed to move the cat.
+        // `trot` keeps its timeline anyway for §7.2's blink, which is a cell
+        // change; `call` no longer needs one to move at all.
+        //
+        // Half the period, reversing: the prototype's keyframes are
+        // `0%,100%{rest} 50%{extreme}`, which is exactly an autoreversing
+        // animation of half the cycle. `--ease` is `cubic-bezier(.22,.9,.28,1)`,
+        // which `.easeInOut` approximates; matching the bezier exactly is the
+        // open motion-curve item and is not settled by guessing here.
+        .offset(x: moving ? (pulse?.sway ?? 0) : 0,
+                y: moving ? (pulse?.rise ?? 0) : 0)
+        .animation(pulse.map {
+            .easeInOut(duration: $0.period / 2).repeatForever(autoreverses: true)
+        }, value: moving)
+        // §7.2's "one spring pop" for `happy`, the prototype's
+        // `catpop 540ms var(--spring-w)`: `scale(.6) → 1.12 at 60% → 1`. A
+        // spring that overshoots is the same figure with one parameter instead
+        // of three keyframes, and unlike the repeating scales this one is
+        // transient — so the blur measured in `CatMood.pulse` lasts 540ms and
+        // then the grid is exact again, which is why this is the one scale we do
+        // match.
+        .scaleEffect(cat.mood == .happy && !moving ? 0.6 : 1)
+        .animation(cat.mood == .happy ? .spring(response: 0.42, dampingFraction: 0.56) : nil,
+                   value: moving)
+        .onAppear { moving = true }
     }
 }

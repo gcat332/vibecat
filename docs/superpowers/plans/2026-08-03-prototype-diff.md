@@ -137,6 +137,53 @@ So everything below may now be matched with view transforms. What follows is sti
 the accounting of *what* has to change and why the plan file's own description of
 it was wrong — the price is simply no longer a blocker.
 
+### Done: four of the five moods now carry the prototype's own motion
+
+Implemented 2026-08-03 as `CatMood.pulse`, a view-level transform applied by
+`CatCanvas` — the same mechanism the badges use, so no `TimelineView` tick is
+needed to move the cat.
+
+| mood | prototype | ours | verdict |
+|---|---|---|---|
+| `trot` | `translateY(-2px)` 1s | `-2pt`, 1s | **matched exactly** |
+| `sleep` | `translateY(2px)` 3s | `+2pt`, 3s | **matched exactly** |
+| `happy` | `scale(.6→1.12→1)` 540ms `--spring-w` | one-shot spring overshoot | **matched in figure** |
+| `call` | `scale(1.09)` 1.1s | `-3pt` translate, 1.1s | **deliberate divergence** |
+| `dead` | `rotate(±4deg)` 2.4s | `±1pt` sway, 2.4s | **deliberate divergence** |
+
+**The blur claim this all turned on was backwards.** `ResolvedCat.verticalOffset`
+asserted for three plans that "a fractional offset would blur the grid", and it was
+never measured. Measured now
+(`theCatsGridSurvivesATranslateButNotAScale`): a translate leaves the sprite at
+**9 distinct colours** at every offset tried, whole *or* fractional, at 1× and 2×.
+`.scaleEffect(1.09)` — the prototype's own `callout` — takes it to **95 colours at
+1×, 130 at 2×**. Translation is exact; scaling is what dissolves the grid.
+
+So the whole-cell rule was guarding the wrong thing, and the two divergences above
+are the honest consequence: `call` and `dead` cannot match the prototype without a
+permanently soft sprite in the two states where the cat matters most. `happy` is
+the one scale we do match, because a 540ms blur ends.
+
+`call` is `-3pt` rather than `-2pt` for a reason worth keeping: §7.2 names two
+*different* motions, a "quick bob" and an "attention pulse", and the prototype
+carried that distinction in the transform *kind*. Collapsing both to translates
+would have made them the same motion at slightly different speeds, so the
+distinction moved into the amplitude.
+
+### And the cost turned out to be per-island, not per-animation
+
+Adding `trot`'s transform put two continuous animations on the `running` island.
+The within-run `running − dormant` delta — the 12 fps timeline cancels, being in
+both — moved from **+2.89pp to +3.64pp**: about **+0.75pp for a whole second
+animation**, against ~10pp for the first. Adding `sleep`'s drowse to dormant then
+took it 10.16% → **11.59%**, the same order again.
+
+That is what unblocked `sleep`. Plan 3 made it still on a real measurement, but
+that measurement priced the cell-swapping mechanism at 3.6–4.1%; a transform on an
+island already animating is under a point. **The reasoning was sound and the number
+it assumed was wrong** — which is the third time on this project that a genuine
+measurement turned out to have priced the wrong mechanism.
+
 ### The trot amplitude is not the one-line fix it was recorded as
 
 `plans/README.md` says: "`trot`'s amplitude is simply halved, … `trot`'s missing

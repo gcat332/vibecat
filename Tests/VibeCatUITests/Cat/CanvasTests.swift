@@ -62,6 +62,50 @@ import CoreGraphics
             "a real render never reached the Canvas renderer, so the counter can never register a redraw either")
 }
 
+/// The measurement Plan 4.5's motion decisions rest on, and the correction of a
+/// claim this codebase asserted for three plans without checking.
+///
+/// `ResolvedCat.verticalOffset` used to carry "Whole cells. Pixel art steps; a
+/// fractional offset would blur the grid." **The opposite is true.** A translate
+/// — whole *or* fractional, at 1× or 2× — leaves the sprite's palette exactly as
+/// it is. It is `scale` that dissolves it, by an order of magnitude:
+///
+/// | transform | distinct colours @1× | @2× |
+/// |---|---|---|
+/// | `offset` 0 / −2 / −0.5 / −0.25 | 9 / 9 / 9 / 9 | 9 / 9 / 9 / 9 |
+/// | `scaleEffect` 1.09 (the prototype's `callout`) | **95** | **130** |
+/// | `scaleEffect` 1.12 (`catpop`'s peak) | 100 | 128 |
+/// | `scaleEffect` 0.6 (`catpop`'s start) | 41 | 72 |
+///
+/// So the prototype's `translateY` motions can be matched exactly, and its
+/// `scale`/`rotate` ones cannot without accepting a permanently soft sprite. That
+/// is why `call` translates where the prototype scales, and why `happy` — alone —
+/// is allowed to scale: it is a 540ms one-shot, so its blur ends.
+///
+/// **What this does and does not prove.** It measures `ImageRenderer`. The live
+/// path is the render server transforming a cached layer, which cannot be sharper
+/// than this and is very likely softer — the badge CPU probe measured 0 `Canvas`
+/// draws during a repeating transform, which is direct evidence the bitmap is not
+/// re-rendered at the scaled size. Treat these as a floor on the blur, not a
+/// ceiling.
+@MainActor @Test func theCatsGridSurvivesATranslateButNotAScale() throws {
+    let cat = ResolvedCat(coat: .tabby, mood: .trot, phase: 0.6)
+    let palette = CatPalette(accent: IslandState.running.accent)
+    let sprite = CatCanvas(cat: cat, palette: palette, cellSize: 1)
+
+    for scale in [CGFloat(1), 2] {
+        let rest = try rasterise(sprite.padding(4), scale: scale).distinctColours.count
+        for dy in [CGFloat(-2), -0.5, -0.25] {
+            let moved = try rasterise(sprite.offset(y: dy).padding(4), scale: scale).distinctColours.count
+            #expect(moved == rest,
+                    "@\(Int(scale))x: translating by \(dy)pt took the palette from \(rest) colours to \(moved) — a translate must be exact, and `CatMood.pulse` chose translates on the strength of that")
+        }
+        let scaled = try rasterise(sprite.scaleEffect(1.09).padding(4), scale: scale).distinctColours.count
+        #expect(scaled > rest * 5,
+                "@\(Int(scale))x: scaling by the prototype's own 1.09 gave \(scaled) colours against \(rest) at rest — if a scale has stopped blurring, `call` and `dead` can match the prototype exactly and this decision should be revisited")
+    }
+}
+
 /// A zero or negative cell size must not trap.
 @MainActor @Test func aDegenerateCellSizeDoesNotTrap() {
     let cat = ResolvedCat(coat: .tabby, mood: .trot, phase: 0)
