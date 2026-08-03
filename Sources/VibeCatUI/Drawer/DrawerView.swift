@@ -38,7 +38,27 @@ struct DrawerView: View {
     /// Plan 6 slots straight into it without forcing a relayout of
     /// everything above. Do not delete this as unused space: nothing draws
     /// here because nothing is *meant to* yet, not because it was forgotten.
-    private static let footerHeight: CGFloat = 44
+    ///
+    /// Plan 6.4, Task 3: claimed now, by `PanelBar`, built directly in
+    /// `body` below. The value itself is unchanged; only its visibility
+    /// widened from `private` so `PanelBarTests
+    /// .theReservedFooterIsNoLongerEmpty` can crop a real render to exactly
+    /// this many points from the bottom rather than a copy of the literal
+    /// `44`.
+    ///
+    /// An earlier draft of this file routed `body` and a `footerProbeForTesting`
+    /// helper through one shared static, on the theory that a single
+    /// implementation can't let the two drift apart. That reasoning holds for
+    /// "does the footer draw the right *content*", but not for the mutation
+    /// this plan actually calls out — reverting `body`'s own call back to
+    /// `Color.clear` — because a static the *test* calls directly is, by
+    /// construction, never affected by what `body` does or doesn't call.
+    /// Measured: that version of `theReservedFooterIsNoLongerEmpty` **stayed
+    /// green** under exactly that mutation. Reported rather than quietly kept,
+    /// per this plan's own rule about a mutation that stays green — the fix is
+    /// below: render the real `DrawerView` and inspect its actual bottom
+    /// strip, which cannot help but go through `body`.
+    static let footerHeight: CGFloat = 44
 
     private var accentColor: Color { Color(accent) }
 
@@ -86,11 +106,18 @@ struct DrawerView: View {
                         }
                     }
                     .animation(.easeInOut(duration: FaceCrossfade.duration), value: question == nil)
-                    // The reservation itself: an explicitly empty, fixed-
-                    // height spacer rather than plain absence, so its height
-                    // is checkable and its presence is a decision a later
-                    // reader can see rather than infer.
-                    Color.clear.frame(height: Self.footerHeight)
+                    // The reservation itself, now claimed by `PanelBar`.
+                    // `muted` hardcoded `false` and both closures no-ops:
+                    // Task 4 owns wiring this to `Preferences.soundEnabled`
+                    // and a real settings-window opener. A button that calls
+                    // nothing yet is still correct chrome — the
+                    // alternative, an empty 44pt gap, is exactly what this
+                    // task replaces. Built directly here, not through a
+                    // shared static a test could call around `body` — see
+                    // `footerHeight`'s own doc comment for why that
+                    // indirection let a real mutation go uncaught.
+                    PanelBar(muted: false, onToggleMute: {}, onOpenSettings: {})
+                        .frame(height: Self.footerHeight)
                 }
             }
             // Re-clips the overlay's content to the same silhouette as the

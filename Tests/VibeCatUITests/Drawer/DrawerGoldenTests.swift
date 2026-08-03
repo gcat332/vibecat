@@ -234,14 +234,41 @@ private func contentBands(_ raster: Raster) -> [Range<Int>] {
 /// the same trap `contentBands` above sidesteps by treating any non-opaque
 /// pixel as "nothing drawn," but this needs the sharper opaque-only test
 /// because it is measuring a boundary in pixels, not just counting bands.
+///
+/// **Plan 6.4, Task 3 update.** This function predates `PanelBar` — every
+/// caller here was written when the 44pt band was still `Color.clear`, so
+/// "any real content inside it at all" was an unambiguous overflow signal.
+/// It no longer is: `PanelBar` now legitimately paints a full-width hairline
+/// at the band's own top row and two icons in its trailing ~74pt (`18pt`
+/// padding + two `26pt` buttons + a `4pt` gap — see `PanelBar.swift`), and
+/// every one of this file's four footer tests started failing the moment
+/// that content existed, with no actual question-content overflow involved.
+/// Measured directly against a bar-only render before writing this: the
+/// hairline is the first row of the band and nothing else in the leading
+/// portion of the width; the icons never reach past the trailing ~80pt. So
+/// the boundary row itself is now skipped outright (it is *always*
+/// `PanelBar`'s hairline, never question content — nothing above it can
+/// physically render there without first passing through every row between),
+/// and any row further into the band only counts content found in the
+/// leading columns, where `PanelBar` is guaranteed blank
+/// (`PanelBarTests.bothButtonsSitAgainstTheTrailingEdge` proves that
+/// guarantee for the bar itself). This keeps the check meaning what it
+/// always meant — does *question* content reach into the reservation — while
+/// no longer confusing the reservation's own new occupant for an overflow.
 private func footerMargin(_ raster: Raster, footerHeight: Int) -> Int {
     func isRealContent(_ p: Raster.Pixel) -> Bool {
         guard p.a == 255 else { return false }
         return !(abs(Int(p.r) - 5) <= 6 && abs(Int(p.g) - 7) <= 6 && abs(Int(p.b) - 11) <= 6)
     }
     let boundary = raster.height - footerHeight
+    // `PanelBar`'s own trailing footprint: 18pt padding + 26pt gear + 4pt gap
+    // + 26pt mute = 74pt, plus a 10pt safety margin against measurement noise.
+    let panelBarTrailingWidth = 84
+    let leadingWidth = max(0, raster.width - panelBarTrailingWidth)
     for y in stride(from: raster.height - 1, through: 0, by: -1) {
-        if (0..<raster.width).contains(where: { isRealContent(raster[$0, y]) }) {
+        if y == boundary { continue } // PanelBar's own full-width hairline
+        let scanWidth = y > boundary ? leadingWidth : raster.width
+        if (0..<scanWidth).contains(where: { isRealContent(raster[$0, y]) }) {
             return boundary - (y + 1)
         }
     }
