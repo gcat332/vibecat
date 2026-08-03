@@ -315,10 +315,42 @@ let islandGroundColour = RGBA(hex: "#07080A")!
 /// guessed: `.ask-q` (the question) is `--bone`; `.detail.mono` (the command
 /// body) is `--haze`; `.choice.alt` — a non-recommended row — is `--haze`, and
 /// `.choice.alt:hover` promotes it to `--bone`; `.confirm .tally` is `--haze`.
-/// `--dim` already exists in `IslandState` as dormant's colour, which is the
-/// third of the same family.
+/// The third rung of the same family, `--dim`, is `dimColour` below — it was
+/// missing here until the second mockup-fidelity wave, and its absence is why
+/// every quiet field in §11's row was drawn one rung too bright.
 let boneColour = RGBA(hex: "#EDEFF4")!
 let hazeColour = RGBA(hex: "#8A93A6")!
+
+/// `--dim`, the third rung of the same ladder, which the prototype spends **13
+/// times** and which we had folded into `hazeColour` everywhere — flattening a
+/// three-tier ink hierarchy to two and making §11's row read busier than the
+/// mockup it was drawn from.
+///
+/// Which fields take it is read off the prototype's CSS field by field, never
+/// guessed from the name: in the row block (lines 344–388) `--dim` is `.rmeta`,
+/// `.rsaid`, `.rwt`, `.rblock .bh em`, `.tk.done`, `.ag .m` and `.rblock .sub`,
+/// while `.tk`, `.ag` and `.rblock .bh` stay `--haze`. The rule that falls out of
+/// that list: **`--haze` is a field you read, `--dim` is a field you refer back
+/// to** — a timestamp, a summary in brackets, a done item, a machine detail.
+///
+/// `#5A6273` is also `IslandState.dormant.accent`, and this token is deliberately
+/// **not** written as `IslandState.dormant.accent`. That would state a dependency
+/// that does not exist: the prototype's `--dim` and its dormant grey are the same
+/// hex because the palette has one cool grey ramp and both want its darkest rung,
+/// not because a dim label is in any sense dormant. Tying them together would
+/// mean a future retune of the dormant island silently repainted every timestamp
+/// in the drawer.
+let dimColour = RGBA(hex: "#5A6273")!
+
+/// `.ract em` — the ink of the command on §11's line 2, `#B9C4D6`.
+///
+/// The only colour in the prototype's row CSS that is neither a `--var` nor a
+/// state hue, and the reason it exists is legible from where it sits: the command
+/// has to outrank the sentence around it without being promoted all the way to
+/// `--bone`, which line 1's project name owns. Substituting `boneColour`
+/// preserved the emphasis and overstated it — two fields on different lines then
+/// claimed the row's brightest ink.
+let commandColour = RGBA(hex: "#B9C4D6")!
 
 /// `--hairline: rgba(255,255,255,.09)`. One token in the prototype, against three
 /// different values of ours (`0.05`, `0.06`, `0.08`) for the same job — a divider
