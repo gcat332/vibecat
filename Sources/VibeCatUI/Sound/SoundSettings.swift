@@ -1,4 +1,5 @@
 import Foundation
+import VibeCatCore
 
 /// What the Sound section of §14 controls, as values.
 ///
@@ -46,5 +47,32 @@ public struct SoundSettings: Sendable, Equatable {
         self.volume = Self.clampedVolume(volume)
         self.quietDuringDoNotDisturb = quietDuringDoNotDisturb
         self.pack = pack
+    }
+}
+
+public extension SoundSettings {
+    /// Everything in `Preferences` that this type is the runtime home of.
+    ///
+    /// **This initialiser exists because two of the three were persisted and never
+    /// read.** `main.swift` built `SoundSettings(enabled: preferences.load()
+    /// .soundEnabled)` and stopped there, so `volume` and `quietDuringDoNotDisturb`
+    /// fell back to this type's own defaults on every launch. `volume` was inert
+    /// (both defaults happen to be `0.60`); `quietDuringDoNotDisturb` was not —
+    /// `SoundPlayer.wantsSilence` gates every cue on it, so the plist could say
+    /// `false` and Focus suppression carried on regardless.
+    ///
+    /// It is an initialiser in a library rather than three more lines in
+    /// `main.swift` for the reason 85e69fb cost a plan to learn: **no test runs
+    /// `main.swift`**, because an `executableTarget` with a `main.swift` cannot be
+    /// `@testable import`ed. Wiring that has to be right belongs behind something a
+    /// test can call.
+    ///
+    /// `pack` is not persisted yet — §14's Sound Pack control is Plan 6.5's, and
+    /// inventing a key for it now would mean a stored value nothing writes, which
+    /// is the exact defect this initialiser closes.
+    init(_ preferences: Preferences) {
+        self.init(enabled: preferences.soundEnabled,
+                  volume: preferences.volume,
+                  quietDuringDoNotDisturb: preferences.quietDuringDoNotDisturb)
     }
 }

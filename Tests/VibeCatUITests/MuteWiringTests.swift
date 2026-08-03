@@ -208,3 +208,39 @@ private func fixtureMetrics() -> ScreenMetrics {
     #expect(opaqueDimPixelsInFooter(unmuted) == 0,
             "DrawerView(muted: false) must not draw any dimColour ink in the footer")
 }
+
+// MARK: - the other two preferences production never read
+
+@Test func everyPersistedSoundSettingReachesTheRuntimeAndNotJustEnabled() {
+    // Two of the four preferences were write-only: `main.swift` built
+    // `SoundSettings(enabled: preferences.load().soundEnabled)`, so `volume` and
+    // `quietDuringDoNotDisturb` were saved by `PreferenceStore.save(_:)` and read
+    // by nothing. `quietDuringDoNotDisturb` is the one that mattered —
+    // `SoundPlayer.wantsSilence` gates every cue on it, so the plist could say
+    // `false` and Focus suppression carried on anyway.
+    //
+    // Every value here differs from `SoundSettings`' own default, which is what
+    // makes the test able to fail: with `volume` at the shared 0.60 default, a
+    // dropped `volume:` argument is invisible.
+    let prefs = Preferences(soundEnabled: false, volume: 0.15,
+                            quietDuringDoNotDisturb: false, selectedPage: "display")
+    let settings = SoundSettings(prefs)
+    #expect(settings.enabled == false)
+    #expect(settings.volume == 0.15, "a persisted volume does not reach the player")
+    #expect(settings.quietDuringDoNotDisturb == false,
+            "a persisted Do Not Disturb choice does not reach the player, so suppression ignores it")
+    // The one field with no key yet. Asserted so that adding a `pack` preference in
+    // 6.5 is a deliberate edit here rather than a silent default.
+    #expect(settings.pack == .chiptune)
+}
+
+@Test func aStoredVolumeIsStillClampedOnItsWayIntoTheRuntime() {
+    // Two clamps, deliberately, exactly as `SettingsWindowController` keeps two
+    // page clamps: `UserDefaultsPreferenceStore.load()` clamps, but
+    // `InMemoryPreferenceStore` does not and `Preferences.init` does not either, so
+    // a `Preferences` can carry a volume production could not have produced. This
+    // initialiser must not be the place that lets one through to an AVAudioEngine
+    // gain.
+    #expect(SoundSettings(Preferences(volume: 42)).volume == 1.0)
+    #expect(SoundSettings(Preferences(volume: .nan)).volume == SoundSettings.defaultVolume)
+}

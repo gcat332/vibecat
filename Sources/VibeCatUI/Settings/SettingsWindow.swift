@@ -17,13 +17,42 @@ import VibeCatCore
 /// leaves the graph acyclic: controller → model ← view ← window ← controller has
 /// exactly one arrow pointing back, and it is the one the controller can drop.
 @MainActor @Observable final class SettingsWindowModel {
-    /// A page *key*, never an index — see `Preferences.selectedPage`. Always one
-    /// of `SettingsPageKey.all`: the only writer today is the controller's
-    /// initialiser, which clamps.
+    /// A page *key*, never an index — see `Preferences.selectedPage`. Clamped by
+    /// the controller's initialiser on the way in; written afterwards only through
+    /// `selectPage(_:)`, so that every change is also persisted.
     var selectedPage: String
 
-    init(selectedPage: String) {
+    /// What to do with a page the user has just moved to. A closure rather than a
+    /// `PreferenceStoring`, because this type has no other business with the store
+    /// and a closure is what lets a test see the write without a second store.
+    private let persist: (String) -> Void
+
+    init(selectedPage: String, persist: @escaping (String) -> Void = { _ in }) {
         self.selectedPage = selectedPage
+        self.persist = persist
+    }
+
+    /// The sidebar's and the panes' one handle on the selection — and the reason
+    /// `SettingsRootView` no longer uses `@Bindable`.
+    ///
+    /// `$model.selectedPage` writes straight to the stored property, which is
+    /// exactly why the page was persisted by nothing: there was no seam between
+    /// "the sidebar changed the selection" and "the selection was stored". Routing
+    /// the setter through `selectPage(_:)` puts one there without the sidebar
+    /// learning what a `PreferenceStoring` is.
+    var pageBinding: Binding<String> {
+        Binding(get: { self.selectedPage }, set: { self.selectPage($0) })
+    }
+
+    /// Moves to a page and stores it.
+    ///
+    /// The guard is not an optimisation: `@Observable` notifies on the *write*,
+    /// not on the change, so re-selecting the current page would invalidate every
+    /// body reading it and write the plist for nothing.
+    func selectPage(_ key: String) {
+        guard key != selectedPage else { return }
+        selectedPage = key
+        persist(key)
     }
 }
 
@@ -39,19 +68,19 @@ import VibeCatCore
 ///
 /// All this view does is bridge the observable model to a plain `Binding`, so
 /// everything below it — `SettingsShell`, the sidebar, the panes — is a pure
-/// function of a `String` and can be rasterised without a window. `@Bindable` on
-/// a local, rather than the property itself, because the model is a `let`: the
-/// controller owns it and this view must not be the thing that keeps it alive
-/// (see `SettingsWindowModel`'s own note on the retain cycle that would close if
-/// the *controller* were what a root view held).
+/// function of a `String` and can be rasterised without a window. The binding
+/// comes from the model rather than from `@Bindable`, so that a write goes through
+/// `SettingsWindowModel.selectPage(_:)` and gets persisted — see that method.
 struct SettingsRootView: View {
     /// Read by the sidebar and the panes. Held here for the reason in
     /// `SettingsWindowModel`'s doc comment.
     let model: SettingsWindowModel
 
     var body: some View {
-        @Bindable var model = model
-        SettingsShell(selection: $model.selectedPage)
+        // `model.pageBinding`, not `@Bindable`'s `$model.selectedPage` — see that
+        // property's own doc comment. The read direction is identical; the write
+        // direction is what changed, and it is the direction that was missing.
+        SettingsShell(selection: model.pageBinding)
     }
 }
 
@@ -123,8 +152,29 @@ struct SettingsRootView: View {
         // person would see. The fallback is `Preferences`' own default rather
         // than a second `"general"` literal, so the default page stays one
         // fact in one place.
+        //
+        // **Read-modify-write against the value as it is right now, never against
+        // a snapshot this object is holding.** `PreferenceStore.save(_:)` writes
+        // the whole struct, so two surfaces that each `load()` once, mutate their
+        // own field and `save()` later would have the second write silently drop
+        // the first — and there already is a second writer, `NotchController
+        // .toggleMute()`, which someone can use from the island's footer while
+        // this window is open. Loading inside the closure means the only thing
+        // this write can be stale about is a change made between the `load()` and
+        // the `save()` on this same actor, which is nothing. Plans 6.5-6.7 add
+        // more writers; every one of them needs this shape (or a per-key write)
+        // rather than a view model holding a `Preferences` it saves back wholesale.
+        //
+        // `store`, the parameter, is captured rather than `self` — the closure
+        // outlives this initialiser and a captured `self` would retain the
+        // controller through its own model.
         self.model = SettingsWindowModel(
-            selectedPage: SettingsPageKey.isKnown(stored) ? stored : Preferences().selectedPage)
+            selectedPage: SettingsPageKey.isKnown(stored) ? stored : Preferences().selectedPage,
+            persist: { key in
+                var prefs = store.load()
+                prefs.selectedPage = key
+                store.save(prefs)
+            })
     }
 
     /// Whether a window exists at all — not whether it is on screen.
@@ -159,6 +209,13 @@ struct SettingsRootView: View {
     /// `windowForTesting`. Non-optional because the model outlives the window:
     /// there is always an answer to "which page", even before the first `show()`.
     var selectedPageForTesting: String { model.selectedPage }
+
+    /// The live model, for `SettingsWindowTests` only — same visibility reasoning
+    /// as `windowForTesting`. This is what lets a test drive the *write* direction
+    /// (`modelForTesting.pageBinding.wrappedValue = ...`) through the very binding
+    /// `SettingsRootView` hands the sidebar, rather than through a parallel path
+    /// that only resembles it.
+    var modelForTesting: SettingsWindowModel { model }
 
     private func makeWindow() -> NSWindow {
         // `settings.html:50` — `.body{min-height:620px}` — and `:40`,

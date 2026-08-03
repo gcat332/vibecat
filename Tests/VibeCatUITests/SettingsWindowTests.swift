@@ -64,8 +64,9 @@ import VibeCatCore
     // being removed, and it does not — a controller that has already dropped
     // its reference builds a fresh window either way, so this test cannot tell
     // a released window from a leaked one. That gap is now covered by
-    // `aClosedWindowIsDeallocatedRatherThanLeakedForever` below, which reads a
-    // weak reference instead of an identity; the line itself is gone, because
+    // `closingTheWindowTakesItOutOfTheApplicationsWindowList` below, which asks
+    // whether AppKit still holds it rather than whether we do; the line itself is
+    // gone, because
     // measuring it showed it leaked one window per close rather than preventing
     // a double release (see `makeWindow()`'s own comment).
     let c = SettingsWindowController(store: InMemoryPreferenceStore())
@@ -152,4 +153,79 @@ import VibeCatCore
     let size = c.windowForTesting?.contentView?.frame.size
     #expect(size?.width == 900)
     #expect(size?.height == 620)
+}
+
+// MARK: - the page the window reopens on
+
+@Test @MainActor func choosingAPageStoresItSoTheWindowReopensThere() {
+    // `Preferences.selectedPage`'s whole stated reason to exist — "the window has
+    // to reopen where you left it" — did not work: Task 1 created the key, Task 5
+    // read it, and no task wrote it. `grep -rn "\.save(" Sources/` returned one hit
+    // and it was `NotchController.toggleMute()`.
+    //
+    // Driven through `model.pageBinding`, which is the *same* binding
+    // `SettingsRootView` hands `SettingsShell` and therefore the sidebar — not a
+    // parallel `select…ForTesting()` that only resembles it. What this still cannot
+    // prove is that `body` passes that binding rather than a `.constant`; that is
+    // the closure-identity gap `PanelBarTests
+    // .tappingEachButtonCallsItsOwnClosureAndNotTheOther` records, and it is
+    // reported rather than papered over — the mutation
+    // `SettingsShell(selection: .constant(model.selectedPage))` stays green here.
+    let store = InMemoryPreferenceStore()
+    let c = SettingsWindowController(store: store)
+    c.show()
+    c.modelForTesting.pageBinding.wrappedValue = "display"
+    #expect(c.selectedPageForTesting == "display", "the binding did not reach the model")
+    #expect(store.load().selectedPage == "display", "the chosen page was never persisted")
+
+    // The consequence, spelled out: a second window built on the same store opens
+    // where the first one was left. This is the assertion that would still fail if
+    // `selectPage` wrote some *other* key correctly.
+    #expect(SettingsWindowController(store: store).selectedPageForTesting == "display")
+}
+
+@Test @MainActor func storingThePageDoesNotClobberASettingChangedElsewhere() {
+    // `PreferenceStore.save(_:)` writes the whole struct, and there is a second
+    // writer: `NotchController.toggleMute()`, reachable from the island's footer
+    // while this window is open. If the page write went through a `Preferences`
+    // this controller had snapshotted at init, it would silently undo the mute.
+    //
+    // So: mute happens *after* the controller is built, then a page is chosen.
+    // Both must survive. Mutating `persist` to build a fresh `Preferences(
+    // selectedPage: key)`, or to close over a snapshot taken in `init`, fails
+    // exactly this.
+    let store = InMemoryPreferenceStore()
+    let c = SettingsWindowController(store: store)
+    var muted = store.load()
+    muted.soundEnabled = false
+    muted.volume = 0.15
+    store.save(muted)
+
+    c.modelForTesting.pageBinding.wrappedValue = "integrations"
+    let after = store.load()
+    #expect(after.selectedPage == "integrations")
+    #expect(after.soundEnabled == false, "storing the page reset soundEnabled")
+    #expect(after.volume == 0.15, "storing the page reset volume")
+}
+
+@Test @MainActor func reselectingTheCurrentPageWritesNothing() {
+    // `@Observable` notifies on the write, not on the change — CLAUDE.md's own
+    // rule, and `AppModel.prune` is the precedent. A sidebar row is clickable when
+    // it is already current, so without the guard every such click invalidates
+    // every body reading the selection and writes the plist.
+    //
+    // Counted through a store that records, because "did it write" is invisible
+    // from a value-equal `Preferences`.
+    final class CountingStore: PreferenceStoring {
+        let inner = InMemoryPreferenceStore()
+        nonisolated(unsafe) var saves = 0
+        func load() -> Preferences { inner.load() }
+        func save(_ preferences: Preferences) { saves += 1; inner.save(preferences) }
+    }
+    let store = CountingStore()
+    let c = SettingsWindowController(store: store)
+    c.modelForTesting.pageBinding.wrappedValue = "general"   // already the default
+    #expect(store.saves == 0, "re-selecting the current page wrote the plist")
+    c.modelForTesting.pageBinding.wrappedValue = "display"
+    #expect(store.saves == 1)
 }

@@ -66,10 +66,14 @@ let controller = NotchController(model: model, preferences: preferences)
 // permission serves. It is a no-op once the user has decided either way.
 let quietHours = FocusStatusQuietHours()
 quietHours.requestAuthorizationIfNeeded()
-// `SoundSettings(enabled:)` seeded from the same `preferences` read above —
-// see that `let`'s own comment. A stored mute must be honoured from the very
-// first cue, not only after the first toggle of this session.
-let soundPlayer = SoundPlayer(settings: SoundSettings(enabled: preferences.load().soundEnabled),
+// `SoundSettings(_:)` seeded from the same `preferences` read above — see that
+// `let`'s own comment. A stored mute must be honoured from the very first cue,
+// not only after the first toggle of this session, and the same is true of the
+// other two settings this type is the runtime home of: an earlier version of
+// this line passed `enabled` alone, so `volume` and `quietDuringDoNotDisturb`
+// were written to the plist by `save(_:)` and read by nothing. The mapping lives
+// in `SoundSettings(_:)` rather than here because no test can run this file.
+let soundPlayer = SoundPlayer(settings: SoundSettings(preferences.load()),
                               quietHours: quietHours)
 // Renders all five cues on `SoundPlayer`'s own serial queue, before any event
 // arrives. Measured at 858ms for `error` alone in a debug build — which is what
