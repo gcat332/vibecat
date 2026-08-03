@@ -2,6 +2,12 @@ import Foundation
 
 /// The three oscillator shapes §12 calls for, band-limited by construction.
 ///
+/// **"By construction" is only as true as the frequency the caller asks about.**
+/// `harmonicCount` answers for one frequency, and a bent note has more than one —
+/// so the caller must pass the highest the note reaches, which is what
+/// `Note.peakFrequency` is for. Asking with the starting pitch of a rising bend
+/// returns a count whose top partials cross Nyquist partway through the note.
+///
 /// Built by summing the shape's own Fourier series and stopping at or below
 /// Nyquist, rather than by the obvious `phase < 0.5 ? 1 : -1`. A naive square
 /// at G6 (1568Hz, which `done` holds for 0.46s) puts harmonics at 4704, 7840,

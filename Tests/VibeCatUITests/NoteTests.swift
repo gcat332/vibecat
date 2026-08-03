@@ -65,3 +65,20 @@ import Foundation
     #expect(abs(Pitch.c5 - Pitch.a5 * pow(semitone, -9)) < 0.05)
     #expect(abs(Pitch.bFlat3 - Pitch.a5 * pow(semitone, -23)) < 0.05)
 }
+
+@Test func peakFrequencyIsWhereABendEndsOnlyWhenTheBendRises() {
+    // Three cases, and the third is the one a naive `frequency * bend` gets
+    // wrong. `0` is how the prototype spells "no bend", so treating it as a
+    // multiplier would report every plain note in the pack as reaching 0Hz —
+    // which `Waveform.harmonicCount` answers with its `frequency > 0` floor of a
+    // single partial, turning every unbent note into a sine.
+    let rising = Note(600, at: 0, 0.20, waveform: .triangle, gain: 0.09, bend: 1.75)
+    #expect(abs(rising.peakFrequency - 1050) < 1e-9, "got \(rising.peakFrequency)")
+
+    // A falling bend never goes above where it started, so the limit stays there.
+    let falling = Note(Pitch.bFlat3, at: 0, 0.46, waveform: .sawtooth, gain: 0.06, bend: 0.80)
+    #expect(falling.peakFrequency == Pitch.bFlat3)
+
+    let plain = Note(Pitch.g5, at: 0, 0.11, detuneCents: 8)
+    #expect(plain.peakFrequency == Pitch.g5)
+}

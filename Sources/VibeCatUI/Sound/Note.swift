@@ -46,6 +46,22 @@ public struct Note: Sendable, Equatable {
 
     public var end: TimeInterval { at + duration }
 
+    /// The highest frequency this note ever reaches — the one a band limit has to
+    /// be computed from.
+    ///
+    /// A bend ramps the frequency to `frequency * bend` across the note, so a
+    /// rising bend (`meow`'s `1.75`) ends higher than it starts and a falling one
+    /// (`error`'s `.80`, `meow`'s second syllable `.52`) ends lower. Computing the
+    /// harmonic limit from `frequency` alone is right for the falling case and
+    /// wrong for the rising one, where the top partials cross Nyquist partway
+    /// through the note and fold back as inharmonic tones the prototype does not
+    /// have. **`bend == 0` means no bend**, which is how the prototype spells it —
+    /// treating it as a multiplier would report every plain note as reaching 0Hz.
+    public var peakFrequency: Double {
+        guard bend > 0 else { return frequency }
+        return max(frequency, frequency * bend)
+    }
+
     /// Phase in cycles, `t` measured from the note's own onset.
     ///
     /// An unbent note is just `f·t`. A bent one has an instantaneous frequency
