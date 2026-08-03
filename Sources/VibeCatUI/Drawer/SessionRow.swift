@@ -44,10 +44,7 @@ struct SessionRow: View {
                     .foregroundStyle(Color(hazeColour))
                     .lineLimit(2)
             }
-            // `SessionBlocks` is Task 6's deliverable and is wired in there, not
-            // here: it consumes `SessionRow.Options`, which this task defines, so
-            // calling it from this task would make the two circular and leave
-            // Task 5 unable to compile on its own.
+            SessionBlocks(session: session, options: options, accent: accent)
         }
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
