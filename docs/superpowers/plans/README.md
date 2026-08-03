@@ -12,7 +12,8 @@ plan files twice; it is cheaper to keep it written down.
 | 4 | The drawer and answering — single and multi select, the destructive second ask, the reply round-trip | §6.3, §10 | done |
 | 4.5 | Matching the prototype — one systematic diff of colour, radius, type scale, spacing and motion curve, and a written record of every deliberate divergence | the prototypes the spec header names | **done** — [the diff](2026-08-03-prototype-diff.md); two deliberate divergences recorded |
 | 5 | The session list · plus the hover reveal's content and the sliver that shares its mechanism · plus a multi-sprite CPU measurement | §11, §9.1's reveal | **done** — [the plan](2026-08-03-session-list.md), 8 tasks; 419 tests after the raster and lapse fixes. Carried findings below |
-| **6** | Sound, jump, all four Settings sections, the Full/Reduced/Off control · **plus everything gated on keyboard input** | §12, §13, §14, §9.3's UI | not written |
+| 6.2 | Sound — five synthesised cues, the trigger rule, Do Not Disturb | §12 | **done** — [the plan](2026-08-03-sound.md), 7 tasks plus a whole-branch review and one fix round; 509 tests. Five written decisions, and four things still needing an ear (see the plan's own closing section) |
+| **6** | Jump, all four Settings sections, the Full/Reduced/Off control · **plus everything gated on keyboard input** — sound is 6.2 above | §13, §14, §9.3's UI | not written |
 | **7** | Generic adapter and custom sources | §3 | not written |
 | **8** | Matching motion cost to motion content | §9.1's rates | not written |
 

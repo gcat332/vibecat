@@ -512,7 +512,11 @@ Respects Do Not Disturb. These are the defaults; the pack is switchable.
 > `docs/superpowers/prototypes/island-motion.html:858-918` — and the
 > implementation follows the prototype wherever the two disagree, per the
 > standing rule that the prototype is the authority on how a thing looks and
-> sounds. Four things it lost:
+> sounds. **Two things the table itself lost, and two more the implementation
+> departs from on purpose** — the lead-in said "four things it lost" until
+> 2026-08-03, which was wrong about its own list: only the first two below are
+> losses in the table, the third is a deliberate divergence from
+> `island-motion.html:957`, and the fourth is a scope note about `settings.html`:
 >
 > - **The Voice column omits the detuned twin on two cues.** It gives "Needs an
 >   answer" a `pulse, detuned twin` and leaves "Needs an answer, multi" and
@@ -537,6 +541,33 @@ Respects Do Not Disturb. These are the defaults; the pack is switchable.
 >   Silent exist, and `SoundPack` is an enum so a later one is additive. Meow
 >   *is* defined, is implemented, and has no trigger — it exists for the
 >   per-cue picker Plan 6.4 owns.
+>
+> Two further deliberate divergences, added after this block was first written and
+> recorded here so the list is the whole list:
+>
+> - **A note shorter than the 6ms attack has its attack shortened to half its
+>   duration** (`ToneEnvelope.swift`). The prototype has no clamp and Web Audio
+>   simply stops the oscillator mid-ramp, leaving the note at a non-zero amplitude
+>   — the same click the `0.0001` release floor exists to prevent. No cue in the
+>   chiptune pack is close to this short; it exists so a later pack cannot produce
+>   a click by accident.
+> - **Cues play serially, and one more than a second behind is dropped rather
+>   than queued** (`SoundPlayer.maximumBacklog`). The prototype builds fresh
+>   oscillators per call and mixes overlapping cues;
+>   `AVAudioPlayerNode.scheduleBuffer` queues them. Serial is kept — mixing needs a
+>   player node per voice and two alerts summed at full gain are louder than
+>   either — but an unbounded queue would put the Nth alert of a burst
+>   0.6…0.9s × (N−1) after the event it announces, which is noise rather than
+>   information.
+>
+> **Still unheard.** Nothing in §12 has been listened to: whether each cue matches
+> the prototype's own sound buttons, whether a note's release clicks, and whether
+> `done`'s held G6 carries inharmonic hash all remain open. One thing a person
+> doing that comparison needs to know: the prototype connects every oscillator
+> straight to `ac.destination` with no master gain, while VibeCat multiplies by
+> `settings.volume`, which defaults to `0.60`. **Compare at `volume: 1.0`**, or
+> VibeCat will simply sound 4.4dB quieter and the difference will be the setting
+> rather than the synthesis.
 
 ---
 
