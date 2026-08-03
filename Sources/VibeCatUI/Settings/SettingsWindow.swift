@@ -29,24 +29,29 @@ import VibeCatCore
 
 /// The Settings window's content, hosted once.
 ///
-/// Task 6 replaces the interior with `SettingsSidebar` and the four panes; the
-/// model is threaded through now so that lands as an edit inside this `body`
-/// rather than as a change to the hosted *type*. That distinction has already
-/// cost this repo once — `NotchController.present`'s once-only hosting guard
-/// keys on `NSHostingView<IslandView>`, the type, so anything that changes the
-/// hosted type silently changes what "already hosted" means.
+/// Task 6 filled the interior in, and it landed exactly where Task 5 predicted:
+/// as an edit inside this `body` rather than as a change to the hosted *type*.
+/// That distinction has already cost this repo once —
+/// `NotchController.present`'s once-only hosting guard keys on
+/// `NSHostingView<IslandView>`, the type, so anything that changes the hosted
+/// type silently changes what "already hosted" means, and
+/// `theWindowHostsSwiftUIRatherThanAnEmptyContentView` keys on this one.
 ///
-/// `Color(SettingsPalette.background)` and nothing else is the whole of Task 5's
-/// visual surface, deliberately: `settings.html:40` gives `.win` the `--bg`
-/// ground and the panes that sit on it are the next task's. The `--chrome`
-/// titlebar above it is a real one — see `SettingsWindowController.makeWindow`.
+/// All this view does is bridge the observable model to a plain `Binding`, so
+/// everything below it — `SettingsShell`, the sidebar, the panes — is a pure
+/// function of a `String` and can be rasterised without a window. `@Bindable` on
+/// a local, rather than the property itself, because the model is a `let`: the
+/// controller owns it and this view must not be the thing that keeps it alive
+/// (see `SettingsWindowModel`'s own note on the retain cycle that would close if
+/// the *controller* were what a root view held).
 struct SettingsRootView: View {
-    /// Read by Task 6's sidebar and panes. Held here now for the reason in this
-    /// view's own doc comment.
+    /// Read by the sidebar and the panes. Held here for the reason in
+    /// `SettingsWindowModel`'s doc comment.
     let model: SettingsWindowModel
 
     var body: some View {
-        Color(SettingsPalette.background)
+        @Bindable var model = model
+        SettingsShell(selection: $model.selectedPage)
     }
 }
 

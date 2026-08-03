@@ -44,6 +44,20 @@ public enum SettingsPalette {
     /// a caller draws it at 8% the way `settings.html`'s own CSS does, e.g.
     /// `Color(SettingsPalette.hairline).opacity(0.08)`.
     public static let hairline = RGBA(r: 1, g: 1, b: 1)
+    /// The `.08` half of `settings.html:14`'s `rgba(255,255,255,.08)`, which
+    /// `hairline` above cannot carry.
+    ///
+    /// Added in Task 6, when the sidebar's `border-right` became the first real
+    /// caller: two surfaces (that border and the panes' group edges) applying an
+    /// opacity by hand is two chances to type `0.8`, and **nothing about
+    /// `hairline` alone can fail a test if a caller forgets it entirely** — the
+    /// value is a legitimate opaque white. Naming the number here at least makes
+    /// "the hairline is 8%" one fact.
+    ///
+    /// Deliberately **not** `island-motion.html`'s `--hairline`, which is `.09`:
+    /// the two prototypes disagree on this exact value, and `PanelBar` documents
+    /// the same trap from the other side.
+    public static let hairlineOpacity: Double = 0.08
     /// `settings.html:16` — primary text.
     public static let bone = RGBA(hex: "#F2F2F5")!
     /// `settings.html:17` — secondary/description text.
