@@ -312,6 +312,41 @@ private let externalDisplay = ScreenMetrics(
     #expect(panel.acceptsClicks)
 }
 
+/// §6.1's own table: a click opens "question, **or session list**" — not
+/// only a question. Before this, `reflow()`'s `acceptsClicks` gate read
+/// `model.question != nil` alone, which left the panel permanently
+/// click-through whenever sessions were pending with no question — this
+/// plan's entire routing (`IslandModel.face`/`.tier` correctly computing
+/// `.sessionList`/`.drawer`) was unreachable by a real click as a result.
+///
+/// Driven through a real `AppModel.ingest`, not `setQuestion` — unlike the
+/// test above, there is no bypass-`AppModel` seam for sessions the way
+/// `aQuestion()` gives `setQuestion` for a question: `model.sessions` is
+/// only ever assigned by `render()`, reading `appModel.store
+/// .mostUrgentFirst`, so a real `AppModel`/ingest is what actually populates
+/// it here.
+@MainActor @Test func thePanelTakesClicksWithSessionsPendingEvenWithoutAQuestion() throws {
+    let model = AppModel(socketPath: "/tmp/vibecat-test-unused.sock")
+    let c = NotchController(model: model, metrics: { mbp14 })
+    c.refreshGeometry()
+    c.present()
+    let panel = try #require(c.panelForTesting)
+
+    c.setHovering(true)
+    #expect(panel.acceptsClicks == false,
+            "setup: nothing pending yet — hovering must not swallow a menu bar click with neither a question nor a session")
+
+    model.ingest(VibeEvent(id: "e1", cli: "claude-code", kind: .running,
+                           session: "s1", cwd: "/dev/a"), now: t0)
+    #expect(panel.acceptsClicks,
+            "a session is pending with no question, but the panel still refuses clicks — the session list is unreachable by a real click")
+
+    c.setHovering(false)
+    #expect(panel.acceptsClicks == false,
+            "the pointer is nowhere near the island, but the panel accepted clicks anyway")
+    c.dismiss()
+}
+
 /// A question arriving must not open the drawer by itself — that would steal
 /// the screen from whatever the person is doing. It changes the cat and waits.
 @MainActor @Test func aQuestionDoesNotOpenTheDrawerOnItsOwn() {

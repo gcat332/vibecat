@@ -306,6 +306,16 @@ import SwiftUI
         // else the menu bar underneath stays clickable — which is what makes
         // Plan 3's oversized fixed panel safe (see maxCollapsedFrames).
         //
+        // Plan 5: widened from `model.question != nil` alone. §6.1's own
+        // table says a click opens "question, or session list" — gating
+        // solely on a question left a click undeliverable whenever sessions
+        // were pending with no question at all, which made this plan's own
+        // routing dead code: `model.face`/`.tier` would correctly compute
+        // `.sessionList`/`.drawer`, but the panel stayed click-through and
+        // nothing could ever set `drawerOpen` to reveal it. With sessions
+        // present a click *would* do something (open the list), so this
+        // follows the comment above rather than bending it.
+        //
         // model.question, not appModel.pending: the two always agree in
         // production (present() sets pending immediately before the
         // onQuestion callback that reaches model.question here), but only
@@ -314,7 +324,7 @@ import SwiftUI
         // deliberately bypassing AppModel entirely (see makeController()).
         // Reading appModel.pending here would make those tests unsatisfiable
         // regardless of anything else NotchController did.
-        panel?.acceptsClicks = model.hovering && model.question != nil
+        panel?.acceptsClicks = model.hovering && (model.question != nil || !model.sessions.isEmpty)
 
         // The panel is otherwise fixed at its widest collapsed size (Plan 3);
         // this is the one thing that grows it, and only when the tier it
