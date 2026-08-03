@@ -63,6 +63,14 @@ public struct NeverQuiet: QuietHours {
     }
 
     /// Call once at launch. Does nothing if the user has already decided.
+    ///
+    /// **Called from `Sources/VibeCatApp/main.swift`**, next to
+    /// `BackdropSampler.requestAccessIfAskedTo()`, which is where the app's other
+    /// permission is asked for. Named here because the final-fix brief reported this
+    /// method as having no caller and §12's "Respects Do Not Disturb" as therefore
+    /// silently dead — it does have one, and `isQuiet`'s own doc comment records the
+    /// hardware run where `authorizationStatus` went from `0` to `3` across it.
+    /// Written down so the next reader does not have to grep to find that out.
     public nonisolated func requestAuthorizationIfNeeded() {
         guard INFocusStatusCenter.default.authorizationStatus == .notDetermined else { return }
         INFocusStatusCenter.default.requestAuthorization { _ in }
@@ -70,6 +78,16 @@ public struct NeverQuiet: QuietHours {
 
     /// The raw `INFocusStatusAuthorizationStatus` value, for reporting what a
     /// build actually observed rather than what it was expected to.
+    ///
+    /// **Deliberately unreferenced, and kept.** The whole-branch review found it
+    /// called from nowhere, which is true: it was added for the hardware probe whose
+    /// results `isQuiet`'s doc comment records, and that probe has been run. It stays
+    /// for two reasons. The correction block in §15 asserts specific raw values
+    /// (`0` then `3`), and a claim about an observed number should remain
+    /// re-observable — a `SwiftUI` label or a fresh probe can print it again without
+    /// anyone re-deriving how to ask. And §14's Permissions row, which Plan 6.4
+    /// owns, is the consumer this was shaped for: it has to show *which* state the
+    /// grant is in, not merely whether `isQuiet` came back false.
     public nonisolated var authorizationStatusRawValue: Int {
         INFocusStatusCenter.default.authorizationStatus.rawValue
     }

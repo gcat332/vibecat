@@ -238,3 +238,52 @@ private func modelWithRecorder() -> (AppModel, @MainActor () -> [Cue]) {
     #expect(SoundPlayer.admission(now: later, queueEndsAt: queued, duration: 0.93) != nil,
             "once the queue is within the bound again, cues must resume")
 }
+
+// MARK: - The branch production actually takes
+
+/// Every cue test above is `@MainActor` and calls `ingest` directly, so all of them
+/// take `applyAndNotify`'s `Thread.isMainThread` branch. **Production never takes
+/// that branch**: `SocketServer` hands each event to a fresh thread, so the three
+/// duplicated lines in the `Task { @MainActor }` branch are the only ones that ever
+/// run against a real agent — and nothing exercised them. The duplication is
+/// justified (de-duplicating it is precisely the change `AppModel.swift:100-128`
+/// records as having reproduced a full-suite-only flake), but its cost is that the
+/// two copies can drift and nothing would go red.
+///
+/// **Why this is safe to write, having read that comment.** The hazard it documents
+/// is `DispatchQueue.main.sync` called from a task on Swift's small shared
+/// cooperative pool: enough of those threads blocked at once leaves none free to run
+/// the `Task { @MainActor … }` hops that would unblock them. Nothing here blocks. The
+/// detached task calls `ingest` for an event with `wantsReply == false`, which
+/// returns without touching `PendingQuestion.await()`; `applyAndNotify` then only
+/// *enqueues* a main-actor task. The test's own `await` releases the main actor,
+/// which is what lets that enqueued task run at all — and the wait is a bounded poll,
+/// so it cannot hang the suite even if the cue never arrives.
+@Test @MainActor func aCueFiresWhenTheEventArrivesOffTheMainThread() async throws {
+    let (model, cues) = modelWithRecorder()
+    // Both events go through the non-main branch, in order, so the before/after pair
+    // `CueSelector` needs is formed there too rather than half on each branch.
+    await Task.detached { _ = model.ingest(event(.running, session: "a")) }.value
+    await Task.detached { _ = model.ingest(event(.permission, session: "a")) }.value
+    for _ in 0..<200 where cues().isEmpty {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(cues() == [.ask],
+            "the fire-and-forget branch either never cued or cued the wrong thing")
+    #expect(model.sessionCount == 1, "and the store must have been applied on it too")
+}
+
+/// The mirror of `aQuietChangeFiresNothingAtAll`, on the other branch. Without it a
+/// non-main copy that fired unconditionally — dropping the `if let cue` — would still
+/// pass the test above.
+@Test @MainActor func aQuietChangeOffTheMainThreadFiresNothingEither() async throws {
+    let (model, cues) = modelWithRecorder()
+    await Task.detached { _ = model.ingest(event(.running, session: "a")) }.value
+    // Nothing to poll *for*, so this waits for the enqueued main-actor task to have
+    // run at all — the store landing is the observable proof that it did.
+    for _ in 0..<200 where model.sessionCount == 0 {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(model.sessionCount == 1, "the event never landed, so this proves nothing yet")
+    #expect(cues().isEmpty, "a run starting is not news")
+}

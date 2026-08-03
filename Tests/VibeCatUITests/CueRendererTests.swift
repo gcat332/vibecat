@@ -323,3 +323,33 @@ private func zeroCrossings(_ b: ArraySlice<Float>) -> Int {
     #expect(ratio < 0.95,
             "the bent note keeps its second partial past Nyquist: RMS ratio \(ratio), expected ≈0.894")
 }
+
+// MARK: - The volume boundary
+
+@Test func aVolumeIsClampedWhereverItEntersFrom() {
+    // Plan 6.4 reads this from `UserDefaults`, where anything running as this user
+    // can write it, and `CueRenderer` multiplies every sample by it. Both entry
+    // points are checked, because a clamp in the initialiser alone leaves
+    // `settings.volume = 7` open and vice versa.
+    #expect(SoundSettings(volume: 7).volume == 1)
+    #expect(SoundSettings(volume: -1).volume == 0)
+    var settings = SoundSettings()
+    settings.volume = 7
+    #expect(settings.volume == 1)
+    settings.volume = -1
+    #expect(settings.volume == 0)
+    // In range is left exactly alone: a clamp that rounded or quantised would be a
+    // different bug.
+    settings.volume = 0.37
+    #expect(settings.volume == 0.37)
+}
+
+@Test func aNonFiniteVolumeFallsBackToTheDefaultRatherThanToSilence() {
+    // `min`/`max` propagate NaN, so a naive clamp lets it through, and a NaN volume
+    // renders a cue of NaN samples — which reaches the speakers as a click or as
+    // nothing, and passes any assertion that only counts samples.
+    #expect(SoundSettings(volume: .nan).volume == SoundSettings.defaultVolume)
+    #expect(SoundSettings(volume: .infinity).volume == SoundSettings.defaultVolume)
+    let buffer = CueRenderer.render(.ask, settings: SoundSettings(volume: .nan), sampleRate: rate)
+    #expect(buffer.allSatisfy { $0.isFinite }, "a NaN volume reached the samples")
+}
