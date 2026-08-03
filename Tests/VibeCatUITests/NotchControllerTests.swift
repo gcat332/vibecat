@@ -787,22 +787,27 @@ private let externalDisplay = ScreenMetrics(
 /// -dump-macro-expansions`): the macro's generated setter guards
 /// `withMutation` behind `shouldNotifyObservers(old, new)`, which resolves
 /// (by overload) to `old != new` for any `Equatable` type — which
-/// `IslandState`, `Int`, and `Session?` all are. This is why `render()`'s
-/// `model.state`/`model.sessionCount`/`model.revealed` assignments below are
-/// plain, unguarded writes rather than the explicit `if old != new` checks an
-/// earlier version of this task added: the macro already does that check, and
-/// duplicating it only misleads a future reader into thinking `render()`
-/// needs to.
+/// `IslandState`, `Int`, `Session?` and `[Session]` all are. This is why
+/// `render()`'s `model.state`/`model.sessionCount`/`model.revealed`/
+/// `model.sessions` assignments are plain, unguarded writes rather than the
+/// explicit `if old != new` checks an earlier version of this task added: the
+/// macro already does that check, and duplicating it only misleads a future
+/// reader into thinking `render()` needs to.
 ///
-/// The opposite dependency lives right below `render()`'s three assignments:
-/// the `bloomEnd` Task's `self?.model.aura = self?.model.aura ?? AuraTrigger()`
-/// nudge exists specifically to force a notification once a bloom ends, and
-/// `AuraTrigger` is *also* `Equatable` — so that reassignment is exactly the
-/// "equal write" this test pins as a no-op, meaning the nudge is currently
-/// dead code on this toolchain. Task 3.5 owns fixing that; this test is the
-/// fact both sides of that disagreement stand on. If this test ever starts
-/// failing, the macro stopped deduplicating and the nudge silently starts
-/// working again; as long as it keeps passing, the nudge needs its own fix.
+/// **What this fact is load-bearing for, restated from the code as it stands
+/// after `90a8253`** — four claims that used to live here were true only before
+/// that commit and are now all false. It said the bloom-end nudge still *is* the
+/// equal write `self?.model.aura = self?.model.aura ?? AuraTrigger()`, that it is
+/// "currently dead code", that "Task 3.5 owns fixing that", and that "the nudge
+/// needs its own fix". `90a8253` is that fix, already landed: `bloomEnd` now
+/// calls `model.aura.endBloom()`, a `mutating` method that clears `firedAt`. That
+/// changes what this test guards rather than removing it — a `mutating` call goes
+/// through the macro's `_$observationRegistrar.withMutation` unconditionally,
+/// with no `shouldNotifyObservers` gate at all, so the nudge no longer *depends*
+/// on the value differing. This test now stands behind `render()`'s four plain
+/// assignments alone. If it starts failing, those writes stopped deduplicating
+/// and every one of them notifies on every `render()` — a cost question, not a
+/// correctness one, and not a nudge question at all any more.
 @MainActor @Test func anEqualWriteToAnObservablePropertyDoesNotNotify() {
     let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
                             motion: MotionPreference(systemWantsReduced: false))
@@ -843,7 +848,7 @@ private let externalDisplay = ScreenMetrics(
             "a write that changed the value did not notify — the instrument is broken, so the equal-write assertion below would be vacuous")
 
     #expect(!fires { model.state = .running },
-            "an equal write still notified — @Observable no longer deduplicates identical writes on this toolchain, which both render()'s plain assignments and the bloomEnd nudge's opposite assumption depend on")
+            "an equal write still notified — @Observable no longer deduplicates identical writes on this toolchain, which render()'s four plain assignments depend on")
 }
 
 /// The bug itself, at the level it actually bites: a still mood with a bloom in

@@ -220,9 +220,21 @@ were explicitly not measured here:
   what the per-island passage above calls "roughly 10pp for the first." The
   comparison that matters here is against that second figure: **+13.6pp for
   the session list exceeds the +11.97pp the badge transform itself cost**, not
-  merely the +2.89–3.64pp of switching the timeline on. It exceeds both, on a
-  machine additionally throttled by Low Power Mode, which if anything should
-  have *compressed* the gap rather than inflated it.
+  merely the +2.89–3.64pp of switching the timeline on. It exceeds both.
+
+  **What Low Power Mode does to that comparison is indeterminate, and this
+  paragraph used to claim otherwise** — it said throttling "if anything should
+  have *compressed* the gap rather than inflated it", which asserts a direction
+  nobody measured. Both directions have a plausible mechanism and they push
+  opposite ways: lower clocks make the *same* work a larger share of a core,
+  which inflates a percentage-of-core delta; a frame-rate cap reduces the work
+  actually done per second, which compresses it. Which dominates here is
+  unmeasured, so the honest statement is that the +13.6pp figure is not
+  quantitatively comparable to the mains-taken +11.97pp at all. What survives
+  regardless is the within-run comparison the table itself carries: throttling
+  scales both rows of a single run together, and +13.6pp against a ±1.5pp noise
+  floor is a real cost. Settling the cross-run comparison needs the mains
+  re-measurement this spike already records as owed.
 
   **`draws/s` stayed flat — 47.8 to 47.7 — across that whole +13.6pp.** The
   badge's `Canvas` is not drawing more often with the list open; whatever the

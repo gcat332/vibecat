@@ -11,7 +11,7 @@ plan files twice; it is cheaper to keep it written down.
 | 3 | The cat, its moods and coats, badges, motion | §7, §8, §9.1, §9.3's rule | done |
 | 4 | The drawer and answering — single and multi select, the destructive second ask, the reply round-trip | §6.3, §10 | done |
 | 4.5 | Matching the prototype — one systematic diff of colour, radius, type scale, spacing and motion curve, and a written record of every deliberate divergence | the prototypes the spec header names | **done** — [the diff](2026-08-03-prototype-diff.md); two deliberate divergences recorded |
-| 5 | The session list · plus the hover reveal's content and the sliver that shares its mechanism · plus a multi-sprite CPU measurement | §11, §9.1's reveal | **written** — [the plan](2026-08-03-session-list.md), 8 tasks |
+| 5 | The session list · plus the hover reveal's content and the sliver that shares its mechanism · plus a multi-sprite CPU measurement | §11, §9.1's reveal | **done** — [the plan](2026-08-03-session-list.md), 8 tasks; 414 tests. Carried findings below |
 | **6** | Sound, jump, all four Settings sections, the Full/Reduced/Off control · **plus everything gated on keyboard input** | §12, §13, §14, §9.3's UI | not written |
 | **7** | Generic adapter and custom sources | §3 | not written |
 | **8** | Matching motion cost to motion content | §9.1's rates | not written |
@@ -227,8 +227,14 @@ value — it is an architectural mismatch:**
   overshoots more than height in both — but a spring settles asymptotically where
   a bezier lands exactly, so this is where the feel diverges most and it will not
   be settled by matching numbers. Render or record both and compare.
-- **`--t-face: 190ms`, the face crossfade, was never implemented.** Already
-  recorded in Plan 3's follow-ups as never assigned to a task.
+- ~~**`--t-face: 190ms`, the face crossfade, was never implemented.** Already
+  recorded in Plan 3's follow-ups as never assigned to a task.~~ **Done — Plan
+  4.5 built it, Plan 5 finished wiring it.** `FaceCrossfade` / `AnyTransition
+  .faceCrossfade` carry §9.1's own three numbers (190ms, 5pt rise, 3pt blur).
+  Plan 4.5 applied it to `QuestionFace`'s rows ↔ reply-field swap but wired only
+  its `duration`, leaving the transition itself with **no caller at all** — found
+  by Plan 5's final whole-branch review as F7 and applied there to the drawer's
+  first real face swap, `QuestionFace` ↔ `SessionListFace` (`011c277`).
 - **The type scale has never been compared.** The prototype runs a dense ladder —
   9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 14.5px — across SF Pro Text and SF
   Mono. We have `RightFlankFont` and whatever Plan 4's drawer chose.
@@ -242,13 +248,25 @@ the next person who notices it.
 Two items land here because they share a mechanism or a cause with the session
 list, not because the list needs them.
 
-- **The hover sliver.** `IslandBody`'s silhouette is one shape spanning the whole
+- ~~**The hover sliver.** `IslandBody`'s silhouette is one shape spanning the whole
   body height at the hover-coupled width, while Plan 4 made the drawer's width
   hover-independent. The result is a 150pt-wide opaque rectangle covering ~92% of
-  the drawer's height, appearing and disappearing with hover. Fixing it means
-  changing `IslandBody`'s hover-reveal mechanism — which is exactly the mechanism
-  Plan 5 fills with §9.1's promised name and elapsed time. Doing both at once is
-  cheaper than doing either twice.
+  the drawer's height, appearing and disappearing with hover.~~ **Done — Plan 5
+  Task 1**, `IslandBody` now paints two silhouette rects and drops the reveal
+  entirely while a drawer is open, so the collapsed bar and the drawer share one
+  width. One correction to how this was written: "appearing and disappearing with
+  hover" understated it. `model.hovering` stays **true for the whole life of an
+  open drawer** (`click()` never clears the controller's `.hover` tier, and
+  `acceptsClicks` is gated on it), so the sliver stood there for as long as the
+  question did.
+
+  **And it cost a follow-on defect, which is the part worth remembering.** Task 1
+  shrank the silhouette's `.frame` and left `content(cell:)` laying `RevealContent`
+  out at the full 150pt, so the `HStack` overran its frame and SwiftUI squeezed
+  §5.4's session-count `Text` — the count vanished from every open drawer. Task 1
+  was the one task on the branch that never had an independent review, and no test
+  in the suite looked at the collapsed bar's *content* while the drawer was open.
+  Fixed in `6607728`; both call sites now read one `IslandBody.revealWidth`.
 - ~~**`render()`'s unconditional writes.** It assigns `model.state` and
   `model.sessionCount` on every call, and `@Observable` notifies on the write
   rather than on a change, so every hook event invalidates the body two or three
@@ -281,12 +299,109 @@ list, not because the list needs them.
   not depend on `firedAt` changing; it works because it is a mutating call rather
   than an assignment. Worth knowing before anyone "optimises" a mutating call into
   an assignment, or writes another equal-value nudge expecting it to fire.
-- **A CPU measurement, as a task.** Plan 3's numbers are all single-sprite, on
+- ~~**A CPU measurement, as a task.** Plan 3's numbers are all single-sprite, on
   mains power, on a 120Hz built-in display. Plan 8 needs multi-sprite numbers to
-  aim at, and Plan 5 is the first thing that produces several sprites. Measure
-  with `getrusage(RUSAGE_SELF)` — **never `ps %cpu`**, which is a decaying
-  average and once produced a false failure that cost most of a plan's
-  investigation budget.
+  aim at, and Plan 5 is the first thing that produces several sprites.~~ **Done —
+  Task 8**, in [the badge spike](../spikes/2026-08-03-badge-transform-cost.md).
+  `getrusage(RUSAGE_SELF)`, never `ps %cpu` — that decaying average once produced
+  a false failure costing most of a plan's investigation budget.
+
+  **The result reopens the owner's accepted ~12%.** Opening the session list with
+  12 sessions costs **+13.6pp of one core** on top of the running row (17.69% →
+  31.28%), about 9× the ±1.5pp noise floor, with `draws/s` flat at 47.8 → 47.7 —
+  so it is not extra badge redraws. That **revises** rather than extends the
+  earlier "per-island, not per-animation" conclusion, which came from a second
+  *animation* costing ~+0.75pp and does not carry to rows of content.
+
+  **Two caveats a reader must not lose.** The run was on battery, ~48%
+  discharging, with Low Power Mode **on** — every other figure in that spike is
+  mains. Throttling scales both rows of a single run together, so the within-run
+  +13.6pp stands; the cross-run comparison against the mains-taken +11.97pp badge
+  figure does **not**, and which way throttling moves it is indeterminate rather
+  than favourable (lower clocks inflate a share-of-core delta, a frame-rate cap
+  compresses it). A mains re-measurement is owed and the spike records it as such.
+
+## Plan 5's carried findings — what its final review deliberately did not close
+
+The equivalent of Plan 4's follow-ups, recorded here because `.superpowers/` is
+gitignored scratch and this file is the permanent register. Everything Plan 5's
+final whole-branch review ruled *must fix* is fixed (`6607728`, `b907682`,
+`011c277`, and the documentation-truth commit that carries this section). What
+follows is what it deliberately left, with the reason.
+
+**One item has a deadline attached, and it is the only one that does:**
+
+- **`aLapsedQuestionClosesTheDrawer` must be fixed before the next plan starts.**
+  It flakes under full-suite load — measured over 8 full-suite runs each, 2/8 on
+  the commit before the fix wave and 3/8 with the wave's own tests added, which at
+  that sample size says nothing about the difference. **Pre-existing, not Plan
+  5's**: nothing in this plan touches the lapse path. The test already polls
+  rather than sleeping, with a 2s ceiling, so the remaining failure mode is the
+  lapse `Task`'s continuation being starved of main-actor turns for longer than
+  that while other `@MainActor` tests hold it. The precedent to follow is
+  `0ed9932`, which fixed two drawer golden tests of exactly this class with a
+  condition-based wait. Two honest limits on calling it benign: single-digit run
+  counts are weak evidence about a load-dependent flake, and this repo has a
+  documented case where a "flake" turned out to be a real concurrency bug
+  (`AppModel`'s `DispatchQueue.main.sync`).
+- **A drawer-golden jitter reading nobody can account for.**
+  `theDrawersContentDoesNotShiftWhenOnlyHoverChanges` asserts `differing == 0` and
+  produced **72** on one full-suite run out of ~10 during the final fix wave,
+  never reproducible under `--filter`. Every jitter magnitude previously recorded
+  for this class is 4, 4, 8, 22. Not chased and deliberately not absorbed by
+  loosening the assertion back to `<= 30` — the whole reason it is `== 0` is that
+  the tolerance stopped absorbing anything once the sliver was split out. If it
+  recurs, start here.
+- **An unidentified Task 4 flake** whose data is unrecoverable. Recorded only so a
+  future recurrence is not mistaken for something new.
+
+Plan 6 items, deliberately left as behaviour rather than changed:
+
+- **`IslandModel.revealed` is now redundant with `sessions.first`.** `render()`
+  assigns both from the same `SessionStore.mostUrgentFirst` ordering, so
+  `revealed` is `sessions.first` by construction. Not collapsed now for one
+  reason: they are read by different surfaces with different lifetimes —
+  `revealed` by the collapsed bar's hover reveal, `sessions` by §11's list — and
+  Plan 6's Settings can make the list's contents configurable (§11: "every line is
+  individually switchable"), at which point "the session the island's state
+  summary is about" and "the first row of the list" stop being guaranteed to be
+  the same session. Collapsing them first and re-splitting them later is the
+  expensive order. If Plan 6 decides the two really are one thing, `revealed` is
+  the one to delete.
+- **`.scrollIndicators(.never)` on a face whose content genuinely overflows.**
+  `SessionListFace` fixes at §6.3's 420pt (376pt of it usable above §6.4's footer
+  reservation) while 20 sessions measure 699pt — measured, not assumed, by
+  `twentySessionsGenuinelyOverflowTheFixedFace`. So rows continue below the fold
+  with **no cue whatever** that they do. This is a design decision, not a bug:
+  §11 does not specify an indicator, and a permanently visible scrollbar on a
+  400pt-wide black panel is a real aesthetic cost. But "no cue" was never chosen
+  either — it fell out of a one-line modifier. Plan 6 owns picking one (a fade at
+  the bottom edge, `.scrollIndicators(.automatic)`, or a "+N more" line), because
+  Plan 6 is where the list gets its Settings and its footer.
+- **`SessionRow.Options` has no production caller passing anything but `.all`.**
+  Kept deliberately — it is §11's own "every line is individually switchable in
+  Settings" switch point, and removing it means Plan 6 rewrites `SessionRow` and
+  `SessionBlocks`. It is not untested: `sessionRowForwardsItsOptionsToSessionBlocks`
+  pins the forwarding by mutation. **But `SessionListFace.options` was removed** in
+  the final fix wave — nothing, test or production, ever passed it — so Plan 6 has
+  to re-thread one parameter from Settings down to `SessionRow` when it wires the
+  switches up. That is a deliberate one-line cost, not an oversight.
+- **`Session.lastUserMessage` is rendered and never populated.** §11's line 3, and
+  no adapter produces it. Already recorded out of scope with the check that would
+  settle it.
+- **`eachBlockOptionGatesOnlyItsOwnBlock` catches an asymmetric mis-gate but not a
+  symmetric double swap.** With both guards swapped, both single-bit probes still
+  draw non-empty, non-equal content and the test passes. Narrow — it needs a
+  symmetric mistake rather than a typo — but real, and the fix is a third probe
+  asserting *which* block drew rather than only that the heights differ.
+- **A transition's *wiring* is not observable with the tools this project takes.**
+  A `.transition` contributes nothing at identity, and identity is the only state a
+  static `ImageRenderer` render can capture. So `FaceCrossfade`'s numbers and
+  geometry are pinned, and that anything *applies* it is not — which is exactly how
+  §9.1's crossfade sat with no caller from Plan 4.5 until Plan 5's final review
+  found it by reading. Both of `DrawerView`'s and both of `QuestionFace`'s call
+  sites are in this position today. Worth a `#if DEBUG` counter of the kind
+  `IslandView.buildCount` already establishes, if Plan 6 adds a fourth face.
 
 ## Plan 6 also owns
 
@@ -391,7 +506,9 @@ delivered what they claimed**, with three exceptions, all now owned.
   unimplemented." That was wrong — one `standardError.write` and no file named
   `Error` is not the same as no error handling, and the behaviour is spread
   across `SocketClient`, `HookRunner`, `IslandGeometry` and `NotchController`.)
-- **§9.1's 190ms face crossfade** — absent, confirmed, and now named in Plan 4.5.
+- ~~**§9.1's 190ms face crossfade** — absent, confirmed, and now named in Plan
+  4.5.~~ **Present since Plan 5** — see Plan 4.5's own entry above for the two
+  stages it took to get a caller.
 
 Everything else the plans claimed is present: §2's socket and wire protocol,
 §4's states and worst-state-wins, §5's geometry including the corner minimum,
@@ -402,5 +519,5 @@ Everything else the plans claimed is present: §2's socket and wire protocol,
 ## Not a plan, and still not done
 
 - **No licence has been chosen.** The project README says so. Local `main` is
-  deliberately unpushed and now 158 commits ahead of `origin/main` — pushing
+  deliberately unpushed and now 207 commits ahead of `origin/main` — pushing
   publishes, so that decision comes first.

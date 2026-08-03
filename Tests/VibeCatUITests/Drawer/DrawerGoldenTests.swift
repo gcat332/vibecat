@@ -863,18 +863,28 @@ private func isNear(_ p: Raster.Pixel, _ colour: RGBA, tolerance: Int = 6) -> Bo
             differing += 1
         }
     }
-    // <= 30, not == 0 — see aQuestionWithoutAClickRendersIdenticallyToNoQuestionAtAll's
-    // own comment above for why: found flaky during this fix wave even after
-    // switching off `.waiting` (measured: 22, then 8, on separate full-suite
-    // runs), a residual rendering-jitter magnitude nowhere near the 2015
-    // pixels the actual bug this test exists to catch produces (confirmed by
-    // this test's own mutation check, see the task report).
-    // `== 0`, not `<= 30`. The 30 was measured against real jitter (4, 4, 8
-    // across separate full-suite runs) while the sliver still existed; with the
-    // silhouette split this measures **0**, so the allowance is no longer
-    // absorbing anything and a tolerance that absorbs nothing should not be
-    // spent. If jitter returns, raise it deliberately and record the magnitude —
-    // do not restore a number whose original reason is gone.
+    // `== 0`, not `<= 30`. The 30 was measured against real jitter (4, 4, 8, and
+    // later 22, across separate full-suite runs) while the sliver still existed;
+    // with the silhouette split this measures **0**, so the allowance is no
+    // longer absorbing anything and a tolerance that absorbs nothing should not
+    // be spent. A real difference here is in the thousands (2015 pixels, from
+    // this test's own mutation check), so nothing between 0 and 30 is a signal
+    // this test cares about either way.
+    //
+    // (The superseded `<= 30` paragraph used to sit stacked directly *above*
+    // this one, over code that already read `== 0` — F6 of the final
+    // whole-branch review: a reader met the wrong one first. Its measurements
+    // are folded in above rather than deleted, because they are the record of
+    // why 30 was ever chosen. The `<= 30` block near
+    // `aQuestionWithoutAClickRendersIdenticallyToNoQuestionAtAll` is a
+    // different test's own tolerance and is correct there.)
+    //
+    // Observed once during Plan 5's final fix wave, on one full-suite run out of
+    // ~10 and never reproducible under `--filter`: 72 differing pixels. Far
+    // above every jitter magnitude previously recorded and far below a real
+    // regression. Not chased, and not absorbed by loosening this back — logged
+    // in plans/README.md against the drawer-golden flake this file already
+    // carries. If it recurs, that entry is the place to start.
     #expect(differing == 0,
             "\(differing) pixels within the drawer's own width changed when only `hovering` toggled — the drawer's own content moved with the hover reveal")
 }

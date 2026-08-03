@@ -433,11 +433,21 @@ import SwiftUI
     }
 
     /// The island was clicked while it could take clicks (see
-    /// `NotchPanel.acceptsClicks`) — opens the drawer on whichever question
-    /// is currently showing, or closes it again on the next click. A no-op
-    /// either way if there is no question: `model.tier`'s own guard also
-    /// requires one, so toggling this with nothing pending leaves the tier
-    /// at `.rest`/`.hover` regardless.
+    /// `NotchPanel.acceptsClicks`) — opens the drawer on whichever question is
+    /// currently showing, **or on §11's session list when there is no question**,
+    /// or closes it again on the next click.
+    ///
+    /// It used to say "a no-op either way if there is no question:
+    /// `model.tier`'s own guard also requires one, so toggling this with nothing
+    /// pending leaves the tier at `.rest`/`.hover` regardless." That was true
+    /// until Task 7 restructured `IslandModel.tier`, and false since: the guard
+    /// now admits a question *or* a non-empty `sessions`, which is the whole
+    /// point of this plan. A reader taking the old wording at face value would
+    /// wrongly conclude the sessions-only-open path is unreachable — the same
+    /// path `thePanelTakesClicksWithSessionsPendingEvenWithoutAQuestion` and
+    /// `anOpenDrawerStaysClickableAfterItsLastSessionIsPruned` both drive. It is
+    /// still a no-op when there is neither, and `acceptsClicks` will not deliver
+    /// the click in that case anyway.
     ///
     /// `.toggle()`, not an unconditional `= true` (final whole-branch
     /// review, finding 4): Escape is otherwise the only way to back out of
