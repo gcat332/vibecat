@@ -46,3 +46,33 @@ private func session(_ state: Kind, project: String = "api") -> Session {
     #expect(bare.opaquePixelCount > 0,
             "switching the optional lines off erased the row entirely — line 1 is not optional in §11")
 }
+
+/// CARRIED FINDING (Task 6, review round 1): the reviewer temporarily hardcoded
+/// `options: .all` at `SessionRow`'s `SessionBlocks(session:options:accent:)`
+/// call site — dropping the forwarding of whatever `options` the row actually
+/// received — and all 406 tests still passed. Neither this file's `session(_:)`
+/// fixture (no tasks/agents, so `SessionBlocks` draws nothing regardless of
+/// `options`) nor `SessionBlocksTests` (constructs `SessionBlocks` directly,
+/// never going through `SessionRow`) could see the drop. This test goes
+/// through `SessionRow` itself with a fixture that populates both, and fails
+/// against exactly that mutation: with `options: .all` hardcoded, hiding
+/// `.subagents` from the `SessionRow` call has no effect, so the two rasters
+/// come out the same height instead of the collapsed one being shorter.
+@MainActor @Test func sessionRowForwardsItsOptionsToSessionBlocks() throws {
+    var e = VibeEvent(id: "e", cli: "claude-code", kind: .running, session: "s",
+                      cwd: "/Users/dev/api")
+    e.tasks = [TaskItem(title: "Audit authentication flow", status: .doing)]
+    e.agents = [AgentItem(name: "Explore (Search API endpoints)", elapsed: "8s", model: "Sonnet 4.6"),
+                AgentItem(name: "Explore (Read config files)", elapsed: "Done", model: "Sonnet 4.6",
+                          finished: true)]
+    let s = Session(event: e, now: Date(timeIntervalSince1970: 1_000_000))
+    let now = Date(timeIntervalSince1970: 1_000_030)
+
+    let all = try rasterise(SessionRow(session: s, now: now, options: .all).frame(width: 388))
+    let subagentsHidden = try rasterise(
+        SessionRow(session: s, now: now, options: [.activity, .lastMessage, .tasks, .agents])
+            .frame(width: 388))
+
+    #expect(subagentsHidden.height < all.height,
+            "hiding .subagents through SessionRow rendered the same height as .all — if the call site hardcodes `options: .all` instead of forwarding what it received, this passes no matter what the row was asked to show")
+}
