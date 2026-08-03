@@ -3,6 +3,32 @@ import SwiftUI
 import Testing
 @testable import VibeCatUI
 
+// MARK: - The escaped-inout note
+//
+// Why every bitmap context in this file is built inside a
+// `withUnsafeMutableBytes` closure rather than from `&someArray`.
+//
+// `CGContext(data: &bytes, …)` compiles, and all four bitmap contexts in this
+// file were originally written that way. It is undefined behaviour. Swift's
+// inout-to-pointer conversion guarantees the pointer only for the duration of
+// the call it appears in; `CGContext` stores it and writes through it later,
+// when something draws into the context. Nothing warns.
+//
+// This is not a theoretical objection — it is directly observable, with no
+// concurrency and no load. Create a context over `&bytes`, take a plain `let`
+// copy of `bytes`, *then* draw: the copy changes. A `let` copy of a value type
+// mutating because of a later, unrelated statement is impossible in Swift's
+// model, which is exactly the point — the write is landing in memory the
+// language believes is exclusively owned by that copy. Measured here,
+// deterministically, first attempt.
+//
+// **It was not, however, the cause of the blank-render flake**, which was worth
+// establishing before assuming it: in a full-suite run that reproduced the bad
+// reading, a correctly allocated buffer that provably outlived its context read
+// exactly the same wrong value (474) as the `&bytes` version did. The corruption
+// was upstream of the buffer, inside `ImageRenderer` — see `rasterise`. Both
+// defects were real; only one of them was that one.
+
 /// A SwiftUI view rasterised offscreen, as raw sRGB bytes.
 ///
 /// `ImageRenderer` draws with no window server involved, so this works
@@ -95,17 +121,24 @@ struct Raster: Sendable {
     /// when a golden assertion fails and you want to see what it saw.
     @discardableResult
     func writePNG(to path: String) -> Bool {
+        // `withUnsafeMutableBytes`, not `&copy`: see the escaped-inout note at
+        // the top of this file. Everything that reads through the pointer —
+        // `makeImage` included, since a bitmap context's image can share its
+        // backing store — happens inside the closure, so the pointer provably
+        // outlives every use of it.
         var copy = bytes
-        guard let ctx = CGContext(data: &copy, width: width, height: height,
-                                  bitsPerComponent: 8, bytesPerRow: width * 4,
-                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
-              let image = ctx.makeImage(),
-              let dst = CGImageDestinationCreateWithURL(
-                URL(fileURLWithPath: path) as CFURL, "public.png" as CFString, 1, nil)
-        else { return false }
-        CGImageDestinationAddImage(dst, image, nil)
-        return CGImageDestinationFinalize(dst)
+        return copy.withUnsafeMutableBytes { raw in
+            guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height,
+                                      bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+                  let image = ctx.makeImage(),
+                  let dst = CGImageDestinationCreateWithURL(
+                    URL(fileURLWithPath: path) as CFURL, "public.png" as CFString, 1, nil)
+            else { return false }
+            CGImageDestinationAddImage(dst, image, nil)
+            return CGImageDestinationFinalize(dst)
+        }
     }
 }
 
@@ -126,15 +159,20 @@ func writeAnimatedGIF(_ frames: [Raster], secondsPerFrame: Double, to path: Stri
         kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]
     ] as CFDictionary)
     for f in frames {
+        // `withUnsafeMutableBytes`, not `&bytes`: see the escaped-inout note at the top of this file.
         var bytes = f.bytes
-        guard let ctx = CGContext(data: &bytes, width: f.width, height: f.height,
-                                  bitsPerComponent: 8, bytesPerRow: f.width * 4,
-                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
-              let image = ctx.makeImage() else { return false }
-        CGImageDestinationAddImage(dst, image, [
-            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: secondsPerFrame]
-        ] as CFDictionary)
+        let added = bytes.withUnsafeMutableBytes { raw -> Bool in
+            guard let ctx = CGContext(data: raw.baseAddress, width: f.width, height: f.height,
+                                      bitsPerComponent: 8, bytesPerRow: f.width * 4,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+                  let image = ctx.makeImage() else { return false }
+            CGImageDestinationAddImage(dst, image, [
+                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: secondsPerFrame]
+            ] as CFDictionary)
+            return true
+        }
+        guard added else { return false }
     }
     return CGImageDestinationFinalize(dst)
 }
@@ -172,26 +210,66 @@ enum RasterError: Error, CustomStringConvertible {
 
 /// Rasterises a view at `scale` device pixels per point.
 ///
-/// The result is re-drawn into an explicit sRGB context rather than read
-/// straight off `ImageRenderer`'s `CGImage`: that image's colour space and
-/// byte order are not contractual, and reading components off an unknown
-/// colour space is exactly what crashed the pixel profiler during the
-/// animation spike.
+/// SwiftUI draws straight into a bitmap context this function allocates and
+/// zeroes, via `ImageRenderer.render(rasterizationScale:renderer:)`. It
+/// deliberately does **not** ask for `renderer.cgImage`, for a reason that cost
+/// this suite four wrong readings and one wrong diagnosis:
+///
+/// **`ImageRenderer.cgImage` can hand back a recycled backing store, and a view
+/// that paints nothing does not clear it.** Measured, single-threaded, under
+/// `--filter`, with no concurrency anywhere: render `SessionBlocks(options:
+/// .agents)` in a 388×80 frame (474 opaque pixels), then render
+/// `SessionBlocks(options: [])` in the *identical* frame, which must be blank.
+/// The blank render reads **474 opaque pixels, twelve times out of twelve** —
+/// the previous render's pixels, verbatim. The first blank render in a fresh
+/// process reads 0, because nothing has occupied that block yet.
+///
+/// Two things follow, and both contradict what this project's plan register
+/// recorded when the symptom was first seen as a full-suite flake:
+///
+/// 1. `--filter` is **not** a trustworthy mode for a golden reading. It is only
+///    ever *quieter*, because a filtered run has fewer prior renders to inherit.
+/// 2. `.serialized` would **not** have fixed it. There is no race to serialise;
+///    the reproduction above is entirely sequential.
+///
+/// Rendering into our own zeroed buffer removes the shared store from the
+/// picture altogether. It also subsumes the reason the old code re-drew the
+/// `CGImage` into an explicit sRGB context — that image's colour space and byte
+/// order are not contractual, and reading components off an unknown colour
+/// space is what crashed the pixel profiler during the animation spike — since
+/// the context SwiftUI draws into is now sRGB by construction. Measured against
+/// the old two-step path on a content-filled render: identical dimensions,
+/// identical opaque-pixel count, identical top/bottom ink distribution, and a
+/// maximum per-channel difference of **2** levels, which is antialiasing and
+/// well inside this file's own `tolerance: 6` convention.
 @MainActor
 func rasterise(_ view: some View, scale: CGFloat = 1) throws -> Raster {
     let renderer = ImageRenderer(content: view)
     renderer.scale = scale
-    guard let image = renderer.cgImage else { throw RasterError.renderProducedNothing }
 
-    let w = image.width, h = image.height
-    var bytes = [UInt8](repeating: 0, count: w * h * 4)
-    guard let ctx = CGContext(data: &bytes, width: w, height: h,
-                              bitsPerComponent: 8, bytesPerRow: w * 4,
-                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-    else { throw RasterError.contextUnavailable }
-    ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-    return Raster(width: w, height: h, bytes: bytes)
+    var outcome: Result<Raster, RasterError> = .failure(.renderProducedNothing)
+    renderer.render(rasterizationScale: scale) { size, draw in
+        let w = Int((size.width * scale).rounded()), h = Int((size.height * scale).rounded())
+        // A view that resolves to zero size gives nothing to measure. The old
+        // `cgImage` path reported that as a nil image; this reports it the same
+        // way, which `eachBlockOptionGatesOnlyItsOwnBlock` relies on when it
+        // explains why its frame is pinned.
+        guard w > 0, h > 0 else { return }
+        var bytes = [UInt8](repeating: 0, count: w * h * 4)
+        outcome = bytes.withUnsafeMutableBytes { raw -> Result<Raster, RasterError> in
+            guard let ctx = CGContext(data: raw.baseAddress, width: w, height: h,
+                                      bitsPerComponent: 8, bytesPerRow: w * 4,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return .failure(.contextUnavailable) }
+            ctx.scaleBy(x: scale, y: scale)
+            draw(ctx)
+            // Built here, inside the closure, so the bytes are copied out while
+            // the pointer is still provably alive.
+            return .success(Raster(width: w, height: h, bytes: Array(raw)))
+        }
+    }
+    return try outcome.get()
 }
 
 /// Rasterises a view through **AppKit's own** rendering path — `NSHostingView`
@@ -244,11 +322,17 @@ func rasteriseHosted(_ view: some View, size: CGSize) throws -> Raster {
     // during the animation spike.
     let w = image.width, h = image.height
     var bytes = [UInt8](repeating: 0, count: w * h * 4)
-    guard let ctx = CGContext(data: &bytes, width: w, height: h,
-                              bitsPerComponent: 8, bytesPerRow: w * 4,
-                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-    else { throw RasterError.contextUnavailable }
-    ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+    // `withUnsafeMutableBytes`, not `&bytes`: see the escaped-inout note at the top of this file.
+    let drawn = bytes.withUnsafeMutableBytes { raw -> Bool in
+        guard let ctx = CGContext(data: raw.baseAddress, width: w, height: h,
+                                  bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return false }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return true
+    }
+    guard drawn else { throw RasterError.contextUnavailable }
     return Raster(width: w, height: h, bytes: bytes)
 }
+

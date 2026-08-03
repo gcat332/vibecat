@@ -352,39 +352,57 @@ follows is what it deliberately left, with the reason.
   loosening the assertion back to `<= 30` — the whole reason it is `== 0` is that
   the tolerance stopped absorbing anything once the sliver was split out. If it
   recurs, start here.
-- **`ImageRenderer` can return another test's pixels under full-suite
-  concurrency, and this is the most serious of the three because it undermines
-  every golden assertion in the suite.** Found while measuring the two above.
+- **`ImageRenderer.cgImage` hands back a recycled backing store, and a view that
+  paints nothing does not clear it. FIXED — and two of the four things this entry
+  originally said about it were wrong.** Found while measuring the two above.
   `eachBlockOptionGatesOnlyItsOwnBlock` draws `SessionBlocks(options: [])` — an
   empty `VStack` in a fixed 388×80 frame — and asserts the two single-bit renders
-  beat it. **In isolation that render is 0 opaque pixels and 0 distinct colours,
-  measured directly. Under a full-suite run it reads 2287 opaque pixels, and it
-  reads exactly 2287 every time it happens** (4 occurrences across 18 full-suite
-  runs, on commits both before and after Plan 5's final fix wave, so it is
-  pre-existing and unrelated to it). A stable wrong number is not
-  antialiasing jitter — something is handing this raster content that another
-  concurrently-running `@MainActor` test rendered. That also makes it a plausible
-  common cause for the 72-pixel drawer reading above.
-  **Consequences, which matter more than the flake:** any `rasterise`-based
-  assertion in this suite can in principle pass or fail for reasons that have
-  nothing to do with its subject, so a green golden test is weaker evidence than
-  this project has been treating it as.
+  beat it. That render read 0 opaque pixels under `--filter` and **exactly 2287**
+  on 4 of 18 full-suite runs, reproduced by three separate observers, and it later
+  failed a real assertion: `(agentsOnly → 474) > (none → 2287)`.
 
-  **Independently reproduced, so this is two observers and not one.** A second
-  probe — written from scratch, rendering `SessionBlocks(options: [])` into the same
-  fixed 388×80 frame and *printing* the count rather than asserting on it — read
-  **0 opaque pixels under `--filter`** and **`opaque=2287 distinct=587`** on one of
-  six full-suite runs. Byte-identical to the figure above, arrived at separately.
-  587 distinct colours in a frame that must be blank says the content came from
-  something rich, like a sprite sheet.
+  **What it actually is.** `ImageRenderer.cgImage`'s bitmap comes from a store
+  that is reused across renderers, and a fully transparent render never writes to
+  it, so the previous occupant's pixels are read back verbatim. Reproduced
+  **deterministically, single-threaded, under `--filter`, with no concurrency
+  anywhere**: render `SessionBlocks(options: .agents)` in a 388×80 frame (474
+  opaque pixels), then the blank `options: []` render in the *identical* frame,
+  and the blank one reads **474, twelve times out of twelve**. The first blank
+  render in a fresh process reads 0, because nothing has occupied that block yet.
+  Fixed by rendering through `ImageRenderer.render(rasterizationScale:renderer:)`
+  into a bitmap context `rasterise` allocates and zeroes itself, so the shared
+  store is never involved. **20 consecutive full-suite runs green afterwards,
+  against 3 failures in 20 immediately before** — and pinned by
+  `aViewThatPaintsNothingDoesNotInheritTheLastRender`, which fails 12 issues out
+  of 12 against the old path.
 
-  **What is and is not damaged.** Assertions run in **isolation** are unaffected,
-  which covers every mutation check in Plan 5 — all of them used `--filter`. What is
-  weakened is the standing evidentiary value of golden assertions in **full-suite**
-  runs. So the reasonable next step is not to distrust the suite wholesale: it is to
-  serialise the rasterising tests (`.serialized` on those suites, or one shared
-  render queue) **before adding more of them**, and to treat `--filter` as the only
-  trustworthy mode for a golden result until that lands.
+  **Two claims this entry made that are now disproven, recorded because this
+  register's rule is that a wrong measurement gets corrected loudly:**
+
+  1. *"`--filter` is the only trustworthy mode for a golden result"* — **false, and
+     it was the most damaging thing said here.** `--filter` is only ever *quieter*,
+     because a filtered run has fewer prior renders to inherit. The deterministic
+     reproduction above is a `--filter` run. Plan 5's mutation checks all used
+     `--filter` and were called "unaffected" on that basis; that reasoning does not
+     hold, though the mutations themselves stand, since every one of them asserted
+     a *difference* between two renders taken the same way.
+  2. *"the reasonable next step is to serialise the rasterising tests
+     (`.serialized`, or one shared render queue)"* — **false.** There is no race to
+     serialise. `.serialized` would have suppressed the full-suite symptom while
+     leaving the bug entirely in place, and would have made it harder to find by
+     removing the only signal anyone had.
+
+  **And one claim it made that held:** the attribution to `ImageRenderer` was
+  right. A competing diagnosis — that the escaping `CGContext(data: &bytes, …)` in
+  `Raster.swift` was corrupting the destination buffer — was tested first and
+  **falsified**: on a full-suite run that reproduced the bad reading, a correctly
+  allocated buffer that provably outlived its context read the same wrong 474 as
+  the `&bytes` version did, so the corruption was upstream of the buffer. That
+  escaping-inout *is* real undefined behaviour and was fixed at all four sites in
+  the same commit, on its own separately-measured evidence (a `let` copy of the
+  array, taken before the draw, is mutated by the draw) — but it was never this
+  bug, and fixing it alone does not fix this bug. **Two real defects sharing one
+  symptom is exactly the shape that makes a plausible diagnosis dangerous.**
 - **An unidentified Task 4 flake** whose data is unrecoverable. Recorded only so a
   future recurrence is not mistaken for something new.
 
