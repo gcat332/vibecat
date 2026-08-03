@@ -36,6 +36,45 @@ private let externalDisplay = ScreenMetrics(
     return (NotchController(model: model, metrics: metrics), model)
 }
 
+/// Polls `condition` until it holds, bounded by **main-actor turns rather than
+/// by wall-clock seconds**.
+///
+/// The unit is the whole point, and it is what `aLapsedQuestionClosesTheDrawer`
+/// got wrong. That test already polled, with a 2s wall-clock ceiling — the
+/// condition-based shape `0ed9932` established — and still failed roughly 1
+/// full-suite run in 4, reading `.drawer(height: 288.0)` where `.rest` was
+/// expected. A wall-clock ceiling is the wrong bound for this failure, because
+/// wall-clock time is precisely what the failure consumes. `setQuestion`'s lapse
+/// `Task` is created in a `@MainActor` context, so it inherits the main actor:
+/// both its sleep's resumption and its `dismissQuestion()` need a main-actor
+/// turn. A full-suite run has dozens of other `@MainActor` tests taking long
+/// *synchronous* stretches of that same actor — every `rasterise` call is one —
+/// so two seconds can elapse having granted the lapse `Task` almost no turns at
+/// all. Raising the ceiling would only move the odds; it is the same mistake in
+/// a larger number.
+///
+/// Counting turns instead makes the bound scale with load rather than compete
+/// with it: each iteration yields the main actor and comes back, so the ceiling
+/// is denominated in the resource that is actually scarce. 300 turns is ~3s idle
+/// and proportionally longer under load, which is the desired behaviour.
+///
+/// Deliberately not applied to this file's other poll loops. They wait on a
+/// detached `Thread` doing real socket work rather than on a starved main-actor
+/// continuation, so the argument above does not transfer, and none of them has
+/// been observed to flake. They are the next candidates if one ever does.
+///
+/// Returns nothing on purpose: the caller still asserts the condition itself, so
+/// a lapse that never happens still fails the test rather than being absorbed
+/// here.
+@MainActor private func waitForMainActorTurns(_ turns: Int = 300,
+                                              each: Duration = .milliseconds(10),
+                                              until condition: () -> Bool) async {
+    for _ in 0..<turns {
+        if condition() { return }
+        try? await Task.sleep(for: each)
+    }
+}
+
 /// A controller with real geometry and a real panel already up — what every
 /// test below needs before it can read `c.panel` or drive `setHovering`/
 /// `setQuestion`/`click`. `AppModel` is discarded rather than returned:
@@ -427,18 +466,7 @@ private let externalDisplay = ScreenMetrics(
     c.setQuestion(aQuestion(deadline: 0.05))
     c.click()
     #expect(c.model.tier != .rest)
-    // Polled, not a single fixed sleep: the lapse Task's own 50ms sleep
-    // finishes on schedule regardless, but its continuation still has to be
-    // scheduled onto Swift's small shared cooperative pool, which every
-    // other concurrently-running test in a full-suite run is also
-    // contending for — confirmed directly: a single 400ms sleep here passed
-    // every filtered run but failed a full-suite run with `tier` still
-    // `.drawer`. Loose 2s ceiling, same shape as this codebase's other
-    // cross-thread waits (e.g. PipelineTests.waitUntil).
-    let ceiling = Date().addingTimeInterval(2)
-    while c.model.tier != .rest, Date() < ceiling {
-        try await Task.sleep(for: .milliseconds(20))
-    }
+    await waitForMainActorTurns(until: { c.model.tier == .rest })
     #expect(c.model.tier == .rest, "the drawer is still showing a question the hook has abandoned")
     #expect(panel.acceptsClicks == false)
 }
