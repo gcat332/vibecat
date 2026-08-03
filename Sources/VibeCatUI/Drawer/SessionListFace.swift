@@ -20,11 +20,40 @@ import VibeCatCore
 struct SessionListFace: View {
     let sessions: [Session]
 
+    /// A running row's state field is an elapsed time, not a word (the mockup's
+    /// `SESSIONS` gives one `state:'2m 14s'`), so the list needs a clock.
+    ///
+    /// **A real branch, not a paused timeline** — the same shape, and the same
+    /// measurement, as `IslandView.body`: a paused-but-present `TimelineView`
+    /// still costs ~6% of a core, and removing it costs 0.0%. With nothing
+    /// running there is no duration on screen to advance, so there is nothing
+    /// for a timeline to do and it is not created. This also satisfies the
+    /// condition the removal of `SessionRow.now` was recorded under: "a `now`
+    /// that never advances is worse than no `now` at all."
+    ///
+    /// Not gated on `MotionPreference`: a clock ticking is information, not
+    /// motion, and §7's reduce-motion rule is about movement.
+    private var needsClock: Bool { sessions.contains { $0.state == .running } }
+
+    /// One second. `RevealContent.elapsed` only resolves finer than a minute
+    /// below the first minute, so this is as fast as any visible digit changes.
+    private static let clockInterval: Double = 1
+
     var body: some View {
+        if needsClock {
+            TimelineView(.animation(minimumInterval: Self.clockInterval, paused: false)) { ctx in
+                list(now: ctx.date)
+            }
+        } else {
+            list(now: Date())
+        }
+    }
+
+    private func list(now: Date) -> some View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(sessions) { session in
-                    SessionRow(session: session)
+                    SessionRow(session: session, now: now)
                     if session.id != sessions.last?.id {
                         Rectangle()
                             .fill(Color.white.opacity(hairlineOpacity))

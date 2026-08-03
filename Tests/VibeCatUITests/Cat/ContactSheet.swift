@@ -224,11 +224,28 @@ struct ContactSheetTool {
     /// Rendered at `DrawerFace.sessionList.height` — the real 420pt, not a
     /// height that fits the content — so whether the last row clips at the face
     /// boundary is visible rather than hidden by an accommodating frame.
+    /// The wall clock, sampled once.
+    ///
+    /// **Deliberately not a fixed epoch date, unlike every other fixture in this
+    /// file.** `SessionListFace` reads its own `Date()` — that is the whole
+    /// point of its `TimelineView`, and giving it a test-only injection point
+    /// would bend production API for a fixture. So the *sessions* move to the
+    /// clock instead: `sessionListFixture` stamps their `updatedAt` 134 seconds
+    /// before this instant, which is what makes a running row's state field read
+    /// `2m` (the mockup's `state:'2m 14s'`) rather than the `20656d` the old
+    /// 1970-epoch fixture produced the first time this shot was opened after the
+    /// state field became a duration.
+    static let listShotNow = Date()
+
+    /// One CLI per row, so the shot shows all four of `CLIMark`'s marks side by
+    /// side — the leading position now carries *which agent*, and a fixture that
+    /// gave every row `claude-code` would render four identical glyphs and show
+    /// nothing about the one thing §4.3 puts there.
     @MainActor
     static func sessionListFixture() -> [Session] {
         func session(_ kind: Kind, _ project: String, worktree: String?,
-                     rich: Bool) -> Session {
-            var e = VibeEvent(id: "list-\(project)", cli: "claude-code", kind: kind,
+                     rich: Bool, cli: String = "claude-code") -> Session {
+            var e = VibeEvent(id: "list-\(project)", cli: cli, kind: kind,
                               session: "s-\(project)", cwd: "/Users/dev/\(project)")
             e.worktree = worktree
             if rich {
@@ -252,7 +269,7 @@ struct ContactSheetTool {
                             AgentItem(name: "Explore (Read config files)",
                                       elapsed: "Done", model: "Sonnet 4.6", finished: true)]
             }
-            var s = Session(event: e, now: Date(timeIntervalSince1970: 1_000_000))
+            var s = Session(event: e, now: Self.listShotNow.addingTimeInterval(-134))
             // Assigned on the `Session`, not the event, and that is the point:
             // `Session.init` hardcodes `lastUserMessage = nil` and no adapter
             // populates it, so §11's line 3 has never been drawn by anything
@@ -263,9 +280,10 @@ struct ContactSheetTool {
         }
         return [session(.permission, "api", worktree: "auth-hardening", rich: true),
                 session(.running, "web-dashboard-with-a-long-name",
-                        worktree: "feature/redesign-the-settings-panel", rich: true),
-                session(.failed, "infra", worktree: nil, rich: true),
-                session(.done, "scripts", worktree: nil, rich: false)]
+                        worktree: "feature/redesign-the-settings-panel", rich: true,
+                        cli: "codex"),
+                session(.failed, "infra", worktree: nil, rich: true, cli: "gemini-cli"),
+                session(.done, "scripts", worktree: nil, rich: false, cli: "aider")]
     }
 
     /// The assembled list at its real size, beside the one thing the list itself
@@ -284,11 +302,28 @@ struct ContactSheetTool {
                 DrawerView(question: nil, sessions: sessions,
                            accent: IslandState.waiting.accent, width: 388)
             }
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 12) {
+                // All four of `MARKS`, at the 16pt the row draws them, because
+                // the 420pt face beside this clips after two rows and the two it
+                // shows are `claude` and `codex` — `gemini` and `generic` would
+                // never be looked at otherwise.
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("§4.3 · shape says which agent — CLIMark, ported from MARKS")
+                        .font(.system(size: 9)).foregroundStyle(Color(hazeColour))
+                    HStack(spacing: 14) {
+                        ForEach(CLIMark.allCases, id: \.self) { mark in
+                            HStack(spacing: 5) {
+                                CLIMarkView(mark: mark)
+                                Text(mark.rawValue)
+                                    .font(.system(size: 9)).foregroundStyle(Color(hazeColour))
+                            }
+                        }
+                    }
+                }
                 Text("§11 · Subagents hidden — collapses to a count")
                     .font(.system(size: 9)).foregroundStyle(Color(hazeColour))
-                SessionRow(session: sessions[0],
-                           options: [.activity, .lastMessage, .tasks, .agents])
+                SessionRow(session: sessions[0], now: listShotNow,
+                           options: .all.subtracting(.subagents))
                     .frame(width: 388)
                     .background(Color(islandGroundColour))
             }

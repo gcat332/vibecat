@@ -45,7 +45,9 @@ private func tempPath(_ n: String) -> String { "/tmp/vibecat-e2e-\(n)-\(getpid()
     let session = try #require(snapshot.sessions.first)
     #expect(snapshot.sessions.count == 1)
     #expect(session.project == "api")
-    #expect(session.activity == "Bash rm -rf build/")
+    // Two fields, not one joined string: the sentence and the command reach the
+    // row separately so the row can emphasise the command (see `Session.Activity`).
+    #expect(session.activity == Session.Activity(sentence: "Bash", command: "rm -rf build/"))
     #expect(session.origin.termSession == "w0t1p0:ABC")
 }
 

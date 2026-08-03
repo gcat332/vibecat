@@ -28,10 +28,27 @@ private func event(_ kind: Kind, cwd: String = "/Users/me/dev/api",
     #expect(s.startedAt == t0)          // start time is never rewritten
 }
 
-@Test func activityCombinesTitleAndBody() {
-    let s = Session(event: event(.permission, title: "Asking to run", body: "rm -rf build/"),
-                    now: t0)
-    #expect(s.activity == "Asking to run rm -rf build/")
+/// `Session.Activity` keeps §11's line 2 in the two halves the wire sends it in.
+/// It used to join them with a space, which is what stopped the row emphasising
+/// the command — the field a triage list is actually scanned for. Each half must
+/// survive on its own, because an event may carry either alone.
+@Test func activityKeepsTitleAndBodyApart() {
+    let both = Session(event: event(.permission, title: "Asking to run", body: "rm -rf build/"),
+                       now: t0)
+    #expect(both.activity?.sentence == "Asking to run")
+    #expect(both.activity?.command == "rm -rf build/")
+
+    let titleOnly = Session(event: event(.running, title: "Thinking"), now: t0)
+    #expect(titleOnly.activity?.sentence == "Thinking")
+    #expect(titleOnly.activity?.command == nil)
+
+    let bodyOnly = Session(event: event(.running, body: "swift build"), now: t0)
+    #expect(bodyOnly.activity?.sentence == nil)
+    #expect(bodyOnly.activity?.command == "swift build")
+
+    // Neither half stays `nil` activity rather than an empty `Activity`, so
+    // `SessionRow` can drop line 2's left side by asking one question.
+    #expect(Session(event: event(.running), now: t0).activity == nil)
 }
 
 @Test func mergeKeepsTasksWhenAnEventOmitsThem() {
@@ -59,7 +76,7 @@ private func event(_ kind: Kind, cwd: String = "/Users/me/dev/api",
     #expect(s.worktree == "auth-hardening")
     #expect(s.model == "Opus 4.8")
     #expect(s.effort == "high")
-    #expect(s.activity == "Editing src/auth.swift")
+    #expect(s.activity == Session.Activity(sentence: "Editing", command: "src/auth.swift"))
     #expect(s.tasks.count == 1)
     #expect(s.agents.count == 1)
     #expect(s.startedAt == t0)
