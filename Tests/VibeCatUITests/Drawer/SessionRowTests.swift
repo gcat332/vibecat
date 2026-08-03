@@ -18,8 +18,10 @@ private func session(_ state: Kind, project: String = "api",
 }
 
 @MainActor private func row(_ s: Session, now: Date = t0,
-                            options: SessionRow.Options = .all) throws -> Raster {
-    try rasterise(SessionRow(session: s, now: now, options: options).frame(width: 388))
+                            options: SessionRow.Options = .all,
+                            highlight: SessionRow.Highlight = []) throws -> Raster {
+    try rasterise(SessionRow(session: s, now: now, options: options, highlight: highlight)
+        .frame(width: 388))
 }
 
 /// `session(_:)` plus §11's line 3, and **deliberately no Tasks and no Agents.**
@@ -623,4 +625,44 @@ extension Raster {
     let rule = RGBA(hex: "#26272B")!
     #expect(raster.longestVerticalRun(of: rule) >= 8,
             "the tallest run of 13%-white in the row is \(raster.longestVerticalRun(of: rule))px — line 3's rule is being drawn in the text's ink, so it is a character in the string rather than the mockup's bar")
+}
+
+// MARK: - Focusable, and legible when focused
+
+/// `tabindex="0"`, `cursor:pointer`, `border-radius:9px`,
+/// `.row:hover{background:rgba(255,255,255,.05)}` and
+/// `.row:focus-visible{outline:2px solid var(--haze);outline-offset:-2px}` — **the
+/// row had none of the five**, so the session list could not be reached from the
+/// keyboard at all. The key-input spike settled that a non-activating panel does
+/// receive keystrokes without stealing focus (Path A), which turned this from a
+/// future concern into a present gap.
+///
+/// Three separate claims, because they fail separately:
+/// - hover fills, and fills *inside a rounded corner* — the outermost corner pixel
+///   stays clear while the top edge midway along does not, which is what a 9pt
+///   radius is and pins it without restating the number;
+/// - focus draws in the row's outermost 2pt, where no field ever draws;
+/// - focus is not hover — a ring is not a fill.
+///
+/// Mutation-verified: deleting `.background` makes hover ink equal to plain
+/// (53134 both ways) and the first fail; `RoundedRectangle(cornerRadius: 0)` puts
+/// ink in the corner pixel and fails the second; deleting the `.overlay` takes
+/// focus's border ink from 2328 to **0** and fails the fourth.
+@MainActor @Test func aRowFillsUnderThePointerAndIsRingedWhenFocused() throws {
+    let s = richSession()
+    let plain = try row(s)
+    let hovered = try row(s, highlight: .hovered)
+    let focused = try row(s, highlight: .focused)
+
+    #expect(hovered.opaquePixelCount > plain.opaquePixelCount,
+            "the row drew the same ink under the pointer as at rest (\(hovered.opaquePixelCount) against \(plain.opaquePixelCount)) — there is no hover state, so nothing tells you which row you are about to click")
+    #expect(hovered[0, 0].isTransparent && !hovered[hovered.width / 2, 0].isTransparent,
+            "the hover fill reaches the row's very corner — it is a rectangle, not the mockup's 9pt rounded panel")
+
+    #expect(plain.opaquePixelCount(inBorderOfWidth: 2) == 0,
+            "an unfocused row already paints its outermost 2pt, so this test cannot tell a focus ring from a field that overflows")
+    #expect(focused.opaquePixelCount(inBorderOfWidth: 2) > 0,
+            "a focused row painted nothing in its outermost 2pt — there is no focus ring, so a keyboard user cannot see where they are")
+    #expect(focused.pixelCount(near: hazeColour) > plain.pixelCount(near: hazeColour),
+            "focusing the row drew no more `--haze` — whatever is in the border is not the mockup's `outline:2px solid var(--haze)`")
 }

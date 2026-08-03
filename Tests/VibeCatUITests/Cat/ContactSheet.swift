@@ -326,6 +326,21 @@ struct ContactSheetTool {
                            options: .all.subtracting(.subagents))
                     .frame(width: 388)
                     .background(Color(islandGroundColour))
+                // The two skins the list itself cannot show: an offscreen render
+                // has no pointer and no focus system, so `highlight` is the only
+                // way either of them reaches an eye or an assertion. Drawn on the
+                // shortest fixture row, since what is being looked at is the
+                // panel's fill, its corner radius and the ring's inset — not the
+                // content inside it.
+                Text("mockup 345–348 · .row:hover, then .row:focus-visible")
+                    .font(.system(size: 9)).foregroundStyle(Color(hazeColour))
+                VStack(alignment: .leading, spacing: 1) {
+                    SessionRow(session: sessions[3], now: listShotNow, highlight: .hovered)
+                    SessionRow(session: sessions[3], now: listShotNow, highlight: .focused)
+                    SessionRow(session: sessions[3], now: listShotNow)
+                }
+                .frame(width: 388)
+                .background(Color(islandGroundColour))
             }
         }
         .padding(12)

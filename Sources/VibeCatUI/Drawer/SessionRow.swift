@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import VibeCatCore
 
@@ -71,6 +72,30 @@ struct SessionRow: View {
     let now: Date
     var options: Options = .all
 
+    /// The two interactive skins the mockup gives a row — `.row:hover` and
+    /// `.row:focus-visible` — **as a value, alongside the live state that
+    /// normally drives them.**
+    ///
+    /// It is a parameter because an offscreen render has neither a pointer nor a
+    /// focus system: `ImageRenderer` never delivers `onHover` and never resolves
+    /// `@FocusState` to `true`, so a focus ring reachable only through
+    /// `@FocusState` is a thing no test in this suite could ever see. Two earlier
+    /// waves of this file lost real defects exactly there — a switch that was
+    /// threaded and then ignored, a mark that was drawn and never varied — and
+    /// both were caught only once the state in question could be *asked for*.
+    ///
+    /// Production passes nothing and gets the live behaviour. Nothing branches on
+    /// whether the value or the live state supplied the skin; they are OR-ed.
+    struct Highlight: OptionSet, Sendable {
+        let rawValue: Int
+        static let hovered = Highlight(rawValue: 1 << 0)
+        static let focused = Highlight(rawValue: 1 << 1)
+    }
+    var highlight: Highlight = []
+
+    @State private var hovering = false
+    @FocusState private var keyboardFocus: Bool
+
     private var accent: Color { Color(IslandState(session.state).accent) }
 
     /// The mockup's `s.state`: a word for three of the four states and an
@@ -135,11 +160,48 @@ struct SessionRow: View {
                 SessionBlocks(session: session, options: options)
             }
         }
-        // `.row{padding:8px 10px}`.
+        // `.row{padding:8px 10px}`. The horizontal half is new with the hover
+        // background: without it the background would start and end exactly at
+        // the first and last glyph, where the mockup's stands 10px clear of them.
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Self.corner.fill(Color.white.opacity(isHovered ? Self.hoverInk : 0)))
+        // `outline:2px solid var(--haze);outline-offset:-2px` — inside the row's
+        // own box, not around it. `strokeBorder` draws inward from the shape's
+        // edge, which is what an inset outline is.
+        .overlay { if isFocused { Self.corner.strokeBorder(Color(hazeColour), lineWidth: 2) } }
+        // `cursor:pointer` needs the whole padded rectangle to be the target, not
+        // just the glyphs — `HStack` hit-testing would otherwise leave the gaps
+        // between fields inert and make the hover flicker as the pointer crosses
+        // them.
+        .contentShape(Self.corner)
+        // `tabindex="0"`. Focusable and legible when focused; **not** wired to any
+        // key handling, which is Plan 6's — and which the key-input spike
+        // constrains further (the panel may hold key status only while a question
+        // is open, or it silently swallows everything the person types).
+        .focusable()
+        .focused($keyboardFocus)
+        // `transition:background 130ms var(--ease)`.
+        .animation(.easeOut(duration: 0.13), value: isHovered)
+        .onHover { inside in
+            // Guarded so the cursor stack stays balanced: SwiftUI can deliver the
+            // same edge twice, and two pushes with one pop leaves a pointing hand
+            // over the whole app.
+            guard inside != hovering else { return }
+            hovering = inside
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
     }
+
+    /// `border-radius:9px`, shared by the hover fill, the focus ring and the hit
+    /// region so the three can never disagree about the row's shape.
+    private static let corner = RoundedRectangle(cornerRadius: 9)
+    /// `.row:hover{background:rgba(255,255,255,.05)}`.
+    private static let hoverInk: Double = 0.05
+
+    private var isHovered: Bool { hovering || highlight.contains(.hovered) }
+    private var isFocused: Bool { keyboardFocus || highlight.contains(.focused) }
 
     private var headline: some View {
         HStack(spacing: 10) {
