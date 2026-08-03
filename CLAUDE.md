@@ -111,6 +111,39 @@ These are load-bearing. Breaking one is a product failure, not a bug.
 - **No event ever comes from a GUI app (§13).** Events arrive by hook; a GUI is
   only ever a jump target.
 
+## Dispatching visual work — the rule that failed once, written where it binds
+
+**If you delegate work on a visual surface, the prototype path goes in the dispatch
+prompt, not just in this file.**
+
+This section exists because the rule *was already here*, phrased as "open the
+prototypes before changing anything visual" — and Plan 5 still shipped eight tasks
+without a single implementer or reviewer opening `island-motion.html`. Every dispatch
+pointed at §11's ASCII diagram in the spec instead. The mockup contains a fully
+worked session list (real records, a `card` options object, the row rendering), and at
+least six divergences went unnoticed because nobody was given the reference.
+
+**Why it failed is the useful part: a guardrail written in a document nobody re-reads
+at the moment of action does not bind.** The dispatch templates say "read your brief";
+the brief is extracted from the plan; and nothing in either carried this repo's own
+rule. So:
+
+- **A dispatch touching a visual surface must contain the prototype path and the
+  element name** — `island-motion.html`'s `renderRows()`, `.rtop`, `tasksHTML`,
+  whatever it is. Not "consult the prototype": the actual path, in the prompt.
+- **A brief that cites only the spec's prose or ASCII art, for something the prototype
+  implements, is incomplete.** The spec's diagrams are lossy renderings of the
+  mockup — §11's `✳` reads as a state marker and is in fact a per-CLI mark. Treat the
+  spec as the authority on *rules* and the prototype as the authority on *appearance*.
+- **Ask the reviewer to confirm the diff happened**, and to name what it compared. A
+  review that never opened the prototype cannot report fidelity, only self-consistency.
+- **Plan Global Constraints must name the prototype** for any plan with a visual
+  surface, because that block is what every extracted brief carries.
+
+`.claude/agents/prototype-fidelity.md` exists for exactly this and is the right thing
+to dispatch. Note it cannot be used in the session that creates it — the agent registry
+is read at session start.
+
 ## UI and UX standards
 
 The two prototypes named in the spec header are the design's own reference, and

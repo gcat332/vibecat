@@ -323,6 +323,55 @@ list, not because the list needs them.
 
 ## Plan 5's carried findings — what its final review deliberately did not close
 
+- **NOBODY ON PLAN 5 OPENED THE MOCKUP, AND THE MOCKUP HAS THE SESSION LIST.** Added
+  2026-08-03 after the owner asked. This is Plan 4.5's own failure — "nobody diffed the
+  implementation against the prototype" — repeating one level down, and it is the most
+  embarrassing finding on this list because a subagent was written at the start of the
+  same session *specifically to prevent it* (`.claude/agents/prototype-fidelity.md`) and
+  never used. Every Plan 5 dispatch pointed implementers at **§11's ASCII diagram** in
+  the spec instead of at `island-motion.html`, which contains a fully worked session
+  list: real session records (line 788+), a `card` options object (line 813), and the
+  row rendering (line 846+).
+
+  Concrete divergences, read off `renderRows()` (line 839+), `metaLine()` (816) and the
+  `card` object (813). None of the eight task reviews could have caught any of these,
+  because none was given the reference:
+
+  | # | the mockup | ours |
+  |---|---|---|
+  | 1 | `markSVG(s.mark)` leads the row — a **per-CLI** mark | a state-coloured `Circle()`. §11's `✳` was read as a state marker |
+  | 2 | state text carries a **`pip`**, class `live` while running | no pip; the dot moved to the front instead |
+  | 3 | `${card.project ? s.proj : s.term}` — the project switch **substitutes the terminal name**, it does not blank the field | no project switch at all; line 1 declared non-switchable |
+  | 4 | `${s.act} <em>${s.code}</em>` — sentence and command are **separate fields, the command emphasised** | one `session.activity` string, `"title body"` joined by `Session.activity(from:)`; the command no longer stands out |
+  | 5 | `metaLine` = `term · model · effort`, model and effort **individually switchable** | the same three joined, none switchable |
+  | 6 | running shows `state:'2m 14s'` — **elapsed time as the state** | `IslandState.label`, the word "Running" |
+  | 7 | 8 switches: `project` `worktree` `model` `effort` `said` `tasks` `agents` `activity` | 5: `activity` `lastMessage` `tasks` `agents` `subagents` |
+
+  **#1 is the one that matters beyond appearance.** §4.3 says which agent is speaking is
+  carried by icon *shape*, never by hue — the mockup honours that by leading with the
+  CLI's mark and putting state in a pip. Ours spends the row's leading position on a
+  state-coloured dot and then repeats state in the label beside it, so a row cannot say
+  *which* CLI it belongs to at all. That is a design-rule divergence, not a styling one.
+
+  **#4 is a legibility regression** and the repo already knows why: the drawer's own
+  command body gets `.truncationMode(.middle)` because the end of a command is its
+  target. A row that merges the sentence into the command loses the emphasis the mockup
+  gives it, in a list whose whole job is triage at a glance.
+
+  §11 says "every line is individually switchable" and the mockup shows what that
+  means. `SessionRow.Options` implements a different, smaller set, and the
+  "line 1 is deliberately not switchable" ruling in the plan was a decision made
+  without looking at the reference that contradicts it.
+
+  **This is not closed and should not be treated as cosmetic.** The three §11-diagram
+  divergences the final review found were caught only by the visual fixture, at the very
+  end; the four above are against a *richer* reference nobody consulted at all, so the
+  honest expectation is that there are more. The work is a Plan 4.5-style systematic
+  diff of `SessionRow`/`SessionBlocks`/`SessionListFace` against `island-motion.html`,
+  with every deliberate divergence written down — and the `prototype-fidelity` agent now
+  exists to do it, in a session where it resolves.
+
+
 The equivalent of Plan 4's follow-ups, recorded here because `.superpowers/` is
 gitignored scratch and this file is the permanent register. Everything Plan 5's
 final whole-branch review ruled *must fix* is fixed (`6607728`, `b907682`,

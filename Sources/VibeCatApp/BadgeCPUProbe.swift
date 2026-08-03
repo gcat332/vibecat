@@ -181,22 +181,65 @@ import VibeCatUI
         controller.model.sessionCount = 2
         await row("+ running (12fps timeline instead of no timeline)")
 
-        // 5. Plan 5's own owed measurement. The badge spike accepted ~12% on
-        //    single-sprite numbers and named several sprites as a condition
-        //    that would reopen it. Twelve sessions, all four states, drawer
-        //    open — not just a second animation (measured separately, and
-        //    already known to be cheap), but the session list's own rows,
-        //    each with a state dot of its own.
-        controller.model.sessions = (0..<12).map { i in
-            Session(event: VibeEvent(id: "e\(i)", cli: "claude-code",
-                                     kind: [.permission, .failed, .running, .idle][i % 4],
-                                     session: "s\(i)", cwd: "/tmp/p\(i)"),
-                    now: Date(timeIntervalSince1970: 1_000_000))
+        // 5. Plan 5's own owed measurement, as a **sweep** rather than one point.
+        //
+        //    The badge spike accepted ~12% on single-sprite numbers and named
+        //    several sprites as a condition that would reopen it. The first
+        //    answer was a single row at twelve sessions: +11.04pp over `running`
+        //    on mains. That established the list is not free and could not say
+        //    *why*, because one point cannot tell three very different shapes
+        //    apart — and the right response differs sharply between them:
+        //
+        //      fixed          every count costs the same ⇒ it is the face being
+        //                     on screen, not the rows; a typical 3-session list
+        //                     costs as much as a 12-session one.
+        //      linear         cost ∝ rows ⇒ ~0.9pp each, so a realistic list is
+        //                     ~+2.8pp and this is close to a non-issue.
+        //      fixed + slope  an intercept plus a per-row cost ⇒ both matter, and
+        //                     the intercept is the part worth attacking.
+        //
+        //    Four counts, so a straight line through the origin can be told from
+        //    a line with an intercept. Same state, same four-state cycle, same
+        //    drawer — only the row count varies, and `sessionCount` is kept in
+        //    step so the collapsed bar is not measuring a different digit width
+        //    at each step.
+        for count in [1, 3, 6, 12] {
+            controller.model.sessions = (0..<count).map { i in
+                Session(event: VibeEvent(id: "e\(i)", cli: "claude-code",
+                                         kind: [.permission, .failed, .running, .idle][i % 4],
+                                         session: "s\(i)", cwd: "/tmp/p\(i)"),
+                        now: Date(timeIntervalSince1970: 1_000_000))
+            }
+            controller.model.state = .running
+            controller.model.sessionCount = count
+            controller.model.drawerOpen = true
+            await row("+ session list open, \(count) session\(count == 1 ? "" : "s")")
         }
-        controller.model.state = .running
-        controller.model.sessionCount = 12
+
+        // 5b. The control the sweep above demands. If the sweep shows the cost is
+        //     **fixed** rather than per-row, then it is not about rows at all, and
+        //     the obvious suspect is the panel's own area: opening the list grows
+        //     it from the notch's 32pt to 32 + 420 + 24 = 476pt.
+        //
+        //     If that is the mechanism, a **question** face must cost less in
+        //     proportion, because §6.3 gives it 288pt rather than 420 — and that
+        //     matters far beyond Plan 5, because a question drawer is the path
+        //     *every* user hits on *every* permission prompt, and it has been
+        //     there since Plan 4 without anyone measuring it. So this row decides
+        //     whether the figure above is a session-list cost or a
+        //     drawer-is-open cost that predates the list entirely.
+        controller.model.sessions = []
+        controller.model.sessionCount = 1
+        controller.model.state = .waiting
+        controller.model.question = QuestionModel(event: VibeEvent(
+            id: "q", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
+            title: "Bash command", body: "pnpm install",
+            choices: [Choice(id: "allow", label: "Allow once"),
+                      Choice(id: "deny", label: "Deny")],
+            wantsReply: true))
         controller.model.drawerOpen = true
-        await row("+ session list open, 12 sessions across all four states")
+        await row("+ question drawer open instead (288pt face, no list)")
+        controller.model.question = nil
 
         // 6. Back to dormant, with motion turned all the way off and the system
         //    asking for reduced motion as well — the strongest suppression §9.3

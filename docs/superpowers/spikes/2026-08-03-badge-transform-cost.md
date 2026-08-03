@@ -307,12 +307,45 @@ the battery run's 29.29–33.29. Prefer mains for anything where the spread matt
 showed: the list's cost is not extra badge redraws. The mechanism remains the
 recorded hypothesis, still unconfirmed by any compositor-level instrument.
 
-**What is still owed, narrowed.** One question this run raises and cannot answer:
-**is the list's cost per-row or fixed?** Twelve sessions cost +11.04pp. If that were
-linear it would be ~0.9pp per visible session, which would make a typical three-session
-list ~+2.8pp and a non-issue — but a single data point cannot establish linearity, and
-the decision about what to do differs sharply between the two. One more probe row at a
-smaller session count would settle it.
+### The sweep and the control — what they settled, and what they did not
+
+Two further mains runs, probe extended to sweep the session count (1, 3, 6, 12) and to
+add a **question** drawer as a control. All AC power, Low Power Mode off.
+
+| | run A | run B |
+|---|---|---|
+| dormant island | 12.19 (11.87–12.69) | 9.63 (9.30–9.99) |
+| running, 12 fps | 15.86 (14.40–16.96) | 14.13 (13.14–14.96) |
+| list, **1** session | 24.74 (24.10–25.81) | 21.40 (21.29–21.57) |
+| list, **3** sessions | 24.11 (23.97–24.25) | 18.68 (17.60–20.33) |
+| list, **6** sessions | 26.34 (25.56–27.14) | 20.08 (16.88–23.86) |
+| list, **12** sessions | 26.32 (25.73–26.96) | 28.32 (26.74–30.02) |
+| **question drawer (288pt), no list** | — | **14.42 (12.64–16.09)** |
+
+**SETTLED — a question drawer costs nothing measurable.** 14.42% against `running`'s
+14.13%, a +0.29pp delta with heavily overlapping spreads. So the cost is **not** "a
+drawer is open", and it is **not** the panel's area either: the question face is 288pt
+against the list's 420pt, so an area-driven cost would have shown roughly two-thirds of
+the list's delta and instead showed none. **The panel-area hypothesis is refuted.** The
+cost belongs to the session-list face's own content.
+
+That also answers the question that mattered most for ownership: **this is a Plan 5
+cost, not a pre-existing drawer cost from Plan 4.** Every user hitting a permission
+prompt was never paying it.
+
+One reading to head off: the question row's `draws/s` is 12.0 against ~48 elsewhere.
+That is not a rendering difference — `.waiting`'s badge is `bang`, one animated part, so
+1 × 12 fps = 12, where `.running`'s `squares` has four, giving 48. The badge changed with
+the state; the draw *rate per part* did not.
+
+**NOT SETTLED — per-row versus fixed.** Run A reads as fixed (1 session already costs
++8.9pp and 1 → 12 adds only ~1.6pp). Run B disagrees (+7.3pp at one session, +14.2pp at
+twelve) and is much noisier, with the 6-session row spreading 16.88–23.86. **The two runs
+support different shapes, so neither reading is established.** Nothing here justifies
+"a realistic three-session list is nearly free", and nothing justifies "row count is
+irrelevant" either. Settling it needs more samples per count on a quiet machine, not
+another single pass — and the answer changes what to do, so it should be settled before
+anything is optimised.
 - **Thermals under load.** A dev machine running several agents is not idle. This
   probe measured an otherwise quiet system.
 
