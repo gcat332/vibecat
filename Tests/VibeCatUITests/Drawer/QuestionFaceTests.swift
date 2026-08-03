@@ -206,7 +206,7 @@ private func threeChoices(multi: Bool, destructive: Bool = false) -> VibeEvent {
 /// later tuning pass. `duration` in particular is read twice — once by the
 /// transition and once by the `.animation` driving it — and a mismatch between
 /// those two would be silent in every render.
-@Test func theFaceCrossfadeCarriesTheDesignsOwnNumbers() {
+@MainActor @Test func theFaceCrossfadeCarriesTheDesignsOwnNumbers() {
     #expect(FaceCrossfade.duration == 0.190, "§9.1 and --t-face both say 190ms")
     #expect(FaceCrossfade.rise == 5, "§9.1 says fade up 5pt")
     #expect(FaceCrossfade.blurRadius == 3, "§9.1 says with a 3pt blur")
