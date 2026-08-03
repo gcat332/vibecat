@@ -87,8 +87,23 @@ value — it is an architectural mismatch:**
   on purpose), not a constant to nudge. `trot`'s missing pixel is a one-line fix
   and should not wait for that decision.
 
-- **All five badges animate in the prototype. Three of ours are still — and the
-  reason may be a false economy.** Confirmed against the prototype's own CSS:
+> **The badge half of this is DONE** (`5b7c6f9`, `398082a`, `1cc5f40`). All five
+> badges now animate as transforms on the mockup's own timings, `zzz`'s two z's
+> and `squares`' four blocks stagger the way the mockup does, `squares`' blocks
+> stopped resizing, and the three verdict badges share one pulse. **No badge
+> needs a `TimelineView` any more** — `needsTimeline` depends only on the cat.
+>
+> **The one thing that must happen next:** measure it with `getrusage`. The claim
+> that a repeating `.scaleEffect` does not re-invoke the `Canvas` renderer is now
+> load-bearing in shipped code and is still only reasoned, not measured. If it is
+> wrong, five animating badges cost five timelines and the idle island's 0.35%
+> is gone. The source says so in `Badge.pulse`.
+>
+> The **cat** half is untouched and is the same question one layer down — see
+> below.
+
+- **All five badges animated in the prototype and three of ours were still —
+  and the reason was a false economy.** Confirmed against the prototype's own CSS:
 
   | badge | prototype | ours |
   |---|---|---|

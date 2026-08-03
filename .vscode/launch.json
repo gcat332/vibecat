@@ -1,0 +1,44 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vibeCat}",
+            "name": "Debug vibecat-hook",
+            "target": "vibecat-hook",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug vibecat-hook"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vibeCat}",
+            "name": "Release vibecat-hook",
+            "target": "vibecat-hook",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release vibecat-hook"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vibeCat}",
+            "name": "Debug vibecat",
+            "target": "vibecat",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug vibecat"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vibeCat}",
+            "name": "Release vibecat",
+            "target": "vibecat",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release vibecat"
+        }
+    ]
+}

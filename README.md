@@ -23,6 +23,7 @@ the session list and settings are still to come.
 
 | | |
 |---|---|
+| [Handoff](docs/superpowers/HANDOFF.md) | Where the project is, what to do next, and what a newcomer would otherwise rediscover |
 | [Design doc](docs/superpowers/specs/2026-07-31-vibecat-design.md) | Architecture, geometry, sprite spec, settings schema — with the reasoning behind each decision |
 | [Island prototype](docs/superpowers/prototypes/island-motion.html) | Every state, mood, coat and Display option, live. Open in a browser |
 | [Settings prototype](docs/superpowers/prototypes/settings.html) | All four settings sections, every control interactive |
