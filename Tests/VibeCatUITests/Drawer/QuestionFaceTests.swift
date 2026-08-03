@@ -168,7 +168,10 @@ private func threeChoices(multi: Bool, destructive: Bool = false) -> VibeEvent {
 /// directly against the pure function rather than by rendering: a rendered
 /// pixel comparison could show the banner's *position* changing without ever
 /// confirming which words it actually says.
-@Test func theConfirmationBannerNamesTheControlThatActuallyConfirms() {
+/// `@MainActor` like every other test in this file: `QuestionFace` conforms to
+/// `View`, so even a pure static helper on it is main-actor isolated, and
+/// calling it from a nonisolated test was this branch's one compiler warning.
+@MainActor @Test func theConfirmationBannerNamesTheControlThatActuallyConfirms() {
     let single = QuestionFace.confirmationBannerText(isMulti: false)
     let multi = QuestionFace.confirmationBannerText(isMulti: true)
 
