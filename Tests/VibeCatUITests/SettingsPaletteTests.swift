@@ -28,6 +28,20 @@ import SwiftUI
     #expect(SettingsPalette.bone       == RGBA(hex: "#F2F2F5")!)
     #expect(SettingsPalette.haze       == RGBA(hex: "#9A9AA2")!)
     #expect(SettingsPalette.switchOff  == RGBA(hex: "#48484E")!)
+    // `settings.html:14` — `--line:rgba(255,255,255,.08)`, split across two
+    // properties because `RGBA` carries no alpha channel. **The opacity half was
+    // asserted by nothing at all**, and it is the half with a plausible wrong
+    // value: 0.30 for 0.08 passed all 20 tests in this file, because
+    // `theSidebarsRightBorderIsTheHairlineAndNotOpaqueWhite` derived its expected
+    // pixel from `hairlineOpacity` itself and so could only ever prove that the
+    // caller applied *the* constant, never that the constant is 8%.
+    #expect(SettingsPalette.hairline == RGBA(r: 1, g: 1, b: 1))
+    #expect(SettingsPalette.hairlineOpacity == 0.08)
+    // The other prototype's `--hairline` is `.09` and `PanelBar` draws with that
+    // one. Asserting the disagreement is what keeps a future "let us unify these"
+    // from silently moving one of the two surfaces.
+    #expect(SettingsPalette.hairlineOpacity != hairlineOpacity,
+            "settings.html's --line (.08) and island-motion.html's --hairline (.09) are different numbers")
 }
 
 @Test func theStateHuesInSettingsAreTheIslandsExactlyBecauseTheyPreviewIt() {

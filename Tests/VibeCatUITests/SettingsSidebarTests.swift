@@ -89,15 +89,57 @@ struct SettingsSidebarTests {
     // MARK: - what is actually drawn
 
     @Test @MainActor func theSelectedPageIsTheOnlyOneMarkedCurrent() throws {
-        // Two renders differing in exactly one input. A sidebar that highlights
-        // everything, or nothing, is the likeliest defect and a property read would
-        // not see it — both of those make these two renders identical.
-        let general = try rasterise(SettingsSidebar(selection: .constant("general"))
-            .frame(height: 200))
-        let display = try rasterise(SettingsSidebar(selection: .constant("display"))
-            .frame(height: 200))
-        #expect(general.differingPixelCount(from: display) > 0,
-                "the selection changes nothing that is drawn")
+        // **This test's first version could not fail in the direction that
+        // matters, and this is the seventh such test in this plan.** It rendered
+        // two selections and asserted only `differingPixelCount > 0`. Measured:
+        // inverting `SettingsSidebar.swift:30` from `page.key == selection` to
+        // `!=` left all 29 tests in this file green — three rows highlighted at
+        // 11% white, the current row plain, and `.isSelected` on exactly the
+        // wrong three rows. "Differs" is not "differs in the right direction".
+        //
+        // So the highlight is counted, per row, inside a window where only the
+        // highlight can be:
+        //
+        //   * Rows are `36pt` apart from `y = 10` — `.padding(.vertical, 10)` on
+        //     the stack, then `24pt` chip + `6pt` above and below inside each
+        //     `.nav`. The same three numbers `theSidebarsRowsSitWhereThePrototype
+        //     Measures` pins.
+        //   * `x 140..<185` because that is past the longest label. Measured, not
+        //     guessed: the four rows' ink stops at x 95, 121, 125 and 93, so
+        //     "Notifications" leaves a 15pt margin. **The whole row box does not
+        //     work** — 6 to 12 pixels of label antialiasing over `--pane` pass
+        //     through the highlight's own value on their way from `--bone`, so an
+        //     unselected row reads 6–12 rather than 0 there. A window with no
+        //     text in it reads exactly 0.
+        //   * The expected colour is `rgba(255,255,255,.11)` over `--pane`
+        //     (`settings.html:57`), composited by hand, not transcribed from a
+        //     render.
+        //   * The expected *count* is the window's own area: 45 columns × 32 rows
+        //     = 1440. Measured 1440.
+        let o = 0.11
+        let pane = SettingsPalette.pane
+        let highlight = RGBA(r: pane.r * (1 - o) + o, g: pane.g * (1 - o) + o, b: pane.b * (1 - o) + o)
+        let window = 140..<185
+        let rowHeight = 36, firstRowTop = 10, inset = 2
+
+        for selected in SettingsPage.all {
+            let sidebar = try rasterise(SettingsSidebar(selection: .constant(selected.key))
+                .frame(height: 200))
+            for (i, page) in SettingsPage.all.enumerated() {
+                let top = firstRowTop + rowHeight * i
+                var n = 0
+                for y in (top + inset)..<(top + rowHeight - inset) {
+                    for x in window where near(sidebar[x, y], highlight, tolerance: 3) { n += 1 }
+                }
+                if page.key == selected.key {
+                    #expect(n == window.count * (rowHeight - 2 * inset),
+                            "selecting \(selected.key) did not highlight its own row (\(n) of 1440 pixels)")
+                } else {
+                    #expect(n == 0,
+                            "selecting \(selected.key) also highlighted \(page.key) (\(n) pixels)")
+                }
+            }
+        }
     }
 
     @Test @MainActor func theSidebarIsTheWidthTheProtoypeGivesIt() throws {
@@ -181,10 +223,20 @@ struct SettingsSidebarTests {
         //
         // So the expected value is derived from the rule — 8% white composited
         // over `--pane` — rather than transcribed from a measurement.
+        //
+        // **And the rule's two numbers are the prototype's own literals, not
+        // `SettingsPalette`'s constants, which is a deliberate change.** Deriving
+        // `o` from `SettingsPalette.hairlineOpacity` pins "the caller applied *the*
+        // constant" and nothing more: measured, `0.08` → `0.30` in
+        // `SettingsPalette.swift` left this test and all 20 in
+        // `SettingsPaletteTests` green, because both sides of the comparison moved
+        // together. Transcribing `settings.html:14`'s `.08` and `:12`'s `#161618`
+        // here means this render is pinned to the prototype end to end, and the
+        // palette's own test pins the constants separately.
         let sidebar = try rasterise(SettingsSidebar(selection: .constant("general"))
             .frame(height: 200))
-        let o = SettingsPalette.hairlineOpacity
-        let pane = SettingsPalette.pane
+        let o = 0.08
+        let pane = RGBA(hex: "#161618")!
         let expected = Raster.Pixel(RGBA(r: pane.r * (1 - o) + o,
                                          g: pane.g * (1 - o) + o,
                                          b: pane.b * (1 - o) + o))
