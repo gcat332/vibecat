@@ -58,6 +58,12 @@ let controller = NotchController(model: model)
 let quietHours = FocusStatusQuietHours()
 quietHours.requestAuthorizationIfNeeded()
 let soundPlayer = SoundPlayer(quietHours: quietHours)
+// Renders all five cues on `SoundPlayer`'s own serial queue, before any event
+// arrives. Measured at 858ms for `error` alone in a debug build — which is what
+// `Scripts/build-app.sh` produces — so paying it here, off the main actor and once,
+// is the difference between a cue that is late and an island that is frozen. See
+// SoundPlayer's doc comment for the getrusage table.
+soundPlayer.prewarm()
 model.onCue = { [weak soundPlayer] in soundPlayer?.play($0) }
 
 do {

@@ -102,3 +102,139 @@ private func modelWithRecorder() -> (AppModel, @MainActor () -> [Cue]) {
     let player = SoundPlayer(settings: SoundSettings(), quietHours: NeverQuiet())
     #expect(!(player.buffer(for: .ask)?.isEmpty ?? true))
 }
+
+// MARK: - The player's own machinery
+//
+// Everything below exists because of the whole-branch review's Important 2, 3 and
+// 4. None of it can be observed through sound on this machine, so each test names
+// the state it looks at and why that state is the consequence being pinned.
+
+@Test @MainActor func aCueIsRenderedOnceAndThenReadFromTheCache() {
+    // The cache is the fix for a measured 858ms of main-actor time per `error`
+    // render. What has to be true for it to be a fix rather than a bug is that the
+    // second read is the *same* samples and the cache is actually populated — a
+    // `buffer(for:)` that rendered afresh every time would pass any assertion about
+    // the samples alone, because rendering is deterministic.
+    let player = SoundPlayer(settings: SoundSettings(), quietHours: NeverQuiet())
+    #expect(player.rendered.isEmpty, "nothing should be rendered before it is asked for")
+    let first = player.buffer(for: .ask)
+    #expect(player.rendered[.ask] != nil, "the render was not kept")
+    #expect(player.rendered.count == 1, "only the cue that was asked for should be rendered")
+    #expect(player.buffer(for: .ask) == first)
+}
+
+@Test @MainActor func changingASettingThrowsTheRenderedCuesAway() {
+    // Two renders differing in exactly one input, at the cache's boundary. Without
+    // the key comparison a volume change would keep playing the old level for the
+    // rest of the session, which is worse than the cost the cache was added to
+    // avoid — it is the wrong sound, silently.
+    let player = SoundPlayer(settings: SoundSettings(volume: 0.6), quietHours: NeverQuiet())
+    let atSixty = player.buffer(for: .ask)!
+    player.settings.volume = 0.3
+    // The invalidation is lazy on purpose — it happens on the next use, where the
+    // sample rate is read too, so there is one place that decides whether the cache
+    // is still valid rather than a `didSet` on every input.
+    let atThirty = player.buffer(for: .ask)!
+    // Derived rather than asserted as "different": half the volume is half of every
+    // sample, so the loudest sample must have halved.
+    let i = atSixty.indices.max(by: { abs(atSixty[$0]) < abs(atSixty[$1]) })!
+    #expect(abs(Double(atSixty[i]) / 2 - Double(atThirty[i])) < 1e-6,
+            "at the loudest sample: \(atSixty[i]) then \(atThirty[i])")
+}
+
+@Test @MainActor func prewarmRendersEveryCueWithoutBlockingTheCaller() async throws {
+    // `prewarm()` is what keeps the first `failed` event of a session from being the
+    // one that waits 858ms. It must return before the work is done — that is the
+    // whole point — so the assertion is that the cache fills *afterwards*, on the
+    // render queue, and that the hop back to the main actor lands.
+    let player = SoundPlayer(settings: SoundSettings(), quietHours: NeverQuiet())
+    player.prewarm()
+    #expect(player.rendered.count < Cue.allCases.count,
+            "prewarm rendered synchronously; the main actor paid for all five")
+    // Bounded, and generous: five debug renders total about a second of CPU on the
+    // machine this was written on, and the suite runs in parallel. A fixed sleep
+    // would be a flake under load.
+    for _ in 0..<300 where player.rendered.count < Cue.allCases.count {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(player.rendered.count == Cue.allCases.count,
+            "only \(player.rendered.count) of \(Cue.allCases.count) cues reached the cache")
+}
+
+@Test @MainActor func aConfigurationChangeDropsTheGraphAndEveryRenderedCue() async throws {
+    // The review's Important 4, which it could not reproduce and neither could this:
+    // a device being *replaced* mid-session. `AVAudioEngine` documents that a
+    // configuration change stops the engine and invalidates the graph's connections,
+    // and the old code never observed the notification at all — so `wired` stayed
+    // true, the node was never re-connected, and every later cue was either silently
+    // dropped or handed to a mismatched format.
+    //
+    // Posting the real notification for this engine is deliberate: a test that called
+    // the handler directly would still pass with the observer deleted, which is
+    // exactly the defect.
+    let player = SoundPlayer(settings: SoundSettings(), quietHours: NeverQuiet())
+    _ = player.buffer(for: .ask)
+    player.connected = true
+    #expect(player.rendered.count == 1)
+
+    NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange,
+                                    object: player.engine)
+    // The observer is registered on `OperationQueue.main`, so it runs when the main
+    // actor next yields rather than inside `post`. Bounded poll, not a fixed sleep.
+    for _ in 0..<100 where player.connected {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(player.connected == false,
+            "nothing observed AVAudioEngineConfigurationChange, so the graph was never re-made")
+    // `count == 0` rather than `isEmpty`: a failing `#expect` prints the value, and
+    // the value here is 29,000 floats.
+    #expect(player.rendered.count == 0,
+            "a replacement device may run at another rate; the old buffers are wrong, not stale")
+}
+
+// MARK: - The backlog bound
+
+@Test func anEmptyQueueAdmitsACueImmediately() {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let window = SoundPlayer.admission(now: now, queueEndsAt: .distantPast, duration: 0.93)
+    #expect(window?.startsAt == now, "a cue with nothing ahead of it must start now")
+    #expect(window?.endsAt == now.addingTimeInterval(0.93))
+}
+
+@Test func oneCueAlreadyPlayingStillAdmitsTheNext() {
+    // At most one may wait. `error` is the longest cue at 0.93s, and the bound is
+    // 1.0s, so a second `error` arriving the instant the first started is admitted —
+    // it begins 0.93s late, which is the cost of serial playback and is accepted.
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let window = SoundPlayer.admission(now: now, queueEndsAt: now.addingTimeInterval(0.93),
+                                       duration: 0.93)
+    #expect(window?.startsAt == now.addingTimeInterval(0.93))
+    // Compared as an interval, not an instant, and with a slop derived rather than
+    // widened until it passed: a `Date` is a `Double` of seconds since 2001, so at
+    // 2027 the representable resolution is about 2e-7 seconds. Two additions of 0.93
+    // cannot land closer than that.
+    #expect(abs(window!.endsAt.timeIntervalSince(now) - 1.86) < 1e-6,
+            "got \(window!.endsAt.timeIntervalSince(now))")
+}
+
+@Test func aThirdCueInABurstIsDroppedRatherThanQueued() {
+    // The defect this bounds: N events put the Nth alert 0.6…0.9s × (N−1) after the
+    // thing it announces, with nothing capping N. An alert two seconds late is not
+    // information, and the state it would have announced is on the island already.
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let queued = now.addingTimeInterval(SoundPlayer.maximumBacklog)
+    #expect(SoundPlayer.admission(now: now, queueEndsAt: queued, duration: 0.93) == nil,
+            "a cue a full backlog behind must be dropped")
+}
+
+@Test func theBoundHealsItselfAsTimePasses() {
+    // Why the bound is wall-clock and not a count of outstanding buffers: a counter
+    // decremented by a completion handler that never fires would silence the app for
+    // the rest of the session. Time needs nobody to reset it.
+    let start = Date(timeIntervalSince1970: 1_800_000_000)
+    let queued = start.addingTimeInterval(2)
+    #expect(SoundPlayer.admission(now: start, queueEndsAt: queued, duration: 0.93) == nil)
+    let later = start.addingTimeInterval(1.5)
+    #expect(SoundPlayer.admission(now: later, queueEndsAt: queued, duration: 0.93) != nil,
+            "once the queue is within the bound again, cues must resume")
+}
