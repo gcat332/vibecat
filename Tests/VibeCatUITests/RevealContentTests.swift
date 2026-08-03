@@ -17,6 +17,30 @@ import VibeCatCore
     #expect(RevealContent.elapsed(86_400) == "1d")
 }
 
+/// §11's row wants two units where the reveal wants one — `state:'2m 14s'` and
+/// `state:'0m 38s'` in the mockup's own `SESSIONS` — and it asks for them as a
+/// **granularity on this formatter** rather than by growing a second one, so the
+/// collapsed bar and the list can never come to disagree about what two minutes
+/// looks like.
+///
+/// The last three expectations are the ones with teeth: they pin that asking for
+/// the finer form does not change the coarse one, which is what "do not widen the
+/// reveal to fix the row" means in practice. Mutation-verified: making `.fine` the
+/// default parameter fails all three; dropping the `s < 3600` branch's `% 60` term
+/// makes `0m 38s` read `0m 38s`… at 98 seconds too, and fails the second.
+@Test func theFinerElapsedFormatIsTheRowsAndLeavesTheRevealsAlone() {
+    #expect(RevealContent.elapsed(134, precision: .fine) == "2m 14s")
+    #expect(RevealContent.elapsed(38, precision: .fine) == "0m 38s")
+    #expect(RevealContent.elapsed(3599, precision: .fine) == "59m 59s")
+    #expect(RevealContent.elapsed(3600, precision: .fine) == "1h 0m")
+    #expect(RevealContent.elapsed(86_400, precision: .fine) == "1d 0h")
+    #expect(RevealContent.elapsed(-5, precision: .fine) == "0m 0s")
+
+    #expect(RevealContent.elapsed(134) == "2m", "the reveal's own format widened")
+    #expect(RevealContent.elapsed(38) == "38s", "the reveal's own format widened")
+    #expect(RevealContent.elapsed(3600) == "1h", "the reveal's own format widened")
+}
+
 /// Never a negative or an absurd string from a clock that went backwards — the
 /// hook's `now` and the app's are two different clocks, and a session whose
 /// `updatedAt` is a moment in this render's future is not a bug worth showing
