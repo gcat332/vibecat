@@ -13,6 +13,18 @@ import SwiftUI
 /// different palette for a different window — see the plan's own "palette
 /// collision" section, which exists precisely so this file does not repeat it
 /// one document over.
+///
+/// **One recorded divergence, in how the band is filled rather than in what is
+/// drawn.** The prototype's `.panelbar` is `height:28px` at `bottom:9px` with
+/// `padding-top:7px` above the buttons, inside a `.face[data-side="d"]` whose own
+/// `padding-bottom` is `42px`; this fills the whole `DrawerView.footerHeight`
+/// reservation with `.frame(maxHeight: .infinity)`, so the rule sits at the top of
+/// a 44pt band and the buttons are centred in what is left. Left as it is
+/// deliberately: the band's height is Plan 4's (the prototype's footer measures
+/// 37pt against our fixed 44pt, a carried item that predates this file), and
+/// redistributing inside a band whose height is already known to be wrong would be
+/// guessing at two numbers instead of one. Recorded here so it is a decision
+/// rather than an omission — CLAUDE.md's rule for exactly this.
 public struct PanelBar: View {
     let muted: Bool
     let onToggleMute: () -> Void
@@ -32,6 +44,16 @@ public struct PanelBar: View {
             // (0.08) — the two prototypes disagree on this exact value, which
             // is the "carried foot-gun" this file has to get right rather
             // than reach for whichever hairline constant is closest to hand.
+            //
+            // **Inset by the same 18pt as the buttons, because the border is on
+            // an element that is itself inset.** `island-motion.html:181` is
+            // `.panelbar{position:absolute;left:18px;right:18px;…;border-top:1px
+            // solid var(--hairline)}`, so the rule spans `width − 36`, not the
+            // full drawer width. This file drew it full-width for three plans,
+            // and `PanelBarTests` recorded the divergence as a *measured fact
+            // about the prototype* — "that hairline alone paints every column at
+            // `y == 0`" was true of our render and false of the CSS. Checked in
+            // the prototype's own source before this was changed.
             Rectangle()
                 .fill(Color.white.opacity(hairlineOpacity))
                 .frame(height: 1)
@@ -44,9 +66,11 @@ public struct PanelBar: View {
                 muteButton
                 gearButton
             }
-            .padding(.horizontal, 18)
             .frame(maxHeight: .infinity)
         }
+        // One inset for the whole `.panelbar` box, rather than one on the
+        // buttons and none on the rule — which is what let the two drift apart.
+        .padding(.horizontal, 18)
     }
 
     private var muteButton: some View {

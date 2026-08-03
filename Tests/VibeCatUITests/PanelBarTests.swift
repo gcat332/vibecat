@@ -25,20 +25,27 @@ struct PanelBarTests {
     /// (`subscript(x:y:)`, `Pixel.isTransparent`) rather than a member that
     /// doesn't exist on it.
     ///
-    /// Row 0 is excluded on purpose, and this is a disagreement with the
-    /// plan's draft worth reporting rather than silently absorbing:
-    /// `island-motion.html:182`'s `.panelbar{border-top:1px solid
-    /// var(--hairline)}` is a *full-width* divider. Measured during
-    /// development: that hairline alone paints every column at `y == 0`
-    /// (`#171717@23`, i.e. `Color.white.opacity(0.09)` premultiplied), so a
-    /// blankness check that included it would fail
-    /// `bothButtonsSitAgainstTheTrailingEdge` even with the buttons
-    /// correctly pinned to the trailing edge, for a reason that has nothing
-    /// to do with what that test names itself for. The plan's own draft
-    /// check (`isBlank(inColumns: 0..<100)` over every row) could never have
-    /// passed against a prototype-faithful hairline — exactly the kind of
-    /// premise this project's standards ask to be reported rather than
-    /// quietly patched around by deleting the hairline instead.
+    /// Row 0 is excluded on purpose, because it is `.panelbar`'s `border-top`
+    /// and not the buttons this helper's callers are looking for.
+    ///
+    /// **The reason recorded here for three plans was wrong, and the
+    /// correction is worth keeping.** It said `island-motion.html:182`'s
+    /// `.panelbar{border-top:1px solid var(--hairline)}` was a *full-width*
+    /// divider, "measured during development: that hairline alone paints
+    /// every column at `y == 0`". The measurement was of *our* render, which
+    /// did draw it full-width; the prototype does not. `island-motion.html:181`
+    /// is `.panelbar{position:absolute;left:18px;right:18px;…}`, so the border
+    /// spans `width − 36`. `PanelBar` now insets it to match
+    /// (`theHairlineIsInsetTheWayThePrototypesPanelbarIs` pins that), and this
+    /// comment says what the CSS says rather than what our own bug said.
+    ///
+    /// The exclusion itself survives the correction, which is the part the
+    /// final review predicted the other way: an 18pt-inset rule still paints
+    /// columns 18 through `width − 18` at `y == 0`, so the plan's draft check
+    /// (`isBlank(inColumns: 0..<100)` over every row) could not have passed
+    /// against a prototype-faithful hairline either. Only the first 18 columns
+    /// are ever blank in that row, and
+    /// `bothButtonsSitAgainstTheTrailingEdge` checks exactly those.
     static func isBlank(_ raster: Raster, inColumns columns: Range<Int>) -> Bool {
         for x in columns where x >= 0 && x < raster.width {
             for y in 1..<raster.height where !raster[x, y].isTransparent {
@@ -149,6 +156,46 @@ struct PanelBarTests {
                 .frame(width: 200, height: 44))
         #expect(Self.isBlank(bar, inColumns: 0..<100), "the leading half of the bar must be empty")
         #expect(!Self.isBlank(bar, inColumns: 120..<200), "both buttons belong at the trailing edge")
+        // The one range that is blank in *every* row, `border-top` included:
+        // outside `.panelbar`'s own 18pt inset. Checked here rather than through
+        // `isBlank`, whose whole job is to skip row 0.
+        for y in 0..<bar.height {
+            for x in 0..<17 {
+                #expect(bar[x, y].isTransparent, "something is drawn at (\(x),\(y)), outside the 18pt inset")
+            }
+        }
+    }
+
+    @Test @MainActor func theHairlineIsInsetTheWayThePrototypesPanelbarIs() throws {
+        // `island-motion.html:181-183`:
+        //
+        //   .panelbar{ position:absolute;left:18px;right:18px;bottom:9px;height:28px;
+        //              …border-top:1px solid var(--hairline);padding-top:7px; }
+        //
+        // `border-top` is on an element inset 18px on both sides, so the rule spans
+        // `width − 36`. This file drew it full-width for three plans and recorded
+        // the divergence as a measured *fact about the prototype* — the premise
+        // that then justified skipping row 0 in `isBlank` and reworking four
+        // `DrawerGoldenTests`. Both of those accommodations turn out to be
+        // necessary anyway (see `isBlank`'s own comment), but only this test makes
+        // the inset itself something that can fail.
+        //
+        // Asserted at the ends and the middle rather than column by column: the
+        // failure being caught is "the rule runs the whole width", and one blank
+        // pixel inside the inset is enough to catch it, while a painted pixel just
+        // inside each end is what rules out the opposite over-correction of
+        // insetting too far.
+        let width = 200
+        let bar = try rasterise(
+            PanelBar(muted: false, onToggleMute: {}, onOpenSettings: {})
+                .frame(width: CGFloat(width), height: 44))
+        #expect(bar[0, 0].isTransparent, "the rule reaches the drawer's own leading edge")
+        #expect(bar[17, 0].isTransparent, "the rule starts before the 18pt inset")
+        #expect(bar[width - 1, 0].isTransparent, "the rule reaches the drawer's own trailing edge")
+        #expect(bar[width - 18, 0].isTransparent, "the rule runs past the trailing 18pt inset")
+        #expect(!bar[18, 0].isTransparent, "the rule does not start at the 18pt inset")
+        #expect(!bar[width / 2, 0].isTransparent, "no rule is drawn at all")
+        #expect(!bar[width - 19, 0].isTransparent, "the rule stops short of the trailing inset")
     }
 
     @Test @MainActor func tappingEachButtonCallsItsOwnClosureAndNotTheOther() {
