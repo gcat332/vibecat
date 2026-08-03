@@ -59,7 +59,33 @@ state colours (`#3FD99B`, `#5B9DF9`, `#FFA63C`, `#FF5C5C`), dormant's
 `--sp-body/hi/lt/out/sh` against `CatPalette`'s `.body/.highlight/.lightest/
 .outline/.shadow`.
 
-What is known to differ:
+What is known to differ. **Start with the motion, because it is not a tuning
+value — it is an architectural mismatch:**
+
+- **Three of five moods animate with a transform our sprite architecture cannot
+  do.** The box sizes match exactly (cat `18×14`, gap `4`, badge `14×14` on both
+  sides), which is why this hides. The *motion* does not:
+
+  | mood | prototype | ours |
+  |---|---|---|
+  | `trot` | `translateY(-2px)` over 1s | `-1pt`, two beats — **half the amplitude** |
+  | `call` | **`scale(1.09)`** over 1.1s | a `-1pt` hop — **a different transform entirely** |
+  | `happy` | `scale(.6 → 1.12 → 1)` over 540ms | nothing |
+  | `dead` | `rotate(-4deg ↔ 4deg)` over 2.4s | nothing |
+  | `sleep` | `translateY(2px)` over 3s | still |
+
+  The last three were deliberate CPU decisions, recorded in Plan 3's follow-ups.
+  The first two were not: `trot`'s amplitude is simply halved, and `call` uses a
+  vertical hop where the prototype scales.
+
+  **The root cause is a Plan 3 decision, not an oversight.** `ResolvedCat` moves
+  in whole cells because "pixel art steps; a fractional offset would blur the
+  grid." `scale(1.09)` on an 18×14 sprite either interpolates — blurring the grid
+  that decision exists to protect — or needs a second set of sprite frames drawn
+  at the larger size. Same for `rotate`. So matching `call`, `happy` and `dead`
+  is a real design decision (accept interpolation, draw more frames, or diverge
+  on purpose), not a constant to nudge. `trot`'s missing pixel is a one-line fix
+  and should not wait for that decision.
 
 - **The island's ground colour.** The prototype's island background is
   `--void: #07080A`; ours is `#05070B`. That value is the prototype's *sprite
@@ -178,6 +204,36 @@ source on 2026-08-02:
 that the idle island costs 0.35% of a core and three of five moods have no
 timeline at all. Plan 5 puts several sprites on screen at once. Optimise against
 its measurements, not against Plan 3's single-sprite ones.
+
+## Is everything the plans promised actually built?
+
+Audited 2026-08-02 against the spec, section by section, because "the plan says
+done" and "the behaviour exists" are different claims. Result: **the plans
+delivered what they claimed**, with three exceptions, all now owned.
+
+- **§6.2's right flank is not configurable.** The spec says "configurable:
+  session count (default), agent icon, or nothing." `CollapsedLayout.RightContent`
+  has all three cases, but `IslandModel.layout` hardcodes
+  `sessionCount > 0 ? .sessionCount : .nothing`, so `.agentIcon` is constructed
+  by nothing — the unreachable branch already recorded after Plan 3. The missing
+  part is the *choosing*, which is a setting → **Plan 6**.
+- **§16's AppleScript hint.** Four of its five rows are implemented and tested:
+  socket missing fails open, a slow reply falls through to the CLI's default,
+  a display change recomputes geometry from the API, and a notchless display
+  gets the fallback pill. The fifth — "AppleScript blocked → show a hint linking
+  to the Automation setting" — is not, and cannot be until there is an
+  AppleScript call to block → **Plan 6, with jump**.
+  (An earlier reading of this section here said §16 was "essentially
+  unimplemented." That was wrong — one `standardError.write` and no file named
+  `Error` is not the same as no error handling, and the behaviour is spread
+  across `SocketClient`, `HookRunner`, `IslandGeometry` and `NotchController`.)
+- **§9.1's 190ms face crossfade** — absent, confirmed, and now named in Plan 4.5.
+
+Everything else the plans claimed is present: §2's socket and wire protocol,
+§4's states and worst-state-wins, §5's geometry including the corner minimum,
+§6.1's three tiers and §6.3's drawer heights, §7's five moods and five coats,
+§8's five badges, §9.2's aura, §9.3's rule, and all of §10 bar the keyboard.
+§§11–14 are Plans 5 and 6 and were never claimed.
 
 ## Not a plan, and still not done
 
