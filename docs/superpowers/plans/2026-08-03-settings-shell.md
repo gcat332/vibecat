@@ -654,8 +654,13 @@ import SwiftUI
     let size = CGSize(width: 120, height: 44)
     let quiet = try Raster.rasterise(PanelBar(muted: true,  onToggleMute: {}, onOpenSettings: {}), size: size)
     let loud  = try Raster.rasterise(PanelBar(muted: false, onToggleMute: {}, onOpenSettings: {}), size: size)
-    #expect(quiet.opaquePixelCount > loud.opaquePixelCount,
-            "muted must draw more ink than unmuted — the slash: \(quiet.opaquePixelCount) vs \(loud.opaquePixelCount)")
+    // **Do not assert that muted draws MORE ink.** That premise is false and an
+    // earlier draft of this plan asserted it: muted *hides* the two arcs while it
+    // shows the slash, so it is a swap, not an addition — measured 301 against
+    // 308, the wrong way round. The test passed against a bar that ignored
+    // `muted` entirely. Assert on something only the muted state can produce: the
+    // tint change, plus a pixel the slash alone covers.
+    #expect(quiet != loud, "the muted flag changes nothing that is drawn")
 }
 
 @Test func bothButtonsSitAgainstTheTrailingEdge() throws {
@@ -715,11 +720,19 @@ Draw both icons as `Path`s from the prototype's SVG data. Replace
 1. Ignore `muted` and always draw the slash → `theMuteButtonShowsASlashOnlyWhenMuted`
    must fail.
 2. Remove the leading spacer → `bothButtonsSitAgainstTheTrailingEdge` must fail.
-3. Wire the gear's action to `onToggleMute` →
-   `tappingEachButtonCallsItsOwnClosureAndNotTheOther` must fail.
+3. **Predicted uncaught, and it is.** Wiring the gear's action to
+   `onToggleMute` cannot be caught without a ViewInspector-style dependency or
+   real click simulation, and this project has neither and may add neither. A
+   test hook that calls the closures directly does not see a `Button` wired to
+   the wrong one. **Adjudicated as an accepted blind spot**, and it generalises:
+   any footer control with two buttons and two closures has it. Report it, do not
+   paper over it.
 4. Restore `Color.clear` in `DrawerView` → `theReservedFooterIsNoLongerEmpty`
    must fail **and the other three must still pass**, which is the point of
-   having it.
+   having it. **Write this test against a rendered `DrawerView`, not against a
+   shared static** — an earlier draft read a constant independently of `body`, so
+   reverting the wiring left it green. That is the same defect this test exists to
+   catch, in the test itself.
 
 - [ ] **Step 5: Look at it**
 
