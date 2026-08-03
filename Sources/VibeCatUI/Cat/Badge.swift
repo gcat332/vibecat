@@ -71,9 +71,29 @@ public enum Badge: String, Sendable, CaseIterable {
     /// `.repeatForever()` and run by the render server, so it needs no
     /// timeline and leaves `needsTimeline` false. See `BadgeCanvas`.
     ///
-    /// **Not yet measured.** The claim that a repeating `.scaleEffect` does not
-    /// re-invoke the `Canvas` renderer is reasoned from how SwiftUI composites,
-    /// not from `getrusage`. Measure before relying on it.
+    /// **Measured 2026-08-03, and the conclusion above is half wrong.** See
+    /// [the badge transform spike](../../../docs/superpowers/spikes/2026-08-03-badge-transform-cost.md).
+    /// The `Canvas` half held exactly: a repeating transform never re-invokes
+    /// the renderer — 0.0 draws/s in every dormant sample, against 47.9/s when
+    /// a `TimelineView` is involved. **The cost half did not.** The dormant
+    /// island now measures **12.26% of a core in release**, against the 0.35%
+    /// it cost before badges animated and the 3.6–4.1% of the cell-swapping
+    /// `zzz` this replaced. Skipping SwiftUI's renderer is not the same as
+    /// skipping per-frame work: the drawn content is cached, and something
+    /// still ticks the animation every display frame.
+    ///
+    /// **The cost was then accepted deliberately, by the owner, on 2026-08-03
+    /// with those numbers in front of them.** The island's resting cost is now
+    /// intended to be ~12% of a core: the motion is the design (§9 and the
+    /// prototype the spec header names), and this is what it costs. **Do not
+    /// revert these transforms to "restore" 0.35%** — that figure describes a
+    /// build whose badges did not move and no longer describes this product.
+    ///
+    /// **Do, equally, not cite this file as evidence that a transform is cheap.**
+    /// It is evidence of the opposite, knowingly paid for. The spike lists the
+    /// three things that would reopen the decision — battery (every figure here
+    /// is on mains), several sprites at once (Plan 5), and thermals under real
+    /// load — and none of them has been measured.
     public struct Pulse: Sendable, Equatable {
         public let period: Double
         public let scale: ClosedRange<Double>
