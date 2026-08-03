@@ -20,9 +20,7 @@ private func session(_ state: Kind, project: String = "api") -> Session {
 @MainActor @Test func theRowWearsItsOwnStatesAccent() throws {
     for (kind, state) in [(Kind.permission, IslandState.waiting),
                           (.failed, .failed), (.running, .running)] {
-        let raster = try rasterise(SessionRow(session: session(kind),
-                                              now: Date(timeIntervalSince1970: 1_000_030))
-            .frame(width: 388))
+        let raster = try rasterise(SessionRow(session: session(kind)).frame(width: 388))
         #expect(raster.pixelCount(near: state.accent) > 0,
                 "\(kind): no \(state) accent in the row at all")
         for other in IslandState.allCases where other != state && other != .dormant {
@@ -37,9 +35,8 @@ private func session(_ state: Kind, project: String = "api") -> Session {
 /// threaded through and then ignored by the view.
 @MainActor @Test func turningALineOffRemovesItsInk() throws {
     let s = session(.permission)
-    let now = Date(timeIntervalSince1970: 1_000_030)
-    let all = try rasterise(SessionRow(session: s, now: now, options: .all).frame(width: 388))
-    let bare = try rasterise(SessionRow(session: s, now: now, options: [])
+    let all = try rasterise(SessionRow(session: s, options: .all).frame(width: 388))
+    let bare = try rasterise(SessionRow(session: s, options: [])
         .frame(width: 388))
     #expect(bare.opaquePixelCount < all.opaquePixelCount,
             "switching every optional line off drew the same ink (\(bare.opaquePixelCount) against \(all.opaquePixelCount)) — Options is threaded through and then ignored")
@@ -66,13 +63,46 @@ private func session(_ state: Kind, project: String = "api") -> Session {
                 AgentItem(name: "Explore (Read config files)", elapsed: "Done", model: "Sonnet 4.6",
                           finished: true)]
     let s = Session(event: e, now: Date(timeIntervalSince1970: 1_000_000))
-    let now = Date(timeIntervalSince1970: 1_000_030)
 
-    let all = try rasterise(SessionRow(session: s, now: now, options: .all).frame(width: 388))
+    let all = try rasterise(SessionRow(session: s, options: .all).frame(width: 388))
     let subagentsHidden = try rasterise(
-        SessionRow(session: s, now: now, options: [.activity, .lastMessage, .tasks, .agents])
+        SessionRow(session: s, options: [.activity, .lastMessage, .tasks, .agents])
             .frame(width: 388))
 
     #expect(subagentsHidden.height < all.height,
             "hiding .subagents through SessionRow rendered the same height as .all — if the call site hardcodes `options: .all` instead of forwarding what it received, this passes no matter what the row was asked to show")
+}
+
+/// §11's own first words: "**Three** lines per row." A row whose project name
+/// wraps is four, and nothing here checked it.
+///
+/// Found by the visual fixture Plan 5's final review added
+/// (`VIBECAT_LIST_SHOT`) — the first time anyone had looked at the assembled
+/// list, because `ImageRenderer` renders a `ScrollView` blank and only
+/// `NSHostingView` + `cacheDisplay` does not (see `rasteriseHosted`).
+/// `Session.project` is `cwd`'s last path component, so its length is entirely
+/// the user's, and a monorepo package directory reaches this length easily.
+///
+/// Compares rendered *height* against a short-named row rather than looking for
+/// the wrap directly: a wrap is exactly what adds a line box, and height is the
+/// property §11's "three lines" is a claim about. Everything else about the two
+/// fixtures is held identical, so height is the only thing that can move.
+///
+/// Mutation-verified: removing `.lineLimit(1)` from `SessionRow.headline`'s
+/// project `Text` renders the long-named row at 66pt against the short one's
+/// 51pt — one extra line box — and this test fails with that message.
+@MainActor @Test func aLongProjectNameDoesNotAddAFourthLineToTheRow() throws {
+    func row(_ project: String) throws -> Raster {
+        var e = VibeEvent(id: "e", cli: "claude-code", kind: .running, session: "s",
+                          cwd: "/Users/dev/\(project)")
+        e.title = "Asking to run"
+        e.body = "rm -rf build/"
+        let s = Session(event: e, now: Date(timeIntervalSince1970: 1_000_000))
+        return try rasterise(SessionRow(session: s).frame(width: 388))
+    }
+
+    let short = try row("api")
+    let long = try row("web-dashboard-with-a-really-quite-long-package-name")
+    #expect(long.height == short.height,
+            "a long project name rendered the row \(long.height)pt tall against \(short.height)pt for a short one — the name wrapped, so §11's three lines became four")
 }

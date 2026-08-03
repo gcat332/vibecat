@@ -193,3 +193,62 @@ func rasterise(_ view: some View, scale: CGFloat = 1) throws -> Raster {
     ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
     return Raster(width: w, height: h, bytes: bytes)
 }
+
+/// Rasterises a view through **AppKit's own** rendering path — `NSHostingView`
+/// laid out inside an offscreen `NSWindow`, captured with
+/// `cacheDisplay(in:to:)` — rather than through `ImageRenderer`.
+///
+/// **This exists because `ImageRenderer` cannot render a `ScrollView`.** It
+/// paints its content as fully transparent: measured, a bare `Text` in a fixed
+/// frame gives 165 opaque pixels and the identical `Text` inside a `ScrollView`
+/// gives **0**. That is what made §11's assembled session list — the one thing
+/// on this branch nobody had ever looked at — unrenderable, and Plan 5 shipped
+/// `SessionListFace` with a vacuous test and no visual fixture as a result. This
+/// route renders it correctly, and still headlessly: no window is ever ordered
+/// on screen, so it works on a locked machine exactly as `rasterise` does.
+///
+/// Why the window, given the hosting view could be laid out on its own: an
+/// unattached `NSView`'s `bitmapImageRepForCachingDisplay` is 1× and the text
+/// comes out too coarse to read line by line, which is this fixture's whole
+/// purpose. A window supplies a `backingScaleFactor`, and the rep then matches
+/// the real display's.
+///
+/// Still deliberately **not** the default for the assertions in this suite.
+/// `ImageRenderer` is a pure function of a view value; this is a live AppKit
+/// view hierarchy with a window behind it, and the failure modes that brings
+/// (layout timing, backing-store scale varying with the machine) are exactly
+/// what a golden test does not want. Use `rasterise` unless the thing under the
+/// lens is a `ScrollView`.
+@MainActor
+func rasteriseHosted(_ view: some View, size: CGSize) throws -> Raster {
+    let hosting = NSHostingView(rootView: view)
+    hosting.frame = CGRect(origin: .zero, size: size)
+    let window = NSWindow(contentRect: hosting.frame, styleMask: [.borderless],
+                          backing: .buffered, defer: false)
+    window.contentView = hosting
+    // Layout has to complete before the capture: `cacheDisplay` draws whatever
+    // the layer tree currently holds, and an un-laid-out `ScrollView` holds
+    // nothing.
+    hosting.layoutSubtreeIfNeeded()
+    window.displayIfNeeded()
+
+    guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else {
+        throw RasterError.renderProducedNothing
+    }
+    hosting.cacheDisplay(in: hosting.bounds, to: rep)
+    guard let image = rep.cgImage else { throw RasterError.renderProducedNothing }
+
+    // Same explicit sRGB redraw as `rasterise`, for the same reason: the rep's
+    // own colour space and byte order are not contractual, and reading
+    // components off an unknown colour space is what crashed the pixel profiler
+    // during the animation spike.
+    let w = image.width, h = image.height
+    var bytes = [UInt8](repeating: 0, count: w * h * 4)
+    guard let ctx = CGContext(data: &bytes, width: w, height: h,
+                              bitsPerComponent: 8, bytesPerRow: w * 4,
+                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { throw RasterError.contextUnavailable }
+    ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+    return Raster(width: w, height: h, bytes: bytes)
+}

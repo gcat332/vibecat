@@ -27,7 +27,14 @@ struct SessionRow: View {
     }
 
     let session: Session
-    let now: Date
+    /// `now:` deliberately absent (F10 of Plan 5's final whole-branch review).
+    /// It was here, threaded `DrawerView` → `SessionListFace` → here, and
+    /// **never read** by anything: none of §11's three lines is a duration.
+    /// `RevealContent.now` — the collapsed bar's elapsed time — *is* real and is
+    /// a different view. If Plan 6 adds a duration to a row (§11 does not ask
+    /// for one), reintroduce it, and reintroduce `IslandView`'s
+    /// `TimelineView` reasoning with it: a `now` that never advances is worse
+    /// than no `now` at all.
     var options: Options = .all
 
     private var accent: Color { Color(IslandState(session.state).accent) }
@@ -56,6 +63,22 @@ struct SessionRow: View {
             Text(session.project)
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(Color(boneColour))
+                // §11 is "**three** lines per row", and without this the row is
+                // four. Found by opening the assembled list for the first time
+                // (`VIBECAT_LIST_SHOT`): `project` is `cwd`'s last path
+                // component, entirely under the user's control, and
+                // `web-dashboard-with-a-long-name` wrapped to two lines — which
+                // also dragged line 1's layout crooked, because the state dot
+                // centres against the taller block while the worktree and the
+                // state label sit on the lower baseline. Every other `Text` in
+                // this row already had `.lineLimit(1)`; this one, the row's most
+                // important field, did not.
+                //
+                // `.middle`, matching the worktree beside it: a project name has
+                // no end-or-beginning asymmetry the way a command body does (see
+                // `secondLine`), so keeping both ends loses least.
+                .lineLimit(1)
+                .truncationMode(.middle)
             if let worktree = session.worktree {
                 Text("⑂ \(worktree)")
                     .font(.system(size: 11.5))

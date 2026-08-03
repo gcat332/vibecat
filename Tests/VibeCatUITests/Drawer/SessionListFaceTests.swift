@@ -66,9 +66,7 @@ private func threeChoices(multi: Bool) -> VibeEvent {
 /// worth reporting on its own rather than silently making the second test
 /// below vacuous.
 @MainActor @Test func twentySessionsGenuinelyOverflowTheFixedFace() throws {
-    let raster = try rasterise(SessionListFace(sessions: sessionsOf(20),
-                                               now: Date(timeIntervalSince1970: 1_000_030))
-        .frame(width: 388))
+    let raster = try rasterise(SessionListFace(sessions: sessionsOf(20)).frame(width: 388))
     // `CGFloat(raster.height)`, never `Double(raster.height)`, on this side —
     // see the note above `theSessionListFaceHeightDoesNotGrowWithSessionCount`
     // on a second, independent toolchain trap this file's own writing ran

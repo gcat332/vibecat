@@ -18,12 +18,6 @@ struct DrawerView: View {
     /// of which pass a real `question` and never touch this) keeps compiling
     /// unchanged.
     var sessions: [Session] = []
-    /// Threaded to `SessionListFace`, the same reasoning `onAnswer` below
-    /// gives for its own default: nothing in the session list reads the wall
-    /// clock continuously (`SessionRow` stores `now` but no committed layout
-    /// depends on it moving), so a fresh `Date()` per render costs nothing and
-    /// keeps every existing call site compiling unchanged.
-    var now: Date = Date()
     let accent: RGBA
     let width: CGFloat
     /// Fires with the `Reply` a tap inside `QuestionFace` produced. Threaded
@@ -87,7 +81,7 @@ struct DrawerView: View {
                             QuestionFace(question: question, accent: accentColor, onAnswer: onAnswer)
                                 .transition(.faceCrossfade)
                         } else {
-                            SessionListFace(sessions: sessions, now: now)
+                            SessionListFace(sessions: sessions)
                                 .transition(.faceCrossfade)
                         }
                     }

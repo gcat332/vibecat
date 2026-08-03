@@ -352,8 +352,39 @@ follows is what it deliberately left, with the reason.
   loosening the assertion back to `<= 30` — the whole reason it is `== 0` is that
   the tolerance stopped absorbing anything once the sliver was split out. If it
   recurs, start here.
+- **`ImageRenderer` can return another test's pixels under full-suite
+  concurrency, and this is the most serious of the three because it undermines
+  every golden assertion in the suite.** Found while measuring the two above.
+  `eachBlockOptionGatesOnlyItsOwnBlock` draws `SessionBlocks(options: [])` — an
+  empty `VStack` in a fixed 388×80 frame — and asserts the two single-bit renders
+  beat it. **In isolation that render is 0 opaque pixels and 0 distinct colours,
+  measured directly. Under a full-suite run it reads 2287 opaque pixels, and it
+  reads exactly 2287 every time it happens** (4 occurrences across 18 full-suite
+  runs, on commits both before and after Plan 5's final fix wave, so it is
+  pre-existing and unrelated to it). A stable wrong number is not
+  antialiasing jitter — something is handing this raster content that another
+  concurrently-running `@MainActor` test rendered. That also makes it a plausible
+  common cause for the 72-pixel drawer reading above.
+  **Consequences, which matter more than the flake:** any `rasterise`-based
+  assertion in this suite can in principle pass or fail for reasons that have
+  nothing to do with its subject, so a green golden test is weaker evidence than
+  this project has been treating it as. Worth reproducing with a minimal
+  two-test case and, if it holds, serialising the rasterising tests (`.serialized`
+  on the suites, or one shared render queue) before adding more of them.
 - **An unidentified Task 4 flake** whose data is unrecoverable. Recorded only so a
   future recurrence is not mistaken for something new.
+
+**And one defect the fixture found and the fix wave closed**, noted here because
+of *how* it was found: `SessionRow`'s project name had no `.lineLimit(1)`, so a
+long one wrapped and §11's "three lines per row" became four — with line 1 going
+visually crooked, because the state dot centres against the taller block while
+the worktree and state label sit on the lower baseline. `project` is `cwd`'s last
+path component, so its length is entirely the user's. Every other `Text` in the
+row already had `.lineLimit(1)`; the row's most important field did not. Nothing
+in 414 tests could see it, and nobody had ever looked at the assembled list —
+which is the whole argument for keeping `VIBECAT_LIST_SHOT` in the suite. Pinned
+now by `aLongProjectNameDoesNotAddAFourthLineToTheRow` (66pt against 51pt under
+mutation).
 
 Plan 6 items, deliberately left as behaviour rather than changed:
 
@@ -368,16 +399,49 @@ Plan 6 items, deliberately left as behaviour rather than changed:
   the same session. Collapsing them first and re-splitting them later is the
   expensive order. If Plan 6 decides the two really are one thing, `revealed` is
   the one to delete.
-- **`.scrollIndicators(.never)` on a face whose content genuinely overflows.**
-  `SessionListFace` fixes at §6.3's 420pt (376pt of it usable above §6.4's footer
-  reservation) while 20 sessions measure 699pt — measured, not assumed, by
-  `twentySessionsGenuinelyOverflowTheFixedFace`. So rows continue below the fold
-  with **no cue whatever** that they do. This is a design decision, not a bug:
-  §11 does not specify an indicator, and a permanently visible scrollbar on a
-  400pt-wide black panel is a real aesthetic cost. But "no cue" was never chosen
-  either — it fell out of a one-line modifier. Plan 6 owns picking one (a fade at
-  the bottom edge, `.scrollIndicators(.automatic)`, or a "+N more" line), because
+- **`.scrollIndicators(.never)` on a face whose content genuinely overflows, and
+  the fold cuts a line in half.** `SessionListFace` fixes at §6.3's 420pt (376pt
+  of it usable above §6.4's footer reservation) while 20 sessions measure 699pt —
+  measured, not assumed, by `twentySessionsGenuinelyOverflowTheFixedFace`. So rows
+  continue below the fold with no cue that they do. **Seen for the first time in
+  the `VIBECAT_LIST_SHOT` fixture, and it is worse than "no cue":** with four
+  sessions, the boundary lands mid-row and clips the last agent line
+  *horizontally through its glyphs*, leaving a half-height strip of text. That
+  does not read as "there is more below", it reads as a rendering bug. Choosing
+  an indicator is a design decision §11 does not settle — a permanently visible
+  scrollbar on a 400pt-wide black panel is a real aesthetic cost — but "no cue
+  plus a sheared line" was never chosen either; it fell out of one modifier and a
+  fixed frame. Plan 6 owns picking one (a bottom-edge fade, an explicit "+N more"
+  line, or row-granular snapping so the fold never lands inside a row), because
   Plan 6 is where the list gets its Settings and its footer.
+- **Three divergences from §11's own diagram, all found by that same fixture, all
+  cosmetic and none written down before now.** Recorded together because a
+  divergence nobody wrote down gets re-introduced or re-removed by the next person
+  who notices it — this file's own standing rule.
+  - **Line 1's state marking is mirrored.** §11 draws `✳  api  ⑂ worktree … Needs
+    you ●` — a glyph on the left, the word *and* a dot on the right. `SessionRow`
+    draws the dot on the left and the word on the right, with no trailing dot and
+    no `✳`. One accent mark instead of two, which Task 5's review approved on
+    §4.3 grounds; it is still not the diagram.
+  - **§11's `│` continuation bars are missing under the Tasks and Agents
+    headers.** The diagram brackets each block — `┌ Tasks` then `│ ● …`, `│ ☐ …`.
+    Ours draws the `┌` header and then flat, unprefixed items, so at a glance the
+    task lines look like they belong to the row rather than to the block.
+  - **Agent lines are missing §11's effort** (`8s · Sonnet 4.6 · High`; ours stops
+    at the model). This one is a **model** gap, not a view gap: `AgentItem` has
+    `name`/`elapsed`/`model`/`activity`/`finished` and no `effort` field at all,
+    so it needs a wire-protocol change and belongs with whoever next touches
+    `VibeEvent`.
+
+  Everything else in §11's diagram is present and correct, verified line by line
+  against the render: three lines per row in the specified order, the Tasks
+  summary omitting zero counts, `●`/`☐`/`☑` markers with `done` struck through and
+  dimmed, the nested `└ activity` line under a running subagent, one hairline
+  divider between rows and none after the last, middle-truncation keeping both
+  ends of a long worktree, and the collapse rule reporting the **running** count
+  rather than the total. §4.3 holds: each row wears exactly one hue across its
+  dot, its state label and its in-progress task marker, with no other state's
+  accent anywhere in it.
 - **`SessionRow.Options` has no production caller passing anything but `.all`.**
   Kept deliberately — it is §11's own "every line is individually switchable in
   Settings" switch point, and removing it means Plan 6 rewrites `SessionRow` and

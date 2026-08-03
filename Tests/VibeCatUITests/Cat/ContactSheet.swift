@@ -200,6 +200,119 @@ struct ContactSheetTool {
         print("island composition: \(raster.width)x\(raster.height) -> \(path)")
     }
 
+    /// §11's assembled session list, as `DrawerView` actually composes it — the
+    /// one thing on Plan 5's whole branch that nobody had ever looked at.
+    ///
+    /// Task 7's step 4 asked for a line-by-line check against §11's diagram and
+    /// could not get one: `ImageRenderer` paints a `ScrollView`'s content as
+    /// fully transparent, so every render of this face came out blank (measured:
+    /// a bare `Text` gives 165 opaque pixels, the same `Text` inside a
+    /// `ScrollView` gives 0). Plan 5's final whole-branch review found the route
+    /// — `NSHostingView` + `cacheDisplay(in:to:)`, still headless. See
+    /// `rasteriseHosted`.
+    ///
+    ///     VIBECAT_LIST_SHOT=/tmp/list.png swift test --filter sessionListShot
+    ///
+    /// Four sessions, one per state, and every optional line populated on at
+    /// least one of them — because §11's diagram is three lines plus a Tasks and
+    /// an Agents block, and a fixture that leaves them nil shows a one-line row
+    /// and proves nothing about the layout. The `.done` row deliberately carries
+    /// *nothing* optional: §11's collapse behaviour and the divider spacing
+    /// between a tall row and a short one is exactly the kind of thing only an
+    /// eye catches.
+    ///
+    /// Rendered at `DrawerFace.sessionList.height` — the real 420pt, not a
+    /// height that fits the content — so whether the last row clips at the face
+    /// boundary is visible rather than hidden by an accommodating frame.
+    @MainActor
+    static func sessionListFixture() -> [Session] {
+        func session(_ kind: Kind, _ project: String, worktree: String?,
+                     rich: Bool) -> Session {
+            var e = VibeEvent(id: "list-\(project)", cli: "claude-code", kind: kind,
+                              session: "s-\(project)", cwd: "/Users/dev/\(project)")
+            e.worktree = worktree
+            if rich {
+                e.model = "Opus 4.8"
+                e.effort = "high"
+                e.origin = Origin(app: "com.googlecode.iterm2")
+                e.title = "Asking to run"
+                e.body = "rm -rf build/"
+                e.tasks = [TaskItem(title: "Audit authentication flow", status: .doing),
+                           TaskItem(title: "Add refresh-token rotation", status: .open),
+                           TaskItem(title: "Wire the session store", status: .done)]
+                // `activity:` on the first agent only: §11's diagram nests one
+                // `└ Grep: handleRequest` line under a *running* subagent and
+                // none under the finished one, and `SessionBlocks.agentLine`
+                // draws it only when the field is populated — so a fixture that
+                // left it nil everywhere would show a block §11 has four lines
+                // for as two, and look correct.
+                e.agents = [AgentItem(name: "Explore (Search API endpoints)",
+                                      elapsed: "8s", model: "Sonnet 4.6",
+                                      activity: "Grep: handleRequest"),
+                            AgentItem(name: "Explore (Read config files)",
+                                      elapsed: "Done", model: "Sonnet 4.6", finished: true)]
+            }
+            var s = Session(event: e, now: Date(timeIntervalSince1970: 1_000_000))
+            // Assigned on the `Session`, not the event, and that is the point:
+            // `Session.init` hardcodes `lastUserMessage = nil` and no adapter
+            // populates it, so §11's line 3 has never been drawn by anything
+            // reachable from real input. This fixture is the only place it gets
+            // looked at. See plans/README.md's Plan 5 carried findings.
+            if rich { s.lastUserMessage = "clean the build and rebuild from scratch" }
+            return s
+        }
+        return [session(.permission, "api", worktree: "auth-hardening", rich: true),
+                session(.running, "web-dashboard-with-a-long-name",
+                        worktree: "feature/redesign-the-settings-panel", rich: true),
+                session(.failed, "infra", worktree: nil, rich: true),
+                session(.done, "scripts", worktree: nil, rich: false)]
+    }
+
+    /// The assembled list at its real size, beside the one thing the list itself
+    /// can no longer show: §11's collapse rule. `SessionListFace` has no
+    /// `options` parameter any more (F10 — nothing ever passed one), so the only
+    /// way to see "Subagents hidden collapses to a count rather than vanishing"
+    /// is a `SessionRow` rendered directly. Both in one image, the same way the
+    /// contact sheet above puts its four drawer scenarios side by side.
+    @MainActor
+    static func sessionListComposition() -> some View {
+        let sessions = sessionListFixture()
+        return HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("§11 · the assembled list, real 420pt face")
+                    .font(.system(size: 9)).foregroundStyle(Color(hazeColour))
+                DrawerView(question: nil, sessions: sessions,
+                           accent: IslandState.waiting.accent, width: 388)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("§11 · Subagents hidden — collapses to a count")
+                    .font(.system(size: 9)).foregroundStyle(Color(hazeColour))
+                SessionRow(session: sessions[0],
+                           options: [.activity, .lastMessage, .tasks, .agents])
+                    .frame(width: 388)
+                    .background(Color(islandGroundColour))
+            }
+        }
+        .padding(12)
+        .background(Color(red: 0.02, green: 0.027, blue: 0.043))
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["VIBECAT_LIST_SHOT"] != nil))
+    @MainActor func sessionListShot() throws {
+        let path = ProcessInfo.processInfo.environment["VIBECAT_LIST_SHOT"]!
+        // Sized to hold both panels: the drawer's own 420pt face plus this
+        // composition's label and padding. `rasteriseHosted` needs an explicit
+        // size — a hosting view has no `sizeThatFits` step here, and this is a
+        // fixture, so a measured-once number with the reason written down beats
+        // machinery.
+        let raster = try rasteriseHosted(Self.sessionListComposition(),
+                                         size: CGSize(width: 828, height: 460))
+        #expect(raster.writePNG(to: path), "could not write \(path)")
+        #expect(raster.opaquePixelCount > 0,
+                "the composition rendered nothing at all — if this is 0, `rasteriseHosted` has stopped working and the PNG is not worth opening")
+        print("session list: \(raster.width)x\(raster.height) -> \(path)")
+    }
+
     /// A filmstrip: every badge across one full cycle, one column per sampled
     /// phase. Shows which frames actually *differ* — which is the point, since
     /// `squares` has four distinct frames and is drawn twelve times a second,
