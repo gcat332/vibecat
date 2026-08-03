@@ -35,6 +35,14 @@
 	<key>NSAppleEventsUsageDescription</key>
 	<string>VibeCat focuses the terminal window an agent is running in when you click its session.</string>
 
+	<!-- §12's "Respects Do Not Disturb". macOS 14's only supported way to read
+	     Focus is INFocusStatusCenter, which refuses to even ask without this
+	     key. It is a fourth permission and §15 lists three — see that section's
+	     dated correction. The string says what the permission buys, in the
+	     terms of the person reading the prompt. -->
+	<key>NSFocusStatusUsageDescription</key>
+	<string>VibeCat stays silent while you are in a Focus or Do Not Disturb session.</string>
+
 	<!-- Screen recording has NO usage-description key on macOS, unlike camera
 	     or microphone: it is granted only in System Settings > Privacy &amp;
 	     Security > Screen Recording, prompted by CGRequestScreenCaptureAccess().

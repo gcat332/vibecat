@@ -46,6 +46,20 @@ BackdropSampler.requestAccessIfAskedTo()
 let model = AppModel(socketPath: SocketPath.default)
 let controller = NotchController(model: model)
 
+// §12's cues. The player is owned here rather than by AppModel or
+// NotchController: AppModel stays free of AVFoundation so it remains testable
+// without an audio device, and NotchController clears its callbacks on
+// dismiss() — a sound is not part of the panel's lifecycle.
+//
+// The Focus authorization request goes next to BackdropSampler's above: both are
+// permissions asked for at launch, and this one is asked for unconditionally
+// because a user who turned sound on has already opted into the feature the
+// permission serves. It is a no-op once the user has decided either way.
+let quietHours = FocusStatusQuietHours()
+quietHours.requestAuthorizationIfNeeded()
+let soundPlayer = SoundPlayer(quietHours: quietHours)
+model.onCue = { [weak soundPlayer] in soundPlayer?.play($0) }
+
 do {
     try model.start()
 } catch {

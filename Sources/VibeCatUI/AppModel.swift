@@ -28,6 +28,20 @@ import VibeCatTransport
     @ObservationIgnored
     public var onChange: (@MainActor () -> Void)?
 
+    /// Fires when an ingested event changes what the island has to announce.
+    /// Never fires with "nothing" — a cue that means "ignore me" would make
+    /// every consumer branch on it. Prunes never cue: a session ageing out is
+    /// not an event.
+    ///
+    /// `@ObservationIgnored` for the same reason `onChange` is: this is wiring,
+    /// and nothing should re-render because the closure was reassigned.
+    ///
+    /// The player that answers this lives in the app's own wiring, not here —
+    /// `AppModel` stays free of `AVFoundation` so it remains testable without an
+    /// audio device.
+    @ObservationIgnored
+    public var onCue: (@MainActor (Cue) -> Void)?
+
     private let socketPath: String
     private var server: SocketServer?
     private var pruneTimer: Timer?
@@ -112,13 +126,35 @@ import VibeCatTransport
     /// them, so the only thing that eventually resolves the pile-up is each
     /// `PendingQuestion`'s own multi-second timeout, not the 50ms the tests
     /// actually wait.
+    ///
+    /// The three lines are duplicated across both branches deliberately. The
+    /// obvious de-duplication — routing the main-thread branch through
+    /// `Task { @MainActor }` too — is exactly the change the paragraph above
+    /// records as having reproduced a full-suite-only flake. `onCue` fires
+    /// *after* `onChange`, so a listener that redraws and a listener that plays
+    /// a sound both see the same store; and the cue is computed against the
+    /// store as it was **before** the apply, because `CueSelector`'s whole rule
+    /// is a before/after comparison and a `before` read afterwards would make
+    /// every pair identical.
     nonisolated private func applyAndNotify(_ event: VibeEvent, now: Date) {
         if Thread.isMainThread {
-            MainActor.assumeIsolated { store.apply(event, now: now); onChange?() }
+            MainActor.assumeIsolated {
+                let before = store          // SessionStore is a value type
+                store.apply(event, now: now)
+                onChange?()
+                if let cue = CueSelector.cue(for: event, before: before, after: store) {
+                    onCue?(cue)
+                }
+            }
         } else {
             Task { @MainActor [weak self] in
-                self?.store.apply(event, now: now)
-                self?.onChange?()
+                guard let self else { return }
+                let before = store
+                store.apply(event, now: now)
+                onChange?()
+                if let cue = CueSelector.cue(for: event, before: before, after: store) {
+                    onCue?(cue)
+                }
             }
         }
     }

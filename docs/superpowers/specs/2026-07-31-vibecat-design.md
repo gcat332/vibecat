@@ -507,6 +507,37 @@ of files.
 Hard attack (`6ms`), exponential decay — the whole character of the era.
 Respects Do Not Disturb. These are the defaults; the pack is switchable.
 
+> **Corrected 2026-08-03, after Plan 6.2 shipped.** The table above is a lossy
+> summary of the working synth this section was written from —
+> `docs/superpowers/prototypes/island-motion.html:858-918` — and the
+> implementation follows the prototype wherever the two disagree, per the
+> standing rule that the prototype is the authority on how a thing looks and
+> sounds. Four things it lost:
+>
+> - **The Voice column omits the detuned twin on two cues.** It gives "Needs an
+>   answer" a `pulse, detuned twin` and leaves "Needs an answer, multi" and
+>   "Finished" as bare `pulse`, but the prototype passes `duty:8` to every note
+>   of `askmulti` and `duty:6` to every note of `done` — both get the twin, at
+>   8 and 6 cents respectively.
+> - **The table cannot express per-note gain at all.** Against a `.07` default:
+>   `done`'s held G6 is `.06`, all four notes of Failed are `.06`, and Meow is
+>   `.09`.
+> - **A cue fires when demand rises, never when it falls.** The prototype cues
+>   on any change of its own presented state (`island-motion.html:957`), which
+>   means answering one of two questions takes it `askmulti → ask` and sounds
+>   the alert again — congratulating you for the thing you just did. Clicking
+>   buttons in a browser hides that; a person being interrupted would not miss
+>   it. VibeCat fires only when the waiting count rises, or when `waiting` or
+>   `failed` is newly reached. `CueSelector` carries the same reasoning.
+> - **Two of `settings.html`'s four packs, and one of its three per-cue
+>   alternatives, have no defined sound anywhere.** Soft, System and Blip are
+>   named in the Settings mockup and nothing in this repo says what they are —
+>   no frequencies, no waveforms, nothing. They are deliberately not
+>   implemented; inventing them would be inventing design. Only Chiptune and
+>   Silent exist, and `SoundPack` is an enum so a later one is additive. Meow
+>   *is* defined, is implemented, and has no trigger — it exists for the
+>   per-cue picker Plan 6.4 owns.
+
 ---
 
 ## 13. Jump
@@ -562,6 +593,37 @@ Permissions requested: **Automation**, **Notifications**, **Screen Recording**
 (used by `BackdropSampler` to measure what is actually behind the island, so
 the aura's light/dark tint matches the real backdrop rather than guessing from
 the system appearance alone — see §9.2).
+
+> **Corrected 2026-08-03, after Plan 6.2 shipped.** This list is one short.
+> §12's "Respects Do Not Disturb" is **a fourth permission**: macOS 14's only
+> supported way to read Focus is `INFocusStatusCenter` (`Intents`), which needs
+> `NSFocusStatusUsageDescription` in `Info.plist` and its own TCC
+> authorization. Reading `~/Library/DoNotDisturb/DB/Assertions.json` is the
+> widely-copied alternative, is unsupported, has changed shape between
+> releases, and — measured on this machine — is not even readable: `cat` on it
+> returns `Operation not permitted` without Full Disk Access. So the list is
+> **Automation**, **Notifications**, **Screen Recording**, **Focus**.
+>
+> What was actually observed from a signed `VibeCat.app` (identifier
+> `com.gcat332.vibecat`, Apple Development identity, `NSFocusStatusUsageDescription`
+> confirmed present with `plutil -p`), rather than what was expected: on the
+> first launch `authorizationStatus` read `0` (`.notDetermined`) before
+> `requestAuthorization`, immediately after it returned, and still three seconds
+> later — the callback is asynchronous and nothing in the unified log named the
+> request. On a launch a few minutes later it read `3` (`.authorized`), so a
+> prompt was presented and allowed at some point in between. **Whether a prompt
+> was drawn on screen, and who dismissed it, was not observed** — the app is an
+> `LSUIElement` accessory that never activates, and no window-level check was
+> available.
+>
+> When authorization is `.notDetermined` or `.denied`, VibeCat **plays sound**.
+> A user who enabled sound and never answered a fourth permission prompt should
+> hear their agents; silently swallowing every cue is the worse failure. §14's
+> Notifications section already carries a Permissions row, which is where the
+> state belongs; Plan 6.4 wires it. The `.authorized`-and-Focus-on path — that
+> `focusStatus.isFocused` actually reads `true` during a Focus session — is
+> **still unverified**: with authorization granted, `isQuiet` read `false` while
+> Do Not Disturb was off, which is consistent but proves only the negative half.
 
 ---
 
