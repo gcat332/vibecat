@@ -614,6 +614,15 @@ Everything else the plans claimed is present: §2's socket and wire protocol,
 
 ## Not a plan, and still not done
 
-- **No licence has been chosen.** The project README says so. Local `main` is
-  deliberately unpushed and now 207 commits ahead of `origin/main` — pushing
-  publishes, so that decision comes first.
+- ~~**No licence has been chosen.**~~ **Resolved 2026-08-03: MIT.** `LICENSE` is in
+  the repo root and the README points at it. Chosen for what this project actually
+  is — a solo utility with no dependencies and no outside contributors — where
+  Apache-2.0's patent grant and change-notice ceremony buy nothing yet, and copyleft
+  would restrict users without protecting anything the design cares about (§15
+  already rules out the App Store, so GPL closed no door here either).
+
+  The trademark question §3 raises is untouched by this and deliberately so: VibeCat
+  ships neutral geometric marks and lets a source point at its own icon file, so no
+  third-party logo is redistributed and the licence never has to answer for one.
+
+  With that settled, `main` may be pushed.

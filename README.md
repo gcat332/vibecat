@@ -103,4 +103,8 @@ socket, and edit CLI config files.
 
 ## Licence
 
-Not yet chosen.
+[MIT](LICENSE).
+
+Third-party marks are deliberately not bundled: VibeCat ships neutral geometric
+icons and a source points at its own icon file instead (§3 of the design doc).
+That is a trademark question this licence does not answer and does not need to.

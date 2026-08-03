@@ -138,7 +138,8 @@ implementation came first.
 
 ## Still open, and known
 
-- **No licence.** `main` is unpushed on purpose; pushing publishes.
+- ~~**No licence.**~~ **MIT, chosen 2026-08-03** — `LICENSE` in the repo root, README
+  updated. This was the one thing gating a push, so `main` is now publishable.
 - **The cat's motion is the badge mistake one layer down.** `call` scales 1.09,
   `happy` pops, `dead` rotates ±4° in the prototype, and none is implemented
   because `ResolvedCat` moves in whole cells to keep the pixel grid crisp. Item 2
