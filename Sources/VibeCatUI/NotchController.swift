@@ -324,7 +324,30 @@ import SwiftUI
         // deliberately bypassing AppModel entirely (see makeController()).
         // Reading appModel.pending here would make those tests unsatisfiable
         // regardless of anything else NotchController did.
-        panel?.acceptsClicks = model.hovering && (model.question != nil || !model.sessions.isEmpty)
+        //
+        // `|| model.drawerOpen` (final whole-branch review, F3): "is there
+        // something to open" and "is there something open" are different
+        // questions, and only the first was being asked. `setQuestion` resets
+        // `drawerOpen` when a *question* disappears; nothing resets it when the
+        // last *session* does. So the list could be opened with one idle session
+        // in it and then have that session pruned out from under it by
+        // `AppModel.prune`'s 20-minute TTL — probe-verified: `sessions.count ==
+        // 0`, `drawerOpen == true`, `tier == .drawer(height: 420)`, panel 476pt
+        // tall, `acceptsClicks == false`. A permanent empty 420pt black box
+        // under the notch that could not be clicked away, with Escape the only
+        // exit and Escape's own delivery still Task 9's unmeasured hardware
+        // question. A drawer that is open can always be clicked shut.
+        //
+        // The `model.hovering` conjunct still governs all three terms, and that
+        // is deliberate rather than incidental: this gate exists so the menu bar
+        // underneath stays clickable, and hoisting `drawerOpen` out of it would
+        // have the island swallowing clicks from anywhere on the screen for as
+        // long as a drawer was up. Clicks are still refused when there is
+        // genuinely nothing to open *and* nothing open —
+        // `thePanelTakesClicksOnlyWhenHoveredWithAQuestionWaiting` pins that
+        // half, and it passes unchanged either side of this term.
+        panel?.acceptsClicks = model.hovering
+            && (model.question != nil || !model.sessions.isEmpty || model.drawerOpen)
 
         // The panel is otherwise fixed at its widest collapsed size (Plan 3);
         // this is the one thing that grows it, and only when the tier it

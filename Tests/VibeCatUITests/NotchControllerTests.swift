@@ -347,6 +347,71 @@ private let externalDisplay = ScreenMetrics(
     c.dismiss()
 }
 
+/// F3 of the final whole-branch review: **a drawer that is open must always be
+/// closable by a click.**
+///
+/// The gate above answers "is there something to open". That is not the same
+/// question as "is there something open", and `setQuestion` only ever resets
+/// `drawerOpen` when a *question* disappears — nothing resets it when the last
+/// *session* does. So the list could be opened with one idle session in it and
+/// then have that session pruned out from under it by `AppModel.prune`'s
+/// 20-minute TTL, leaving `sessions.count == 0`, `drawerOpen == true`, and
+/// `tier == .drawer(420)`: a 420pt empty black box under the notch, panel grown
+/// to 476pt to cover it, refusing every click aimed at dismissing it. Escape was
+/// the only way out, and whether Escape is even delivered is still an unmeasured
+/// hardware question (Task 9).
+///
+/// This deliberately keeps hovering on throughout. `model.hovering` is true for
+/// the whole life of an open drawer in production (see `revealWidth`'s doc
+/// comment in IslandView.swift), so removing hover is not the state a person is
+/// actually stuck in, and gating on `drawerOpen` alone regardless of hover would
+/// make the island swallow menu bar clicks from across the screen. The
+/// `hovering` half of the rule stays.
+///
+/// Driven through a real `AppModel` for the same reason as the test above:
+/// `model.sessions` is only ever assigned by `render()` from
+/// `appModel.store.mostUrgentFirst`, so a real ingest and a real `prune` are
+/// what actually reproduce the emptying.
+@MainActor @Test func anOpenDrawerStaysClickableAfterItsLastSessionIsPruned() throws {
+    let model = AppModel(socketPath: "/tmp/vibecat-test-unused.sock")
+    let c = NotchController(model: model, metrics: { mbp14 })
+    c.refreshGeometry()
+    c.present()
+    let panel = try #require(c.panelForTesting)
+
+    // `.done`, not `.running`: `SessionStore.prune` only removes *idle*
+    // sessions, so a running one would never leave and this test would pass
+    // against the bug by never reaching the state that exhibits it.
+    model.ingest(VibeEvent(id: "e1", cli: "claude-code", kind: .done,
+                           session: "s1", cwd: "/dev/a"), now: t0)
+    c.setHovering(true)
+    #expect(panel.acceptsClicks, "setup: one session pending, hovering — the list has to be openable first")
+    c.click()
+    #expect(c.model.drawerOpen, "setup: the click did not open the drawer")
+    guard case .drawer = c.model.tier else {
+        Issue.record("setup: one idle session did not reach the drawer tier — this test proves nothing")
+        return
+    }
+
+    model.prune(now: t0.addingTimeInterval(AppModel.idleTTL + 1))
+    #expect(c.model.sessions.isEmpty, "setup: prune left the session in place — the emptying this test is about never happened")
+    #expect(c.model.drawerOpen,
+            "setup: something already resets drawerOpen when the sessions empty, so the state this test is about is unreachable and the assertion below is vacuous")
+
+    #expect(panel.acceptsClicks,
+            "an open drawer refuses clicks now that its last session is gone — a permanent empty box under the notch that cannot be clicked away")
+
+    // And a click really does close it, rather than the panel merely accepting
+    // one: the whole point is the way out, not the event.
+    c.click()
+    #expect(c.model.drawerOpen == false, "the click was accepted but did not close the drawer")
+    #expect(c.model.tier == .hover,
+            "the drawer closed but the tier did not come back down — the panel is still grown to cover a drawer that is not there")
+    #expect(panel.acceptsClicks == false,
+            "with the drawer closed and nothing left to open, the island is still swallowing menu bar clicks")
+    c.dismiss()
+}
+
 /// A question arriving must not open the drawer by itself — that would steal
 /// the screen from whatever the person is doing. It changes the cat and waits.
 @MainActor @Test func aQuestionDoesNotOpenTheDrawerOnItsOwn() {
