@@ -209,10 +209,20 @@ were explicitly not measured here:
   **The delta is the result, and it is unambiguous.** +13.6pp against a ±1.5pp
   noise floor (mains-measured, assumed no better on battery) is roughly 9× the
   instrument's own noise — nowhere near the "under ~2pp is not measurable" line.
-  It is also **larger than the entire first-animation cost** (~10pp, the
-  dormant-to-running jump this same file records above), on a machine that is
-  additionally throttled by Low Power Mode, which if anything should have
-  *compressed* the gap rather than inflated it.
+
+  Two different earlier deltas in this file are both smaller than +13.6pp, and
+  they are not the same quantity — naming both rather than reaching for one
+  round number, so a reader can check either: the **dormant → running** jump
+  (the 12fps timeline switching on) is **+2.89pp** in the original table, and
+  **+3.64pp** after Plan 4.5's `trot` change added a second continuous
+  transform to `running`. The **badge transform's own cost** — hover-monitor-
+  alone (0.29%) up to dormant island composited (12.26%) — is **+11.97pp**,
+  what the per-island passage above calls "roughly 10pp for the first." The
+  comparison that matters here is against that second figure: **+13.6pp for
+  the session list exceeds the +11.97pp the badge transform itself cost**, not
+  merely the +2.89–3.64pp of switching the timeline on. It exceeds both, on a
+  machine additionally throttled by Low Power Mode, which if anything should
+  have *compressed* the gap rather than inflated it.
 
   **`draws/s` stayed flat — 47.8 to 47.7 — across that whole +13.6pp.** The
   badge's `Canvas` is not drawing more often with the list open; whatever the
