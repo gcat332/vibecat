@@ -87,6 +87,40 @@ value — it is an architectural mismatch:**
   on purpose), not a constant to nudge. `trot`'s missing pixel is a one-line fix
   and should not wait for that decision.
 
+- **All five badges animate in the prototype. Three of ours are still — and the
+  reason may be a false economy.** Confirmed against the prototype's own CSS:
+
+  | badge | prototype | ours |
+  |---|---|---|
+  | `zzz` | `zfloat 2.8s`, two z's staggered | still |
+  | `check` | `twinkle 2.2s` — `scale(.62)` + `opacity(.55)` | still |
+  | `squares` | `quad 1.15s` — `scale(.5→1.18)`, `opacity(.28→1)`, staggered per square | 12fps cell swap |
+  | `bang` | `softpulse 1.1s` | 12fps cell swap |
+  | `cross` | `shudder 2.4s` | still |
+
+  `zzz`, `check` and `cross` were made still on a **measured** basis: a
+  continuously drifting `zzz` cost 3.6–4.1% of a core against 0.35% with no
+  timeline, for an animation that did not read as one. That measurement was
+  honest and is not in dispute.
+
+  **But it measured the wrong mechanism.** Every badge animation in the
+  prototype is `scale` and/or `opacity` — and the badge is monochrome, so
+  opacity is alpha on a single fill. In SwiftUI those are `.scaleEffect` and
+  `.opacity` on the whole `BadgeCanvas`, declared once with
+  `.repeatForever()`, and run by the render server. Our cost came from
+  animating by *swapping cells*, which forces a `TimelineView` to re-evaluate
+  the `Canvas` N times a second. A transform-based badge animation plausibly
+  costs **no timeline at all** — meaning all five could animate for roughly
+  what three still ones cost today.
+
+  **This is a hypothesis, not a measurement.** Whether SwiftUI re-invokes a
+  `Canvas` renderer during an implicit repeating transform is exactly the kind
+  of thing this project has been wrong about before, in both directions. Measure
+  it with `getrusage` before designing around it. If it holds, it is the single
+  biggest visual-fidelity win available and it reframes Plan 8: not "match rate
+  to distinct frames", but "the prototype's motion is transforms, and transforms
+  are free".
+
 - **The island's ground colour.** The prototype's island background is
   `--void: #07080A`; ours is `#05070B`. That value is the prototype's *sprite
   outline mix base* (`--sp-out` mixes accent 20% into it), which `CatPalette`

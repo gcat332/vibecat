@@ -35,13 +35,31 @@ public struct BadgeCanvas: View {
         return path
     }
 
+    /// Flipped once on appear so the implicit animation below has something to
+    /// travel to. `autoreverses` then carries it back and forth forever.
+    @State private var pulsing = false
+
     public var body: some View {
         let path = litPath
         let color = Color(tint)
+        let pulse = badge.pulse
         Canvas { ctx, _ in
             ctx.fill(path, with: .color(color))
         }
         .frame(width: CGFloat(Badge.size) * cellSize,
                height: CGFloat(Badge.size) * cellSize)
+        // The prototype animates every badge by transform, not by changing
+        // which cells are lit — see `Badge.pulse`. Applied as modifiers on the
+        // whole canvas rather than inside the renderer, so the render server
+        // runs it and no `TimelineView` is needed: `zzz`, `check` and `cross`
+        // animate while `needsTimeline` stays false and the island keeps its
+        // 0.35%-of-a-core idle. `squares` opts out because its cells already
+        // turn, and scaling on top would double the motion.
+        .scaleEffect(pulse.map { pulsing ? $0.scale.upperBound : $0.scale.lowerBound } ?? 1)
+        .opacity(pulse.map { pulsing ? $0.opacity.upperBound : $0.opacity.lowerBound } ?? 1)
+        .animation(pulse.map {
+            .easeInOut(duration: $0.period / 2).repeatForever(autoreverses: true)
+        }, value: pulsing)
+        .onAppear { if pulse != nil { pulsing = true } }
     }
 }

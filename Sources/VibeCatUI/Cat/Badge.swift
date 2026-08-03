@@ -58,6 +58,32 @@ public enum Badge: String, Sendable, CaseIterable {
         }
     }
 
+    /// The prototype animates **all five** badges, and every one of them by
+    /// `scale` and/or `opacity` rather than by changing which cells are lit —
+    /// `zfloat 2.8s`, `twinkle 2.2s`, `quad 1.15s`, `softpulse 1.1s`,
+    /// `shudder 2.4s`.
+    ///
+    /// That distinction is why `zzz`, `check` and `cross` can animate at all.
+    /// `motion` below drives a `TimelineView`, which re-evaluates a `Canvas`
+    /// N times a second — measured at 3.6–4.1% of a core for `zzz`, against
+    /// 0.35% with no timeline, which is why all three were made still. A
+    /// transform is a different mechanism: declared once with
+    /// `.repeatForever()` and run by the render server, so it needs no
+    /// timeline and leaves `needsTimeline` false. See `BadgeCanvas`.
+    ///
+    /// **Not yet measured.** The claim that a repeating `.scaleEffect` does not
+    /// re-invoke the `Canvas` renderer is reasoned from how SwiftUI composites,
+    /// not from `getrusage`. Measure before relying on it.
+    public var pulse: (period: Double, scale: ClosedRange<Double>, opacity: ClosedRange<Double>)? {
+        switch self {
+        case .zzz:     (2.8, 0.92...1.0, 0.55...1.0)   // zfloat
+        case .check:   (2.2, 0.62...1.0, 0.55...1.0)   // twinkle
+        case .squares: nil                             // its cells already turn
+        case .bang:    (1.1, 0.94...1.06, 0.7...1.0)   // softpulse
+        case .cross:   (2.4, 0.96...1.04, 0.75...1.0)  // shudder
+        }
+    }
+
     public var motion: MotionProfile {
         switch self {
         case .zzz:
@@ -104,16 +130,16 @@ public enum Badge: String, Sendable, CaseIterable {
             // as a V, and — worse — would be a mirror image of itself, leaving
             // nothing for a desaturated eye or a test to tell it from `cross`.
             //
-            // Three rows, down from four. The first version reached rows 2–5
-            // and read as a slash across the disc rather than a mark inside it.
+            // The same 3×3 footprint as `cross` — rows 2–4, columns 2–4 —
+            // after two larger versions. The first reached rows 2–5 and columns
+            // 1–5 and read as a slash across the disc; the second was still
+            // five columns wide and so visibly outweighed `cross` beside it.
             //
-            // The flat two-cell elbow at the bottom is what keeps it legible at
-            // this height. A purely diagonal four-cell version was tried and
-            // rendered as a V: at three rows there is not enough difference
-            // between a one-step left arm and a two-step right one for the
-            // asymmetry to read, and the asymmetry is the whole discriminator
-            // against `cross`. The elbow gives the eye a vertex to sit on.
-            return [(3, 1), (4, 2), (4, 3), (3, 4), (2, 5)]
+            // The right arm rises *vertically* rather than diagonally, which is
+            // what buys the asymmetry inside three columns: a purely diagonal
+            // tick this small is a symmetric V, and mirror-asymmetry is the
+            // whole discriminator against `cross`.
+            return [(3, 2), (4, 3), (3, 4), (2, 4)]
         case .cross:
             // Three by three, and **this is the largest an X fits.** Both of its
             // diagonals through the centre run out to (1,1)/(1,5)/(5,1)/(5,5),
