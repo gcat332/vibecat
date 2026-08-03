@@ -249,11 +249,28 @@ list, not because the list needs them.
   changing `IslandBody`'s hover-reveal mechanism — which is exactly the mechanism
   Plan 5 fills with §9.1's promised name and elapsed time. Doing both at once is
   cheaper than doing either twice.
-- **`render()`'s unconditional writes.** It assigns `model.state` and
+- ~~**`render()`'s unconditional writes.** It assigns `model.state` and
   `model.sessionCount` on every call, and `@Observable` notifies on the write
   rather than on a change, so every hook event invalidates the body two or three
-  times when nothing differs. Harmless at today's rates; Plan 5 is what raises
-  them.
+  times when nothing differs.~~ **The premise is false — corrected 2026-08-03.**
+
+  Measured on Swift 6.3.2: `@Observable` does **not** notify when an `Equatable`
+  property is assigned an equal value. Verified four ways in one run and confirmed
+  by mutation (guards added, then deleted, with the test passing either way). So
+  there were never two or three spurious invalidations per hook event, and no
+  guard is needed. Pinned by
+  `anEqualWriteToAnObservablePropertyDoesNotNotify`.
+
+  **This mattered far more than the item itself, because something else depended
+  on the belief being true.** `NotchController`'s bloom-end nudge assigned
+  `model.aura` its own value to force `IslandView.body` to re-evaluate and drop the
+  `TimelineView` — and, notifying nothing, it ended no bloom. A still mood
+  therefore kept a live 8fps timeline **forever** after the first state change:
+  ~3.3% of a core permanently, against the animation spike's own 3.61%-vs-0.35%
+  figures, in exactly the state §6.1 says must look idle. No probe caught it
+  because `AuraTrigger.observe` never blooms on its first observation and
+  `BadgeCPUProbe` sets the state once. Fixed by `AuraTrigger.endBloom()` —
+  Plan 5's inserted Task 3.5.
 - **A CPU measurement, as a task.** Plan 3's numbers are all single-sprite, on
   mains power, on a 120Hz built-in display. Plan 8 needs multi-sprite numbers to
   aim at, and Plan 5 is the first thing that produces several sprites. Measure

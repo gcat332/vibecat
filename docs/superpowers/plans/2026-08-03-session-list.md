@@ -328,7 +328,40 @@ git commit -m "feat: the hover reveal names the session it has been promising si
 
 ---
 
-## Task 3: Stop `render()` notifying when nothing changed
+## Task 3: Wire `revealed`, and pin what `@Observable` actually does — **PREMISE CORRECTED 2026-08-03**
+
+> **This task was written on a false premise and its title used to be "Stop
+> `render()` notifying when nothing changed".** The premise — inherited from
+> `plans/README.md`'s own follow-up list — was that `@Observable` "notifies on the
+> write rather than on a change", so `render()`'s unconditional assignments cost
+> two or three spurious invalidations per hook event.
+>
+> **Measured on Swift 6.3.2: it does not.** An equal write to an `Equatable`
+> property notifies nothing. Verified four ways in one run
+> (`one=false three=false noopGuarded=false manualEqual=false`), and confirmed by
+> mutation — the guards this task originally added could be deleted with its test
+> still passing, which made that test one this project would call decoration.
+>
+> So the guards are redundant with `@Observable`'s own equality check and are
+> **not** part of this task. What survives, and is worth having:
+>
+> 1. **`render()` assigns `model.revealed`**, which is what makes
+>    `IslandModel.revealed`'s doc comment true and what Task 2 deliberately left
+>    unwired. Plus `SessionStore.mostUrgentSession` to supply it.
+> 2. **`render()` widened to `internal`**, so a test can drive it — the same
+>    reason `click()` and `setHovering(_:)` already are.
+> 3. **A characterization test of the dedupe**, `anEqualWriteToAnObservable
+>    PropertyDoesNotNotify`, kept precisely because **Task 3.5 depends on the
+>    opposite behaviour**: the bloom-end nudge assigned an equal value and so
+>    ended nothing. If this test ever starts failing, that nudge silently starts
+>    working; while it passes, the nudge needs `endBloom()`.
+>
+> **And the trap that produced the wrong measurement is recorded in that test**: a
+> one-shot `withObservationTracking` registration is *not consumed* by an equal
+> write, so it stays armed and is tripped by the next real change. A flag read
+> later than its own mutation reports a false positive. That is how the controller
+> first "confirmed" the opposite.
+
 
 **Files:**
 - Modify: `Sources/VibeCatUI/NotchController.swift` — `render()`
@@ -340,49 +373,102 @@ git commit -m "feat: the hover reveal names the session it has been promising si
 
 **Why now:** `@Observable` notifies on the *write*, not on a change, so `render()`'s unconditional assignments invalidate the body two or three times per hook event when nothing differs. Harmless at Plan 4's rates. Task 5 puts a scrolling list of rows on the other end of those invalidations, and Task 2 just added a third assigned property.
 
+**Amended before execution.** The first draft of this task's test could neither
+compile nor fail: it called `controller.render()`, which is `private`, and used
+`IslandBody.restingWidthReadCount` as the instrument — a counter that only moves
+when `.body` is built directly, never from `render()`, so it reads 0 with the
+guard and 0 without it. Ruled by the human partner: use `withObservationTracking`
+and widen `render()` to internal.
+
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-/// `@Observable` notifies on the write, not on a change. `IslandView.buildCount`
-/// cannot see this (the root view is assigned once — that is what that counter
-/// exists to prove), so the observable read-counters are the instrument: a
-/// second identical ingest must not touch the model at all.
+/// `@Observable` notifies on the *write*, not on a change, so `render()`'s
+/// unconditional assignments invalidate the body two or three times per hook
+/// event when nothing differs.
+///
+/// The instrument is an observation, not a counter. `IslandBody
+/// .restingWidthReadCount` cannot see this — it only moves when `.body` is built,
+/// which `render()` does not do in a headless test, so it would read 0 whether or
+/// not the guard exists. `withObservationTracking` registers interest in exactly
+/// the properties `render()` assigns and fires when one is written, which is the
+/// behaviour under test rather than a proxy for it.
+///
+/// **Both halves are asserted, and the positive control is the important one:**
+/// `!fired` on its own would pass just as well against a broken instrument that
+/// never fires at all.
 @MainActor @Test func anIdenticalEventDoesNotRewriteTheModel() {
-    let model = AppModel(socketPath: "/dev/null/unused.sock")
-    let controller = NotchController(model: model, metrics: { IslandGoldenTests.mbp14 })
-    let event = VibeEvent(id: "e", cli: "claude-code", kind: .running,
-                          session: "s", cwd: "/Users/dev/api")
-    model.ingest(event)
+    let appModel = AppModel(socketPath: "/dev/null/vibecat-test-never-bound.sock")
+    let controller = NotchController(model: appModel, metrics: { IslandGoldenTests.mbp14 })
+    controller.refreshGeometry()
+    appModel.ingest(VibeEvent(id: "e", cli: "claude-code", kind: .running,
+                              session: "s", cwd: "/Users/dev/api"))
     controller.render()
 
-    let before = (state: controller.model.state,
-                  count: controller.model.sessionCount)
-    IslandBody.restingWidthReadCount = 0
-    controller.render()
+    func renderFires(_ body: () -> Void) -> Bool {
+        var fired = false
+        withObservationTracking {
+            _ = controller.model.state
+            _ = controller.model.sessionCount
+            _ = controller.model.revealed
+        } onChange: {
+            fired = true
+        }
+        body()
+        return fired
+    }
 
-    #expect(controller.model.state == before.state && controller.model.sessionCount == before.count,
-            "setup: the second render must be a no-op in value terms")
-    #expect(IslandBody.restingWidthReadCount == 0,
-            "a re-render with nothing changed still invalidated the body \(IslandBody.restingWidthReadCount) times — @Observable notified on the write")
+    // Positive control: a render that genuinely changes something must fire, or
+    // the assertion below proves nothing.
+    #expect(renderFires {
+        appModel.ingest(VibeEvent(id: "e2", cli: "claude-code", kind: .permission,
+                                  session: "s2", cwd: "/Users/dev/web"))
+        controller.render()
+    }, "a render that changed the state did not notify — the instrument is broken, so the no-op assertion below would be vacuous")
+
+    #expect(!renderFires { controller.render() },
+            "a re-render with nothing changed still wrote to the model — @Observable notifies on the write, so render() has to compare first")
 }
 ```
 
 - [ ] **Step 2: Run it and watch it fail**
 
 Run: `swift test --filter anIdenticalEventDoesNotRewriteTheModel`
-Expected: FAIL with a non-zero read count.
+Expected: FAIL on the **second** expectation — the no-op render still notifies.
+The positive control must already pass; if it does not, stop and fix the
+instrument before touching `render()`.
 
-- [ ] **Step 3: Guard each write**
+- [ ] **Step 3: Widen `render()`, then guard each write**
+
+`render()` is `private`. Make it `internal` with a doc comment giving the same
+reason `click()` and `setHovering(_:)` already are — this file's own tests drive
+the state machine directly rather than through a window server:
+
+```swift
+/// `internal`, not `private`: `anIdenticalEventDoesNotRewriteTheModel` drives
+/// this directly, the same way this file's tests already drive `click()` and
+/// `setHovering(_:)` — there is no window server in `swift test`, so a render
+/// triggered any other way cannot be observed.
+func render() {
+```
+
+Then guard the three assignments:
 
 ```swift
 // `@Observable` notifies on the write, not on a change, so an unconditional
 // assignment invalidates the body even when the value is identical — two or
 // three times per hook event. Harmless at Plan 4's rates; Plan 5 is what
 // raises them, by putting a scrolling list on the other end.
+let state = appModel.islandState
+let count = appModel.sessionCount
 if model.state != state { model.state = state }
 if model.sessionCount != count { model.sessionCount = count }
-if model.revealed != revealed { model.revealed = revealed }
 ```
+
+`revealed` is assigned by Task 2 and gets the same guard. **`model.aura.observe`
+below must stay unconditional** — it does its own change detection and only
+reports `true` on a real change, which the existing comment says; folding it into
+one of these guards would stop the aura firing.
 
 - [ ] **Step 4: Run the test and the suite**
 
@@ -394,6 +480,160 @@ Run: `swift test` → all pass
 ```bash
 git add Sources/VibeCatUI/NotchController.swift Tests/VibeCatUITests/NotchControllerTests.swift
 git commit -m "perf: @Observable notifies on the write, so render() has to compare first"
+```
+
+---
+
+## Task 3.5: The bloom never ends, so the timeline never stops — **INSERTED 2026-08-03**
+
+**Files:**
+- Modify: `Sources/VibeCatUI/AuraTrigger.swift`
+- Modify: `Sources/VibeCatUI/NotchController.swift` — the `bloomEnd` Task
+- Test: `Tests/VibeCatUITests/AuraTriggerTests.swift`, `Tests/VibeCatUITests/NotchControllerTests.swift`
+
+**Interfaces:**
+- Produces: `AuraTrigger.endBloom()` (`mutating`)
+
+**Why this exists.** Found while executing Task 3, from the same root cause. On
+Swift 6.3.2 `@Observable`'s setter does not notify when an `Equatable` property is
+assigned an equal value — measured, see the ledger. `NotchController`'s bloom-end
+nudge is:
+
+```swift
+bloomEnd = Task { [weak self] in
+    try? await Task.sleep(for: .seconds(AuraTrigger.duration))
+    guard !Task.isCancelled else { return }
+    self?.model.aura = self?.model.aura ?? AuraTrigger()   // an EQUAL write
+}
+```
+
+It assigns `model.aura` its own current value, so it notifies nothing. And that
+nudge is the only thing that re-evaluates `IslandView.body` after a bloom ends:
+
+- `IslandView.body` is `Group { if model.needsTimeline { TimelineView … } else { … } }`.
+- `needsTimeline` for a **still** mood is `aura.isBlooming(at: Date())`.
+- A `TimelineView`'s own ticks re-run **its content closure**, not the enclosing
+  `body`. So nothing else re-evaluates that `if`.
+
+**Consequence: after the first state change into a still mood (`idle`, `dormant`,
+`failed`), the island keeps a live `TimelineView` forever.** `minimumInterval`
+falls back to 8fps when `framesPerSecond == 0`, and
+[the animation spike](../spikes/2026-08-01-animation-spike.md) measured a live 8fps
+timeline at **3.61% of a core against 0.35% with none** — so this is roughly 3.3
+points of a core running permanently, in exactly the state §6.1 says "an idle
+machine should look idle".
+
+**Why no probe caught it.** `AuraTrigger.observe` returns `false` on its first
+observation ("launching the app is not a state change"), and `BadgeCPUProbe` sets
+`model.state` once before sampling — so no bloom ever fires inside the probe, and
+its dormant row honestly reported `needsTimeline false`. The bug needs a *second*
+state change to appear.
+
+- [ ] **Step 1: Write the two failing tests**
+
+```swift
+/// §9.2: the aura "leaves nothing behind". Once the bloom's duration has elapsed
+/// it is over, and the model has to be able to say so with a value that actually
+/// changes — an equal write notifies nothing (see
+/// `anEqualWriteToAnObservablePropertyDoesNotNotify`), so "nudging" the same
+/// value back in cannot end anything.
+@Test func endingABloomStopsItBlooming() {
+    let fired = Date(timeIntervalSince1970: 1_000_000)
+    var aura = AuraTrigger()
+    _ = aura.observe(.idle, now: fired)          // first observation never blooms
+    #expect(aura.observe(.running, now: fired), "setup: a real change must bloom")
+    #expect(aura.isBlooming(at: fired))
+
+    let before = aura
+    aura.endBloom()
+
+    #expect(!aura.isBlooming(at: fired), "the bloom survived endBloom()")
+    #expect(aura != before,
+            "endBloom() left the value equal to what it was — @Observable would not notify, which is the entire bug this exists to fix")
+}
+
+/// The bug itself, at the level it actually bites: a still mood with a bloom in
+/// flight needs a timeline, and must stop needing one the moment the bloom ends.
+/// Nothing asserted this before, which is why an 8fps timeline could run forever.
+@MainActor @Test func aStillMoodStopsNeedingATimelineOnceTheBloomEnds() {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    model.state = .dormant
+    let now = Date()
+    _ = model.aura.observe(.dormant, now: now)
+    #expect(model.aura.observe(.idle, now: now), "setup: a real change must bloom")
+    model.state = .idle
+    #expect(!model.activeProfile.isContinuous,
+            "setup: idle's mood must be still, or this tests the wrong branch")
+    #expect(model.needsTimeline, "setup: a bloom in flight needs a timeline")
+
+    model.aura.endBloom()
+
+    #expect(!model.needsTimeline,
+            "the island still wants a timeline after the bloom ended — this is ~3.3% of a core running forever in the state §6.1 says must look idle")
+}
+```
+
+- [ ] **Step 2: Run them and watch them fail**
+
+Run: `swift test --filter endingABloomStopsItBlooming` and
+`--filter aStillMoodStopsNeedingATimelineOnceTheBloomEnds`
+Expected: both FAIL to compile — `endBloom()` does not exist.
+
+- [ ] **Step 3: Add `endBloom()`**
+
+In `AuraTrigger`:
+
+```swift
+/// Ends the bloom, and does it by changing the value.
+///
+/// The distinction is the whole point. `NotchController` used to "nudge"
+/// `model.aura` by assigning it its own current value, on the belief that an
+/// `@Observable` write notifies regardless of equality. Measured on Swift 6.3.2:
+/// it does not, for an `Equatable` property. So the nudge notified nothing,
+/// `IslandView.body` was never re-evaluated, and its `if model.needsTimeline`
+/// branch kept a `TimelineView` alive forever after the first state change into a
+/// still mood — about 3.3% of a core, permanently, per the animation spike's own
+/// 3.61%-against-0.35% figures.
+///
+/// Clearing `firedAt` is honest as well as effective: the bloom really is over,
+/// `intensity` is already 0 at that instant, and the resulting value differs from
+/// the one before it, so the observation actually fires.
+public mutating func endBloom() {
+    firedAt = nil
+}
+```
+
+- [ ] **Step 4: Use it in the nudge**
+
+Replace the equal write in `NotchController`'s `bloomEnd` Task:
+
+```swift
+bloomEnd = Task { [weak self] in
+    try? await Task.sleep(for: .seconds(AuraTrigger.duration))
+    guard !Task.isCancelled else { return }
+    // `endBloom()`, never `model.aura = model.aura` — see that method's own
+    // comment. An equal write notifies nothing on this toolchain, and this is
+    // the only thing that re-evaluates `IslandView.body` so its
+    // `needsTimeline` branch can drop the TimelineView.
+    self?.model.aura.endBloom()
+}
+```
+
+- [ ] **Step 5: Run both tests, then the suite**
+
+Run: `swift test` → all pass. `swift build --build-tests 2>&1 | grep -c warning:` → 0.
+
+Existing aura tests assert on `isBlooming`/`intensity`/`opacity` across the
+duration; none of them call `endBloom()`, so they must be unaffected. If one
+breaks, that is a finding worth reporting, not a licence to weaken it.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add Sources/VibeCatUI/AuraTrigger.swift Sources/VibeCatUI/NotchController.swift \
+        Tests/VibeCatUITests/AuraTriggerTests.swift Tests/VibeCatUITests/NotchControllerTests.swift
+git commit -m "fix: an equal write cannot end a bloom, so the timeline never stopped"
 ```
 
 ---
