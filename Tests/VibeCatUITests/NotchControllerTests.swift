@@ -770,3 +770,79 @@ private let externalDisplay = ScreenMetrics(
     #expect(!model.needsTimeline,
             "the island still wants a timeline after the bloom ended — this is ~3.3% of a core running forever in the state §6.1 says must look idle")
 }
+
+/// Closes link 2 of endBloom()'s fix chain, which nothing above measures:
+/// `aStillMoodStopsNeedingATimelineOnceTheBloomEnds` only proves the *value*
+/// of `needsTimeline` ends up correct — it reads a plain computed property,
+/// which recomputes fresh regardless of whether any notification ever fired.
+///
+/// First draft of this test assumed a mutating method call through an
+/// `@Observable` property is gated the same way `anEqualWriteToAnObservable
+/// PropertyDoesNotNotify` shows plain assignment is, and asserted a no-op
+/// `endBloom()` call (no bloom in flight, so `firedAt` is already nil) would
+/// not notify. It notified anyway. That is not a broken test — dumping macro
+/// expansions (`-Xfrontend -dump-macro-expansions`, the same technique that
+/// pinned the `set`-accessor characterization) shows why: a mutating call
+/// desugars through a *different* generated accessor, `_modify`, and unlike
+/// `set` — which does `guard shouldNotifyObservers(_aura, newValue) else {
+/// return }` before touching the registrar — `_modify` calls
+/// `willSet`/`didSet` unconditionally, with no equality gate at all:
+///
+/// ```swift
+/// _modify {
+///     access(keyPath: \.aura)
+///     _$observationRegistrar.willSet(self, keyPath: \.aura)
+///     defer { _$observationRegistrar.didSet(self, keyPath: \.aura) }
+///     yield &_aura
+/// }
+/// ```
+///
+/// So `model.aura.endBloom()` — the exact call shape production's `bloomEnd`
+/// Task uses — notifies regardless of whether `firedAt` actually changes.
+/// That is a *stronger* guarantee than `AuraTrigger.endBloom()`'s own doc
+/// comment claims ("the resulting value differs … so the observation
+/// actually fires"): the value differing is what makes clearing `firedAt`
+/// honest per §9.2, not what makes the notification fire. This test pins the
+/// measured mechanism instead of the assumed one.
+@MainActor @Test func aMutatingCallThroughAnObservablePropertyNotifiesUnconditionally() {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+
+    // Same shape as anEqualWriteToAnObservablePropertyDoesNotNotify's own
+    // `fires` helper, tracking `model.aura` instead of `model.state`.
+    func fires(_ body: () -> Void) -> Bool {
+        nonisolated(unsafe) var fired = false
+        withObservationTracking {
+            _ = model.aura
+        } onChange: {
+            fired = true
+        }
+        body()
+        return fired
+    }
+
+    // Not vacuous: a plain equal-value assignment — the exact shape
+    // anEqualWriteToAnObservablePropertyDoesNotNotify already pins as a
+    // non-notifying `set` call — must not notify here either, or this
+    // harness can't tell "fired" from "didn't" and nothing below means
+    // anything.
+    #expect(!fires { model.aura = model.aura },
+            "an equal plain assignment notified — the harness is broken, so the readings below are vacuous")
+
+    // The case endBloom() actually needs to work for: a real bloom in
+    // flight, ended via the mutating call production uses. Read immediately
+    // after its own mutation. If this doesn't fire, the fix does not work.
+    let now = Date()
+    _ = model.aura.observe(.idle, now: now)
+    #expect(model.aura.observe(.running, now: now) == true, "setup: a real change must bloom")
+    #expect(model.aura.isBlooming(at: now), "setup: bloom must actually be in flight")
+    #expect(fires { model.aura.endBloom() },
+            "endBloom() changed the value but did not notify — the fix's whole mechanism depends on this firing")
+
+    // The surprising part, read immediately after its own mutation: calling
+    // endBloom() again is now a genuine no-op (firedAt is already nil from
+    // the call above), and it STILL notifies — confirming the dumped
+    // `_modify` accessor has no equality gate, unlike `set`.
+    #expect(fires { model.aura.endBloom() },
+            "a no-op mutating call did not notify — _modify is gated after all, contradicting the dumped macro expansion")
+}
