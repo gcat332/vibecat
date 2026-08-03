@@ -57,6 +57,49 @@ struct IslandGoldenTests {
         return (first, last, last - first + 1)
     }
 
+    /// §5.4's session count, measured off the render: accent-coloured pixels
+    /// in the columns strictly to the right of the cutout.
+    ///
+    /// Column-limited, not whole-raster, and that is the whole point. The cat
+    /// and its badge are accent-coloured too and sit *left* of the cutout, so
+    /// `raster.pixelCount(near: accent)` over the whole render still read 192
+    /// on the render where the count had vanished entirely — a number that
+    /// looks like evidence and is not. Right of the cutout the only
+    /// accent-coloured thing a `.sessionCount` layout can draw is the count:
+    /// `RevealContent` paints `--bone` and `--haze` and nothing else (see that
+    /// file), and `.agentIcon` is a different `layout.right` case.
+    ///
+    /// Row-limited to the collapsed bar as well: an open drawer's own rows can
+    /// never hold the count, so scanning them would only widen what could
+    /// accidentally be counted, and it keeps the `MainActor` hold to 221 × 33
+    /// pixels rather than 221 × 344 in a suite whose one known flake
+    /// (`aLapsedQuestionClosesTheDrawer`) is a `Task` starved of main-actor
+    /// turns. Not a claimed cure for that flake — measured over 8 full-suite
+    /// runs each, it fails 2/8 on the commit before this one and 3/8 with these
+    /// tests added, which at that sample size says nothing either way.
+    @MainActor
+    static func sessionCountPixels(_ raster: Raster, _ m: IslandModel,
+                                   tolerance: Int = 6) -> Int {
+        let accent = m.state.accent
+        let target = (Int((accent.r * 255).rounded()),
+                      Int((accent.g * 255).rounded()),
+                      Int((accent.b * 255).rounded()))
+        let notch = IslandGeometry(screen: mbp14).notch
+        let from = Int(notch.maxX - m.frames.panel.minX)
+        let bottom = min(raster.height, Int(notch.height.rounded(.up)))
+        var count = 0
+        for x in from..<raster.width {
+            for y in 0..<bottom {
+                let p = raster[x, y]
+                guard !p.isTransparent else { continue }
+                if abs(Int(p.r) - target.0) <= tolerance,
+                   abs(Int(p.g) - target.1) <= tolerance,
+                   abs(Int(p.b) - target.2) <= tolerance { count += 1 }
+            }
+        }
+        return count
+    }
+
     @MainActor
     static func silhouette(_ m: IslandModel, scale: CGFloat = 1) throws -> (first: Int, last: Int, count: Int) {
         let raster = try rasterise(IslandBody(model: m, now: Date(timeIntervalSince1970: 1_000_000)),
@@ -355,9 +398,83 @@ struct IslandGoldenTests {
         // "Actual content present," the same reasoning
         // `nothingIsDrawnInsideTheCutoutWithTheDrawerOpen` gives for its own
         // identical check: the loop above is vacuously true against a blank
-        // canvas, so this confirms the reveal really painted something with
-        // hovering on, not merely that nothing painted at all.
-        #expect(raster.pixelCount(near: boneColour) > 0,
-                "no --bone pixel anywhere — the reveal's project name did not draw with the drawer open")
+        // canvas, so this confirms the collapsed bar really painted something.
+        //
+        // The witness is §5.4's session count, **not** `--bone` (F2 of the
+        // final whole-branch review). It was `pixelCount(near: boneColour) > 0`
+        // — an assertion that the hover reveal's project name *does* draw with
+        // the drawer open, which flatly contradicts this test's own doc comment
+        // 25 lines above and is exactly the bug F1 fixed. It was also the one
+        // test out of 128 that gating the reveal correctly failed. With the
+        // reveal correctly gated `IslandBody` paints only ground in these
+        // columns, so `--bone` is now 0 by design and the §5.1 loop above would
+        // have gone vacuous behind a witness that could never come back.
+        #expect(Self.sessionCountPixels(raster, m) > 0,
+                "no accent pixel right of the cutout — §5.4's session count did not draw at all, so the §5.1 scan above proves nothing")
+    }
+
+    /// The gap that let F1 through: **nothing in this suite looked at the
+    /// collapsed bar's *content* while the drawer was open.**
+    /// `theDrawersContentDoesNotShiftWhenOnlyHoverChanges` starts its loop at
+    /// `drawerTop`; `hoverWidensTheCollapsedRowAndLeavesTheDrawerRowAlone`
+    /// measures the silhouette's painted *extent*, not what is inside it. So a
+    /// change that shrank the collapsed half's frame without shrinking what was
+    /// laid out inside it passed every one of them.
+    ///
+    /// §5.4's session count is the thing that broke, because it was the only
+    /// flexible child of the overrunning `HStack` and SwiftUI squeezes those
+    /// first. The assertion is equality against the same count with the drawer
+    /// *closed and not hovering* — the plainest state there is, and the one
+    /// §6.1's progressive tiers say an open drawer must agree with, since by
+    /// then the reveal has done its job and been dropped. Equality, not `> 0`:
+    /// a partially squeezed digit is still some accent pixels, and the observed
+    /// failure was a "3" rendering as a clipped "p".
+    ///
+    /// Mutation-verified against the pre-fix behaviour — reverting
+    /// `content(cell:)` to `model.hovering ? CollapsedLayout.hoverReveal : 0`
+    /// gives open+hover **0** accent pixels right of the cutout against 13 for
+    /// all three healthy states, and this test fails with that message.
+    @MainActor @Test func theSessionCountSurvivesAnOpenDrawerWhileHovering() throws {
+        let event = VibeEvent(id: "q", cli: "claude-code", kind: .permission,
+                              session: "s", cwd: "/tmp/proj", title: "Bash command", body: "pnpm install",
+                              choices: [Choice(id: "allow", label: "Allow once"),
+                                        Choice(id: "deny", label: "Deny")],
+                              wantsReply: true)
+
+        /// `revealed` populated in every case, drawer or not: an empty
+        /// `RevealContent` lays out at zero width whatever the frame says, so
+        /// leaving it nil would hide the very overrun this measures.
+        func count(hovering: Bool, open: Bool) throws -> Int {
+            let m = Self.model(.waiting, count: 3, hovering: hovering)
+            m.revealed = Session(event: VibeEvent(id: "e", cli: "claude-code", kind: .running,
+                                                  session: "s2", cwd: "/Users/dev/api"),
+                                 now: Date(timeIntervalSince1970: 1_000_000))
+            if open {
+                m.question = QuestionModel(event: event)
+                m.drawerOpen = true
+                guard case .drawer = m.tier else {
+                    Issue.record("the fixture never reached the drawer tier — this test proves nothing")
+                    return -1
+                }
+            }
+            // A `.sessionCount` right flank is a precondition, not an
+            // assumption: with `.nothing` or `.agentIcon` there is no count to
+            // squeeze and every comparison below is 0 == 0.
+            guard case .sessionCount = m.layout.right else {
+                Issue.record("count=3 did not produce a session-count right flank — there is nothing for this test to measure")
+                return -1
+            }
+            let raster = try rasterise(IslandBody(model: m, now: Date(timeIntervalSince1970: 1_000_030)))
+            return Self.sessionCountPixels(raster, m)
+        }
+
+        let plain = try count(hovering: false, open: false)
+        #expect(plain > 0,
+                "the session count painted no accent pixel right of the cutout even at rest — the baseline this test compares against is vacuous")
+
+        for (hovering, open) in [(true, false), (false, true), (true, true)] {
+            #expect(try count(hovering: hovering, open: open) == plain,
+                    "hover \(hovering) · drawer \(open ? "open" : "closed"): §5.4's session count painted a different number of accent pixels than at rest — the collapsed bar's content is being squeezed by something laid out wider than its own frame")
+        }
     }
 }

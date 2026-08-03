@@ -498,6 +498,51 @@ struct IslandBody: View {
     @MainActor static var hoverRevealWidthReadCount = 0
     #endif
 
+    /// How much of the body's height sits *below* the notch line: an open
+    /// drawer's own height, and `0` whenever no drawer is open.
+    ///
+    /// One expression, read by three places that each need the same answer —
+    /// the two silhouette rects in `body` and the hover reveal in
+    /// `content(cell:)`. It used to be a `let` local to `body`, which is
+    /// precisely why `content(cell:)` could not consult it and F1 happened.
+    var drawerBelowNotch: CGFloat {
+        max(0, model.frames.body.height - model.geometry.notch.height)
+    }
+
+    /// The hover reveal's width **as actually laid out**: `hoverRevealWidth`
+    /// with the drawer open case subtracted back out.
+    ///
+    /// §6.1's tiers are progressive — Rest, then Hover, then Click — so once
+    /// the drawer is open the reveal has already done its job. Dropping it
+    /// makes the collapsed bar and the drawer exactly the same width
+    /// (`restingWidth` and `drawerWidth` are both 273.1 on the mbp14 fixture):
+    /// one column, which is what §9.1's "one body with mass" asks for and what
+    /// the prototype does with its single element. Without it, an open drawer
+    /// showed a collapsed bar `hoverReveal` points wider than itself — a step
+    /// off to the right of every question, for as long as the question was up.
+    ///
+    /// That `model.hovering` is *true* throughout an open drawer is not
+    /// obvious, and is what makes this the ordinary case rather than an edge:
+    /// `NotchController.click()` toggles `model.drawerOpen` and never touches
+    /// the controller's own `tier`, so that tier stays `.hover` and
+    /// `reflow()`'s `model.hovering = (tier == .hover)` stays true — and it has
+    /// to, because `panel.acceptsClicks` is gated on it, so a drawer you cannot
+    /// hover is a drawer you cannot answer.
+    ///
+    /// **Why this is a property and not two expressions** (F1 of the final
+    /// whole-branch review): Task 1 subtracted the reveal from the silhouette's
+    /// `.frame` alone and left `content(cell:)` laying `RevealContent` out at
+    /// the full `CollapsedLayout.hoverReveal` whenever `model.hovering`. The
+    /// `HStack` then overran a frame with no room for it and SwiftUI squeezed
+    /// the only flexible child — §5.4's session-count `Text`. Measured off the
+    /// render, accent pixels to the right of the cutout: 13 closed+hover, 13
+    /// open+no-hover, **0** open+hover. Through `NSHostingView` the digit came
+    /// out as a clipped "p". Both call sites reading this one property is the
+    /// fix; `theSessionCountSurvivesAnOpenDrawerWhileHovering` is the test.
+    var revealWidth: CGFloat {
+        drawerBelowNotch > 0 ? 0 : hoverRevealWidth
+    }
+
     var body: some View {
         let panel = model.panelFrames
         let body = model.frames.body
@@ -520,6 +565,7 @@ struct IslandBody: View {
         // place computes the offset, not two that can drift apart.
         let localOrigin = IslandFrames(body: body, panel: panel.panel).bodyInPanel.origin
         let cell: CGFloat = 1
+        let drawerBelow = drawerBelowNotch
 
         // Plan 5, Task 1: **two** silhouette rects, not one.
         //
@@ -528,15 +574,17 @@ struct IslandBody: View {
         // Plan 4 deliberately made the drawer's width hover-independent — so a
         // single hover-coupled rect spanning both painted `hoverReveal` points of
         // island ground straight down the right of the drawer, over ~92% of its
-        // height, appearing and disappearing with the cursor. Measured before
-        // this: the ground colour at 2pt past the drawer's own right edge, 60pt
-        // below the notch line.
+        // height. Not "appearing and disappearing with the cursor" — that
+        // understates it, and the comment on the `.frame` below says so 40 lines
+        // later: `model.hovering` stays *true* for the whole life of an open
+        // drawer, so in production the sliver stood there for as long as the
+        // question did. Measured before this: the ground colour at 2pt past the
+        // drawer's own right edge, 60pt below the notch line.
         //
         // The collapsed half rounds nothing while the drawer is open
         // (`roundsBottom:`) — two rounded shapes stacked would put a pair of
         // corners across the middle of one body, a seam at exactly the line the
         // island is meant to read as continuous across.
-        let drawerBelow = max(0, body.height - model.geometry.notch.height)
 
         ZStack(alignment: .topLeading) {
             Color.clear
@@ -551,28 +599,13 @@ struct IslandBody: View {
                     .fill(Color(islandGroundColour))
                     .overlay(alignment: .topLeading) { content(cell: cell) }
                     .clipShape(IslandShape(roundsBottom: drawerBelow == 0))
-                    // The reveal is dropped while a drawer is open, and this is
-                    // the second half of the sliver fix rather than an extra.
-                    //
-                    // `model.hovering` is *true* throughout an open drawer in
-                    // production, which is not obvious: `click()` toggles
-                    // `model.drawerOpen` and never touches `NotchController.tier`,
-                    // so that tier stays `.hover` and `reflow()`'s
-                    // `model.hovering = (tier == .hover)` stays true — and it has
-                    // to, because `panel.acceptsClicks` is gated on it, so a
-                    // drawer you cannot hover is a drawer you cannot answer.
-                    //
-                    // So without this, an open drawer permanently showed a
-                    // collapsed bar `hoverReveal` points wider than itself: a
-                    // step off to the right of every question, for as long as the
-                    // question was up. §6.1's tiers are progressive — Rest, then
-                    // Hover, then Click — so once the drawer is open the reveal
-                    // has already done its job, and dropping it makes the bar and
-                    // the drawer exactly the same width (`restingWidth` and
-                    // `drawerWidth` are both 273.1 on the mbp14 fixture). One
-                    // column, which is what §9.1's "one body with mass" asks for
-                    // and what the prototype does with its single element.
-                    .frame(width: restingWidth + (drawerBelow > 0 ? 0 : hoverRevealWidth),
+                    // `revealWidth`, not `hoverRevealWidth`: the reveal is
+                    // dropped while a drawer is open (see that property for why),
+                    // and this frame and `content(cell:)`'s own reveal frame now
+                    // read the *same* property so they cannot disagree about how
+                    // wide it is. They did disagree, and that was F1 of the final
+                    // whole-branch review — see `revealWidth`'s doc comment.
+                    .frame(width: restingWidth + revealWidth,
                            height: model.geometry.notch.height)
                 if drawerBelow > 0 {
                     IslandShape()
@@ -610,8 +643,12 @@ struct IslandBody: View {
                 // be keyed to the same changing `body.width`.
                 .animation(.easeOut(duration: 0.28), value: hoverRevealWidth)
                 // Fix round 1: the click that opens the drawer. Scoped to
-                // this shape's own rect (`restingWidth + hoverRevealWidth` ×
-                // `body.height`, offset within the panel) via `.contentShape`
+                // the stack's own rect via `.contentShape` — that is
+                // `restingWidth + revealWidth` wide by `body.height` tall,
+                // offset within the panel, so with a drawer open it is the
+                // collapsed bar and the drawer together at the one shared
+                // width and *not* `restingWidth + hoverRevealWidth`, which is
+                // 150pt wider than anything painted (see `revealWidth`)
                 // — not the outer `.frame` below, which is the full,
                 // oversized panel width and would otherwise make the entire
                 // unused margin tappable too. `model.onIslandClick`, not a
@@ -652,14 +689,33 @@ struct IslandBody: View {
             // §9.1/§5.2's hover reveal: the session's name and elapsed time,
             // filling the 150pt `CollapsedLayout.hoverReveal` already reserves
             // once hovering — see `rightFlankWidth`'s own `reveal` line. Width
-            // (not just opacity) is driven by `model.hovering` too, and
+            // (not just opacity) is driven by `revealWidth` too, and
             // `.clipped()` is load-bearing: §5.1 forbids content in the
             // cutout's columns, and an unclipped `Text` at width 0 still
             // paints past its frame.
+            //
+            // `revealWidth`, **not** `model.hovering`: this is the half of F1's
+            // fix that lives here. The enclosing `IslandShape`'s own frame is
+            // `restingWidth + revealWidth`, so laying this out at any width that
+            // property does not agree with overruns the frame and SwiftUI
+            // squeezes whichever child is flexible — which is §5.4's session
+            // count, not this. See `revealWidth`'s doc comment for the measured
+            // before/after.
+            //
+            // Kept as a zero *width* rather than an `if` that drops the subview:
+            // the drawer-closed hover reveal has to keep behaving exactly as it
+            // did, and the outer `.animation(.easeOut(duration: 0.28), value:
+            // hoverRevealWidth)` animates this frame's width from inside the
+            // enclosing shape's subtree. An `if` would replace that 280ms clip
+            // with an uninterpolated pop. Width 0 + `.clipped()` is already
+            // measured to paint nothing at all — the drawer-open, not-hovering
+            // render counts 0 `--bone` pixels — so "no width" is also "no
+            // content" here, and `.opacity` (which `ImageRenderer` is on record
+            // as ignoring) is not what carries it.
             RevealContent(session: model.revealed, now: now)
-                .frame(width: model.hovering ? CollapsedLayout.hoverReveal : 0, alignment: .leading)
+                .frame(width: revealWidth, alignment: .leading)
                 .clipped()
-                .opacity(model.hovering ? 1 : 0)
+                .opacity(revealWidth > 0 ? 1 : 0)
         }
         .frame(height: model.geometry.notch.height)
     }
