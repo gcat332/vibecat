@@ -150,6 +150,49 @@ struct IslandGoldenTests {
                 "the dormant island stops \(lastX - notch.maxX)pt past the cutout, inside its own \(IslandGeometry.bottomRadius)pt corner — the hardware's corner is left showing")
     }
 
+    /// Plan 4.5, colour. The prototype paints `.island` with
+    /// `background: var(--void)`, and `--void` is `#07080A`. We painted it
+    /// `#05070B` — which is the prototype's **sprite mix base**, the value
+    /// `--sp-out`/`--sp-sh` composite the accent over, and the only place
+    /// `#05070B` appears in that file at all (two occurrences, both
+    /// `color-mix`). §7.1's sprite table names it for the sprite; nothing names
+    /// it for the island. So the largest area of colour on screen was painted
+    /// with a constant borrowed from the sprite's shading maths.
+    ///
+    /// **Why four plans of green tests never caught this.** Two levels a
+    /// channel is under `Raster.pixelCount(near:)`'s default tolerance of 6, so
+    /// no tolerance-based assertion could see it — and the assertions that
+    /// *were* exact (`nothingIsDrawnInsideTheCutout` below, and three others)
+    /// each hardcoded `Raster.Pixel(r: 5, g: 7, b: 11, a: 255)`. They pinned the
+    /// value we happened to choose, precisely, and so locked the wrong one in
+    /// rather than catching it. A test that pins an unverified constant is not
+    /// evidence about that constant. All four now derive from
+    /// `islandGroundColour` instead of restating it.
+    ///
+    /// Rendered rather than asserted against the constant directly, so this also
+    /// proves the constant is the colour actually reaching the fill.
+    @MainActor @Test func theIslandGroundIsThePrototypesVoidNotTheSpritesMixBase() throws {
+        let void = try #require(RGBA(hex: "#07080A"), "the prototype's --void")
+        #expect(islandGroundColour == void,
+                "islandGroundColour is \(islandGroundColour.hex), the prototype's island background is #07080A")
+
+        // Sampled inside the cutout's own columns, where §5.1 guarantees the
+        // ground spans and no content may be drawn — the same region
+        // `nothingIsDrawnInsideTheCutout` below scans, so "this is pure ground"
+        // is a property this suite already relies on rather than one asserted
+        // here for the first time.
+        let m = Self.model(.dormant, count: 0)
+        let raster = try rasterise(IslandBody(model: m, now: Date(timeIntervalSince1970: 1_000_000)))
+        let notch = IslandGeometry(screen: Self.mbp14).notch
+        let midCutout = Int((notch.midX - m.frames.panel.minX).rounded())
+        let expected = Raster.Pixel(r: UInt8((void.r * 255).rounded()),
+                                    g: UInt8((void.g * 255).rounded()),
+                                    b: UInt8((void.b * 255).rounded()), a: 255)
+        let sampled = raster[midCutout, 8]
+        #expect(sampled == expected,
+                "the island's own ground rendered \(sampled) at the middle of the cutout, not the prototype's --void \(expected)")
+    }
+
     /// Design §5.1, the rule the whole layout exists to obey: the cutout is a
     /// hole and nothing may be drawn in it.
     ///
@@ -158,7 +201,7 @@ struct IslandGoldenTests {
     /// badge or a digit. Any pixel differing from the island's own ground
     /// colour inside the cutout's columns is content that has slid under it.
     @MainActor @Test func nothingIsDrawnInsideTheCutout() throws {
-        let ground = Raster.Pixel(r: 5, g: 7, b: 11, a: 255)     // islandGroundColour
+        let ground = Raster.Pixel(islandGroundColour)   // derived, never restated — see Raster.Pixel(_:)
         for (state, count) in [(IslandState.running, 999), (.waiting, 3), (.dormant, 0)] {
             let m = Self.model(state, count: count)
             let raster = try rasterise(IslandBody(model: m, now: Date(timeIntervalSince1970: 1_000_000)))
@@ -200,7 +243,7 @@ struct IslandGoldenTests {
     /// width — the one artifact `DrawerGeometryTests`' own comment warns
     /// about stays confined to where it always was.
     @MainActor @Test func nothingIsDrawnInsideTheCutoutWithTheDrawerOpen() throws {
-        let ground = Raster.Pixel(r: 5, g: 7, b: 11, a: 255)     // islandGroundColour
+        let ground = Raster.Pixel(islandGroundColour)   // derived, never restated — see Raster.Pixel(_:)
         let event = VibeEvent(id: "q", cli: "claude-code", kind: .permission,
                               session: "s", cwd: "/tmp/proj", title: "Bash command", body: "pnpm install",
                               choices: [Choice(id: "allow", label: "Allow once"),

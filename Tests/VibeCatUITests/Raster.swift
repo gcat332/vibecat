@@ -139,6 +139,24 @@ func writeAnimatedGIF(_ frames: [Raster], secondsPerFrame: Double, to path: Stri
     return CGImageDestinationFinalize(dst)
 }
 
+extension Raster.Pixel {
+    /// An `RGBA` as it renders: 8-bit per channel, fully opaque.
+    ///
+    /// Exists so a test can say `Raster.Pixel(islandGroundColour)` rather than
+    /// restate the value. Four tests used to hardcode
+    /// `Raster.Pixel(r: 5, g: 7, b: 11, a: 255)` with `// islandGroundColour`
+    /// beside it, and when that constant turned out to be two levels a channel
+    /// off the prototype's own `--void` (Plan 4.5), every one of them pinned the
+    /// wrong value precisely rather than catching it. **A test that restates a
+    /// constant cannot be evidence about that constant.**
+    init(_ colour: RGBA) {
+        self.init(r: UInt8((colour.r * 255).rounded()),
+                  g: UInt8((colour.g * 255).rounded()),
+                  b: UInt8((colour.b * 255).rounded()),
+                  a: 255)
+    }
+}
+
 enum RasterError: Error, CustomStringConvertible {
     case renderProducedNothing
     case contextUnavailable

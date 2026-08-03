@@ -270,16 +270,28 @@ public struct IslandView: View {
     }
 }
 
-/// Design §7.1: the sprite ground colour, named there as `#05070B`. Kept as
-/// an `RGBA(hex:)` value rather than a bare `Color(red:green:blue:)` triple
-/// so it is greppable by its spec name, the same way every other colour in
-/// this module is.
+/// The island's own body colour: the prototype's `--void`.
+///
+/// **Corrected 2026-08-03, Plan 4.5.** This was `#05070B` with a doc comment
+/// citing "Design §7.1: the sprite ground colour" — and that is exactly what
+/// went wrong. §7.1 names `#05070B` as the base the *sprite's* outline and
+/// shadow tones composite the accent over (`O = accent 20% over #05070B`), which
+/// `CatPalette` uses correctly and still does. Nothing in the spec names a
+/// colour for the island body at all, so the only authority on it is the
+/// prototype the spec header points at — and there, `.island` is
+/// `background: var(--void)` with `--void: #07080A`. `#05070B` appears in that
+/// whole file only twice, both inside `color-mix` for the sprite tones.
+///
+/// So the largest area of colour in the interface was painted with a constant
+/// borrowed from the sprite's shading maths, two levels a channel off, for four
+/// plans. See `theIslandGroundIsThePrototypesVoidNotTheSpritesMixBase` for why
+/// every test in this suite agreed with it.
 ///
 /// Not `private`: the drawer hangs below this same silhouette and has to
 /// match it exactly (`DrawerView.swift`, a different file in this module),
 /// so this stays module-visible rather than being re-declared a second time
 /// with its own copy of the literal to drift from.
-let islandGroundColour = RGBA(hex: "#05070B")!
+let islandGroundColour = RGBA(hex: "#07080A")!
 
 /// The collapsed island. Left flank, dead zone, right flank.
 ///

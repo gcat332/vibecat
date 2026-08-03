@@ -36,7 +36,7 @@ struct AuraVisibilityTests {
         return ZStack {
             light ? lightBar : darkBar
             IslandShape()
-                .fill(Color(RGBA(hex: "#05070B")!))          // islandGroundColour
+                .fill(Color(islandGroundColour))            // derived, never restated
                 .clipShape(IslandShape())
                 .shadow(color: Color(tint).opacity(auraOpacity), radius: 18, x: 0, y: 2)
                 .frame(width: islandWidth, height: islandHeight)

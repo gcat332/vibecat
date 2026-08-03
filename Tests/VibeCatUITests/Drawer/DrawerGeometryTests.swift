@@ -128,7 +128,7 @@ private let mbp14 = ScreenMetrics(
 /// this height too — that needs real content in the scene, which needs
 /// `IslandModel` to have a tier; that closes once a later task gives it one.
 @MainActor @Test func nothingIsDrawnInsideTheCutoutWithTheDrawerOpen() throws {
-    let ground = Raster.Pixel(r: 5, g: 7, b: 11, a: 255)     // islandGroundColour, §7.1
+    let ground = Raster.Pixel(islandGroundColour)   // derived, never restated — see Raster.Pixel(_:)
     let g = IslandGeometry(screen: mbp14)
     let open = g.frames(rightFlank: 35, tier: .drawer(height: DrawerFace.question.height))
     let origin = open.bodyInPanel.origin
@@ -136,7 +136,7 @@ private let mbp14 = ScreenMetrics(
     let scene = ZStack(alignment: .topLeading) {
         Color.clear
         IslandShape()
-            .fill(Color(RGBA(hex: "#05070B")!))
+            .fill(Color(islandGroundColour))   // derived, so `ground` above cannot disagree with the scene
             .frame(width: open.body.width, height: open.body.height)
             .offset(x: origin.x, y: origin.y)
     }
