@@ -105,6 +105,14 @@ These are load-bearing. Breaking one is a product failure, not a bug.
 - **Colour means state, and only state (§4.3).** `#3FD99B` idle, `#5B9DF9`
   running, `#FFA63C` needs you, `#FF5C5C` failed. Which agent is speaking is
   carried by icon *shape*. A coat changes markings, never hue.
+
+  **"Never by hue" is about identity, not about tinting.** §4.3's own closing
+  sentence is explicit: *"Everything tinted by the current state — marks, cat,
+  badge, counts, the aura — uses the same `--accent`."* So a per-CLI mark **is**
+  tinted by the state accent, and the mockup agrees (`.mark{color:var(--accent)}`).
+  Shape says *who*; hue says *what state*; both live on the same mark. Recorded
+  because this file previously said only the first half, and a dispatch built on
+  that half told an implementer the opposite of what the spec requires.
 - **Worst state wins (§4.2):** `waiting > failed > running > idle`. A waiting
   agent is idling on you right now; a failed one has already stopped. The session
   list is a view, not a state — opening it must not change what the island reports.
