@@ -21,6 +21,19 @@ public struct SessionStore: Sendable, Equatable {
         SessionState.mostUrgent(sessions.map(\.state)) ?? .idle
     }
 
+    /// The single session `IslandModel.revealed` names, so the hover reveal
+    /// points at the same session `aggregate` already summarises the state
+    /// of — one notion of "most urgent", not two. `min(by:)` over
+    /// `SessionState.urgency` (lower is more urgent) rather than reusing
+    /// `aggregate` plus a lookup, since that would only find *a* session in
+    /// that state, not necessarily the single most urgent one when several
+    /// tie. Ties resolve to whichever comes first in `sessions` — a full,
+    /// deterministic ordering across ties belongs to whatever renders the
+    /// scrolling session list, not to this.
+    public var mostUrgentSession: Session? {
+        sessions.min { $0.state.urgency < $1.state.urgency }
+    }
+
     public var counts: [SessionState: Int] {
         Dictionary(grouping: sessions, by: \.state).mapValues(\.count)
     }

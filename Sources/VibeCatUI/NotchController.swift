@@ -459,10 +459,22 @@ import SwiftUI
         return true
     }
 
-    private func render() {
+    /// `internal`, not `private`: `anIdenticalEventDoesNotRewriteTheModel` drives
+    /// this directly, the same way this file's tests already drive `click()` and
+    /// `setHovering(_:)` — there is no window server in `swift test`, so a render
+    /// triggered any other way cannot be observed.
+    func render() {
         let now = Date()
-        model.state = appModel.islandState
-        model.sessionCount = appModel.sessionCount
+        // `@Observable` notifies on the write, not on a change, so an unconditional
+        // assignment invalidates the body even when the value is identical — two or
+        // three times per hook event. Harmless at Plan 4's rates; Plan 5 is what
+        // raises them, by putting a scrolling list on the other end.
+        let state = appModel.islandState
+        let count = appModel.sessionCount
+        let revealed = appModel.store.mostUrgentSession
+        if model.state != state { model.state = state }
+        if model.sessionCount != count { model.sessionCount = count }
+        if model.revealed != revealed { model.revealed = revealed }
 
         // AuraTrigger does its own change detection, so this is called
         // unconditionally and only reports true on an actual change.

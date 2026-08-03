@@ -676,3 +676,60 @@ private let externalDisplay = ScreenMetrics(
     #expect(c.model.tier == .rest, "Escape did not close the drawer")
     c.dismiss()
 }
+
+// MARK: - Task 3 (Plan 5): render() must not notify on a no-op
+
+/// `@Observable` notifies on the *write*, not on a change, so `render()`'s
+/// unconditional assignments invalidate the body two or three times per hook
+/// event when nothing differs.
+///
+/// The instrument is an observation, not a counter. `IslandBody
+/// .restingWidthReadCount` cannot see this — it only moves when `.body` is built,
+/// which `render()` does not do in a headless test, so it would read 0 whether or
+/// not the guard exists. `withObservationTracking` registers interest in exactly
+/// the properties `render()` assigns and fires when one is written, which is the
+/// behaviour under test rather than a proxy for it.
+///
+/// **Both halves are asserted, and the positive control is the important one:**
+/// `!fired` on its own would pass just as well against a broken instrument that
+/// never fires at all.
+@MainActor @Test func anIdenticalEventDoesNotRewriteTheModel() {
+    let appModel = AppModel(socketPath: "/dev/null/vibecat-test-never-bound.sock")
+    let controller = NotchController(model: appModel, metrics: { IslandGoldenTests.mbp14 })
+    controller.refreshGeometry()
+    appModel.ingest(VibeEvent(id: "e", cli: "claude-code", kind: .running,
+                              session: "s", cwd: "/Users/dev/api"))
+    controller.render()
+
+    func renderFires(_ body: () -> Void) -> Bool {
+        // `nonisolated(unsafe)`, not a plain `var`: `withObservationTracking`'s
+        // `onChange` is `@Sendable`, so it cannot capture a mutable local
+        // without this — the same "Swift 6 flags a capture the main actor
+        // makes perfectly safe" situation `MetricsBox` above exists for, just
+        // on a local rather than a stored property. Safe here for the same
+        // reason: everything in this function runs on the main actor, and
+        // `onChange` fires synchronously within this call, never on another
+        // thread concurrently with the read below.
+        nonisolated(unsafe) var fired = false
+        withObservationTracking {
+            _ = controller.model.state
+            _ = controller.model.sessionCount
+            _ = controller.model.revealed
+        } onChange: {
+            fired = true
+        }
+        body()
+        return fired
+    }
+
+    // Positive control: a render that genuinely changes something must fire, or
+    // the assertion below proves nothing.
+    #expect(renderFires {
+        appModel.ingest(VibeEvent(id: "e2", cli: "claude-code", kind: .permission,
+                                  session: "s2", cwd: "/Users/dev/web"))
+        controller.render()
+    }, "a render that changed the state did not notify — the instrument is broken, so the no-op assertion below would be vacuous")
+
+    #expect(!renderFires { controller.render() },
+            "a re-render with nothing changed still wrote to the model — @Observable notifies on the write, so render() has to compare first")
+}
