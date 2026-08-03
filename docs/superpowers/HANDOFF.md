@@ -50,10 +50,18 @@ Neither is a bug to fix; both are calls only you can make.
    sprites at once" would reopen it. [The spike](spikes/2026-08-03-badge-transform-cost.md)
    has the numbers and the leading hypothesis (whole-window recompositing while any
    animation is live), recorded as a hypothesis and not a finding.
-2. **That measurement was taken on battery with Low Power Mode on**, unlike every
-   other figure in that file. The within-run delta survives the confound; the
-   absolute numbers do not. **A mains-power re-run is the file's most urgent
-   outstanding item.**
+2. ~~That measurement was taken on battery…~~ **Re-measured on mains 2026-08-03, and
+   it splits the question in two.** The **resting** figure is confirmed, not revised:
+   dormant reads 13.14% against the accepted 12.26%, inside the ±1.5pp noise floor —
+   **Plan 5 did not raise the island's resting cost.** What is new is the **list-open**
+   figure: **~27% of a core**, +11.04pp over `running`, about 2.1× resting. The battery
+   run was directionally right and ~19% pessimistic (+13.6pp there).
+
+   The narrowed open question: **is that cost per-row or fixed?** Twelve sessions cost
+   +11.04pp; if linear that is ~0.9pp each, making a typical three-session list ~+2.8pp
+   and a non-issue. One data point cannot establish linearity, and the right response
+   differs sharply between the two answers. One more probe row at a smaller session
+   count settles it.
 
 ## Then the plans
 

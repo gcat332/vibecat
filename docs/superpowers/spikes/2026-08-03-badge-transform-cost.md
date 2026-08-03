@@ -265,16 +265,54 @@ were explicitly not measured here:
   more than a second animation and comparable to the first one. "Per-island, not
   per-animation" stands for animations; it does not make a session list free.
 
-  **What is still owed.** This run answers "several sprites at once" but does
-  so on battery, under Low Power Mode, against a baseline (~12% dormant, ±1.5pp
-  noise) that was never measured under those conditions. **A mains-power,
-  Low-Power-Mode-off re-run of this same sixth row is required before the
-  accepted ~12% is either confirmed or revised for a product that can have a
-  session list open** — this is now a fourth named condition alongside the
-  three the original acceptance listed (battery drain, several sprites,
-  thermals under load), and the most urgent of the four: the within-run delta
-  already shows the list is not free, and only a mains run can say what the
-  *absolute* resting-with-list-open figure actually is.
+  ~~**What is still owed.** A mains-power, Low-Power-Mode-off re-run of this same
+  sixth row is required…~~ **Done 2026-08-03, and it settles both halves.**
+
+### The mains re-run — the comparable measurement
+
+Same probe, same six rows, release build, **AC power, Low Power Mode off, no
+thermal limiting recorded, 80% battery AC-attached.** These conditions match every
+other figure in this file, so unlike the battery run the **absolute** numbers are
+comparable.
+
+| what is running | draws/s | CPU (% of one core) | added by this row |
+|---|---|---|---|
+| floor: run loop only, no panel, no timer | 0.0 | 0.03 (0.01–0.06) | — |
+| + `HoverMonitor` 30 Hz alone, no panel | 0.0 | 0.34 (0.33–0.35) | +0.31 |
+| + dormant island composited | 0.0 | **13.14 (12.66–13.84)** | +12.80 |
+| + running (12 fps timeline) | 47.9 | 16.39 (15.24–17.12) | +3.25 |
+| **+ session list open, 12 sessions, all four states** | 48.3 | **27.43 (27.24–27.67)** | **+11.04** |
+| + dormant again, motion `.off` **and** system reduce-motion on | 0.0 | 12.32 (12.03–12.88) | ±0 |
+
+**The accepted ~12% survives, and Plan 5 did not raise the resting cost.** Dormant
+reads 13.14% against the 12.26% this file recorded and the owner accepted — a
+difference inside the ±1.5pp noise floor. So the resting figure is confirmed rather
+than revised, which is the half of the question the battery run could not answer.
+
+**What is new is the cost of having a list open: ~27% of a core**, about 2.1× the
+resting figure, +11.04pp over `running`. That is the number the acceptance decision
+did not have.
+
+**The battery run was directionally right and slightly pessimistic.** It put the
+list delta at +13.6pp where mains says +11.04pp — same order, ~19% smaller. Both are
+many times the noise floor, so the battery run's *conclusion* held; only its
+magnitude was inflated. Worth recording as a data point on how much Low Power Mode
+distorts a within-run delta of this shape, since the direction was genuinely
+indeterminate beforehand (see the note above).
+
+The mains run is also markedly **tighter**: the list row spreads 27.24–27.67 against
+the battery run's 29.29–33.29. Prefer mains for anything where the spread matters.
+
+`draws/s` is unchanged again (47.9 → 48.3), confirming on mains what the battery run
+showed: the list's cost is not extra badge redraws. The mechanism remains the
+recorded hypothesis, still unconfirmed by any compositor-level instrument.
+
+**What is still owed, narrowed.** One question this run raises and cannot answer:
+**is the list's cost per-row or fixed?** Twelve sessions cost +11.04pp. If that were
+linear it would be ~0.9pp per visible session, which would make a typical three-session
+list ~+2.8pp and a non-issue — but a single data point cannot establish linearity, and
+the decision about what to do differs sharply between the two. One more probe row at a
+smaller session count would settle it.
 - **Thermals under load.** A dev machine running several agents is not idle. This
   probe measured an otherwise quiet system.
 
