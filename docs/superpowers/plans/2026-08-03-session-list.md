@@ -1343,7 +1343,20 @@ Recorded so nobody adds them mid-plan, and so the next reader knows they were co
 
 **Spec coverage.** §11's five line types → Tasks 5 and 6. Its switchability → `Options` in Task 5, with the Settings half explicitly deferred. Its subagent-collapse rule → Task 6. Its sort order → Task 4. §6.3's 420pt scrolling face → Tasks 4 and 7. §9.1's hover reveal content → Task 2. The sliver and `render()`'s writes → Tasks 1 and 3. The owed multi-sprite measurement → Task 8. **One §11 line has no working task and is called out above: `lastUserMessage` renders but nothing populates it.**
 
-**Type consistency.** `SessionRow.Options` is named identically in Tasks 5, 6 and 7. `SessionBlocks.taskSummary` and `RevealContent.elapsed` are both `static` and used only as such. `IslandModel.revealed` (Task 2), `.sessions` and `.face` (Task 7) are the three properties `render()` assigns in Task 3 — and Task 3's guard covers `revealed`, so **Task 7 must extend that guard to `sessions` and `face` when it adds them.** Flagged here because Task 7's implementer would not otherwise see Task 3's code.
+**Type consistency.** `SessionRow.Options` is named identically in Tasks 5, 6 and 7. `SessionBlocks.taskSummary` and `RevealContent.elapsed` are both `static` and used only as such. ~~`IslandModel.revealed` (Task 2), `.sessions` and `.face` (Task 7) are the three properties `render()` assigns in Task 3 — and Task 3's guard covers `revealed`, so **Task 7 must extend that guard to `sessions` and `face` when it adds them.**~~
+
+**Stale — withdrawn 2026-08-03, before Task 7 was dispatched.** Task 3's guards were
+**reverted**, because the premise behind them was measured false: `@Observable` does
+not notify on an equal write to an `Equatable` property, so it already performs the
+comparison the guards duplicated. There is no guard left to extend. What Task 7 must
+do instead is simply **assign `model.sessions` in `render()`** (from
+`store.mostUrgentFirst`), unconditionally, exactly as `state`, `sessionCount` and
+`revealed` are assigned. `face` is a *computed* property, not assigned at all, so it
+needs no wiring.
+
+Recorded rather than deleted because this is the second cross-task instruction in
+this plan that a mid-flight finding invalidated, and a reader tracing why Task 7
+looks different from the plan needs to find the reason here.
 
 **Placeholders.** None. Every step carries the code it needs.
 
