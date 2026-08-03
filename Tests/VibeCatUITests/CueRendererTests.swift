@@ -78,10 +78,26 @@ private let rate = 44_100.0
     // detune stripped is the only way to see the twin's contribution at all.
     let withTwin = CueRenderer.render(.ask, settings: SoundSettings(), sampleRate: rate)
     let peakWith = withTwin.map(abs).max() ?? 0
-    // A single unbent 0.07-gain square with volume .60 peaks near .046; the twin
-    // adds up to 60% of that, so the pair must land between the two.
-    #expect(peakWith > 0.046, "the twin contributes nothing: peak \(peakWith)")
-    #expect(peakWith < 0.046 * 2, "the twin is at full gain, not 0.6: peak \(peakWith)")
+
+    // The bound is derived, not picked: a hand-waved `0.046 * 2` upper bound
+    // let a twin-at-full-gain mutation through (measured 0.088, comfortably
+    // under 0.092). Derive `principal` — one voice's peak — from `.ask`'s own
+    // held note (the longest, and the one the buffer's peak comes from) rather
+    // than the frequency and gain typed as literals, so this keeps tracking
+    // the source if either changes.
+    let heldNote = SoundPack.chiptune.notes(for: .ask).max(by: { $0.end < $1.end })!
+    let harmonics = Waveform.harmonicCount(frequency: heldNote.frequency, sampleRate: rate)
+    let squarePeak = heldNote.waveform.sample(phase: 0.25, harmonics: harmonics)
+    let principal = heldNote.gain * squarePeak * SoundSettings().volume
+
+    // In-phase with a twin at factor k, the pair peaks at principal * (1 + k).
+    // At k = .6 (the real value) that's 1.6×; at k = 1.0 (a twin at full gain,
+    // the mutation this test exists to catch) it's 2.0×. 8 cents at ~1046Hz
+    // beats at about 5Hz, so within the held note's 0.36s the two certainly
+    // drift into phase — 1.8× sits roughly in the middle, with ~11% margin on
+    // each side of both real cases.
+    #expect(Double(peakWith) > principal * 1.3, "the twin contributes nothing: peak \(peakWith), principal \(principal)")
+    #expect(Double(peakWith) < principal * 1.8, "the twin is at full gain, not 0.6: peak \(peakWith), principal \(principal)")
 }
 
 @Test func everyCueRendersWithoutANonFiniteSample() {
