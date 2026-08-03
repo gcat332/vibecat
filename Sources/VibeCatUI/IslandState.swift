@@ -49,7 +49,34 @@ public enum IslandState: String, Sendable, CaseIterable {
         }
     }
 
+    /// One session's own state, for a row in §11's list. `init(store:)` answers a
+    /// different question — what the *island* reports, which is the most urgent
+    /// session plus `dormant` for "no sessions at all". A row is never dormant:
+    /// a row exists, so a session exists.
+    public init(_ state: SessionState) {
+        switch state {
+        case .idle:    self = .idle
+        case .running: self = .running
+        case .waiting: self = .waiting
+        case .failed:  self = .failed
+        }
+    }
+
     public var isDormant: Bool { self == .dormant }
+
+    /// §11's line 1 ends with the state in words as well as in colour — "Needs
+    /// you ●". The words are not redundant with the dot: §4.3 reserves colour for
+    /// state precisely so it can be read at a glance from the corner of an eye,
+    /// and a list is the one place a person is already reading.
+    public var label: String {
+        switch self {
+        case .dormant: "—"
+        case .idle:    "Idle"
+        case .running: "Running"
+        case .waiting: "Needs you"
+        case .failed:  "Failed"
+        }
+    }
 
     /// Colour means state and only state. Design §4.3's table covers only the
     /// four *session* states and never assigns dormant a colour — but the
