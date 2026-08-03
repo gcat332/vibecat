@@ -5,7 +5,7 @@ import Testing
     #expect(Badge(state: .dormant) == .zzz)
     #expect(Badge(state: .running) == .squares)
     #expect(Badge(state: .waiting) == .bang)
-    #expect(Badge(state: .idle) == .star)
+    #expect(Badge(state: .idle) == .check)
     #expect(Badge(state: .failed) == .cross)
 }
 
@@ -48,7 +48,7 @@ import Testing
     #expect(Badge.bang.motion.isContinuous)
     #expect(Badge.zzz.motion.isContinuous == false)
     #expect(Badge.cross.motion.isContinuous == false)
-    #expect(Badge.star.motion.isContinuous == false)
+    #expect(Badge.check.motion.isContinuous == false)
 }
 
 @Test func continuousBadgesRunInThePixelArtRange() {
@@ -83,32 +83,69 @@ import Testing
 }
 
 @Test func theCycleLengthsMatchTheDesign() {
-    #expect(Badge.star.motion.cycle == 2.2)
+    #expect(Badge.check.motion.cycle == 2.2)
 }
 
-/// Design §4.3: colour means state, but only if shape carries it too — idle
-/// (`star`) and failed (`cross`) used to be the same `+` figure, one of them
-/// rotated 45°, separated almost entirely by green versus red, the classic
-/// colour-vision failure pair. Pinned two ways so a future edit can't quietly
-/// collapse them back into rotations of each other: a straight rotation
-/// preserves both the total lit-cell count and the *multiset* of per-row
-/// counts (it only permutes which row holds which count), so a real
-/// structural difference must break at least one of those two invariants.
-@Test func starAndCrossAreNotJustRotationsOfEachOther() {
-    let starRows = Badge.star.cells(at: 0)
-    let crossRows = Badge.cross.cells(at: 0)
+/// Design §4.3: colour means state, but only if shape carries it too. Idle and
+/// failed once differed by hue alone — the same `+` figure, one rotated 45°,
+/// green against red, the classic colour-vision failure pair.
+///
+/// `check`, `cross` and `bang` now share one outline **deliberately**: a filled
+/// disc, because all three are verdicts rather than activities. That makes the
+/// old "not rotations of each other" check meaningless — they are supposed to
+/// look alike from a distance — and moves the entire burden of telling them
+/// apart onto the glyph punched out of the disc. So each glyph carries a
+/// structural signature that survives desaturation, and this pins all three.
+///
+/// Each assertion is load-bearing against a specific plausible mistake:
+/// drawing the tick as a symmetric V (it would mirror onto itself, and read as
+/// a V), punching `cross` off-centre, or letting `bang`'s stem drift out of its
+/// column.
+@Test func theThreeVerdictBadgesShareADiscAndDifferOnlyInTheirGlyph() {
+    let disc = Badge.check.cells(at: 0)
+    let cross = Badge.cross.cells(at: 0)
+    let bang = Badge.bang.cells(at: 0)
 
-    let starCount = starRows.flatMap { $0 }.filter { $0 }.count
-    let crossCount = crossRows.flatMap { $0 }.filter { $0 }.count
-    #expect(starCount != crossCount,
-            "star and cross light the same number of cells")
+    // One family: the outline — every cell but the four corners — is common.
+    for (name, cells) in [("check", disc), ("cross", cross), ("bang", bang)] {
+        // Three cells per corner, not one: removing only the corner itself
+        // renders as a squircle, and that is what shipped before this was
+        // pinned. Reverting to it must fail here.
+        for (r, c) in [(0, 0), (0, 1), (1, 0),
+                       (0, 6), (0, 5), (1, 6),
+                       (6, 0), (6, 1), (5, 0),
+                       (6, 6), (6, 5), (5, 6)] {
+            #expect(cells[r][c] == false,
+                    "\(name)'s disc fills (\(r),\(c)) — with the corner shoulders present it reads as a squircle, not a circle")
+        }
+        #expect(cells[0][3], "\(name) has no disc rim above its glyph")
+        #expect(cells[3][0], "\(name) has no disc rim beside its glyph")
+    }
 
-    let starProfile = starRows.map { row in row.filter { $0 }.count }
-    let crossProfile = crossRows.map { row in row.filter { $0 }.count }
-    #expect(starProfile != crossProfile,
-            "star and cross have the same per-row lit-cell profile")
-    #expect(starProfile.sorted() != crossProfile.sorted(),
-            "star and cross have the same per-row profile up to reordering — a rotation could still produce this")
+    let mid = Badge.size / 2
+
+    // check: the only one whose centre survives, and the only asymmetric one.
+    #expect(disc[mid][mid], "check's centre is holed — that is cross's signature, not check's")
+    #expect(disc != disc.map { $0.reversed().map { $0 } },
+            "check is symmetric under a horizontal mirror — a symmetric tick is a V, and mirrors onto cross's family")
+
+    // cross: holed centre, symmetric both ways.
+    #expect(cross[mid][mid] == false, "cross's centre is not holed")
+    #expect(cross == cross.map { $0.reversed().map { $0 } }, "cross is not horizontally symmetric")
+    #expect(cross == cross.reversed().map { $0 }, "cross is not vertically symmetric")
+
+    // bang: every hole in one column.
+    let bangHoleColumns = Set(bang.indices.flatMap { r in
+        bang[r].indices.filter { bang[r][$0] == false && !isOutsideDisc(r, $0) }
+    })
+    #expect(bangHoleColumns == [mid],
+            "bang's holes span columns \(bangHoleColumns.sorted()) — a `!` is one column, and spreading it blurs it into cross")
+}
+
+/// Outside the disc entirely — an unlit cell here is background, not a punched
+/// glyph, so `bang`'s column check must not count it.
+private func isOutsideDisc(_ r: Int, _ c: Int) -> Bool {
+    Badge.check.cells(at: 0)[r][c] == false && Badge.cross.cells(at: 0)[r][c] == false
 }
 
 /// Whether `cells` contains a fully-lit 2×2 block anywhere — the structural
@@ -168,9 +205,16 @@ private func hasAFilledBlock(_ cells: [[Bool]]) -> Bool {
             "zzz contains a filled block — that is what the small z was before it had a glyph")
 }
 
-@Test func starHasAFilledBodyUnlikeCross() {
-    #expect(hasAFilledBlock(Badge.star.cells(at: 0)),
-            "star has no filled 2×2 block anywhere — it reads as a thin-lined figure, not a body")
-    #expect(hasAFilledBlock(Badge.cross.cells(at: 0)) == false,
-            "cross now has a filled body too — the two badges may read as the same family of glyph again")
+/// Every verdict badge has a body now, which is the point — a bounded disc
+/// reads as a conclusion where a thin mark reads as activity. This replaces an
+/// older test that asserted the opposite for `cross`, whose premise the disc
+/// family retires. `zzz` keeps the no-filled-block rule (see above), so the
+/// two families stay distinguishable by weight as well as by outline.
+@Test func everyVerdictBadgeHasAFilledBodyAndTheAmbientOnesDoNot() {
+    for badge in [Badge.check, .cross, .bang] {
+        #expect(hasAFilledBlock(badge.cells(at: 0)),
+                "\(badge) has no filled 2×2 anywhere — it is not reading as a disc")
+    }
+    #expect(hasAFilledBlock(Badge.zzz.cells(at: 0)) == false,
+            "zzz has a filled body — it should read as a loose mark, not a verdict")
 }

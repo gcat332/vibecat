@@ -9,17 +9,51 @@ import Foundation
 ///
 /// Monochrome by design — the view tints with the state accent, so the badge
 /// carries state colour like everything else.
+///
+/// ## Two shape families, and the split means something
+///
+/// `check`, `cross` and `bang` share one silhouette, a filled disc, and are told
+/// apart by the glyph punched out of it. `zzz` and `squares` stay loose marks.
+///
+/// That is not decoration. `idle`, `failed` and `waiting` are the three states
+/// that have *concluded something* or *want you now* — a verdict. `dormant` and
+/// `running` are ambient: the machine is doing what it was already doing. A
+/// bounded disc reads as a verdict; an unbounded mark reads as activity. So the
+/// family boundary carries information, and deliberately does not extend to the
+/// other two.
 public enum Badge: String, Sendable, CaseIterable {
-    case zzz, squares, bang, star, cross
+    case zzz, squares, bang, check, cross
 
     public static let size = 7
+
+    /// The disc every verdict badge is punched out of.
+    ///
+    /// Written as art rather than derived, because the arithmetic version —
+    /// every cell but the four corners — rendered as a *squircle*, not a
+    /// circle. Removing one cell per corner from a 7×7 grid leaves too much
+    /// shoulder; at 14pt it read as a rounded rectangle. Taking three per
+    /// corner is what makes the silhouette round at this size.
+    ///
+    /// Filled, not a ring: a one-cell ring would leave nothing inside to punch.
+    /// The rows that narrow (0, 1, 5, 6) still leave rim on every side of every
+    /// glyph cell below — checked by
+    /// `theThreeVerdictBadgesShareADiscAndDifferOnlyInTheirGlyph`.
+    private static let disc: [[Bool]] = [
+        [false, false, true,  true,  true,  false, false],
+        [false, true,  true,  true,  true,  true,  false],
+        [true,  true,  true,  true,  true,  true,  true ],
+        [true,  true,  true,  true,  true,  true,  true ],
+        [true,  true,  true,  true,  true,  true,  true ],
+        [false, true,  true,  true,  true,  true,  false],
+        [false, false, true,  true,  true,  false, false],
+    ]
 
     public init(state: IslandState) {
         switch state {
         case .dormant: self = .zzz
         case .running: self = .squares
         case .waiting: self = .bang
-        case .idle:    self = .star
+        case .idle:    self = .check
         case .failed:  self = .cross
         }
     }
@@ -39,8 +73,49 @@ public enum Badge: String, Sendable, CaseIterable {
             .still
         case .squares: MotionProfile(framesPerSecond: 12, cycle: 1.0, isContinuous: true)
         case .bang:    MotionProfile(framesPerSecond: 12, cycle: 1.1, isContinuous: true)
-        case .star:    MotionProfile(framesPerSecond: 0, cycle: 2.2, isContinuous: false)
+        case .check:   MotionProfile(framesPerSecond: 0, cycle: 2.2, isContinuous: false)
         case .cross:   .still
+        }
+    }
+
+    /// Which cells of the disc are punched out, for a verdict badge.
+    ///
+    /// **The glyph is a hole, not a second colour.** `BadgeCanvas` fills only
+    /// lit cells, so an unlit one shows the island through and the badge stays
+    /// exactly one colour — the state's. Punching it white would make the badge
+    /// two-tone against §4.3's "colour means state, and only state", and white
+    /// is already spoken for by the cat's eyes and sparkle four points away. At
+    /// two points a cell, a white glyph on saturated fill also blooms across
+    /// subpixels where a dark hole stays crisp.
+    ///
+    /// **Colour cannot be what separates these three.** They now share an
+    /// outline, and idle green against failed red is the classic colour-vision
+    /// failure pair — this project has already shipped a `+` and a `×` that
+    /// differed by hue alone. So each glyph carries a *structural* signature
+    /// that survives being desaturated, and BadgeTests.swift asserts all three:
+    ///
+    /// - `check` — centre cell **lit**, and mirror-asymmetric
+    /// - `cross` — centre cell holed, symmetric under both mirrors
+    /// - `bang`  — every holed cell in a single column
+    private func holes(at phase: Double) -> [(Int, Int)] {
+        switch self {
+        case .check:
+            // A short left arm and a long right one. A symmetric V would read
+            // as a V, and — worse — would be a mirror image of itself, leaving
+            // nothing for a desaturated eye or a test to tell it from `cross`.
+            return [(4, 1), (5, 2), (4, 3), (3, 4), (2, 5)]
+        case .cross:
+            return [(2, 2), (2, 4), (3, 3), (4, 2), (4, 4)]
+        case .bang:
+            // §8 asks this badge to pulse, and it still does: the stem loses
+            // its top cell for half the cycle. Whole cells, because a pixel
+            // grid cannot scale a disc without blurring the grid that drawing
+            // on one is for.
+            return phase < 0.5
+                ? [(1, 3), (2, 3), (3, 3), (5, 3)]
+                : [(2, 3), (3, 3), (5, 3)]
+        case .zzz, .squares:
+            return []
         }
     }
 
@@ -101,38 +176,9 @@ public enum Badge: String, Sendable, CaseIterable {
                 }
             }
 
-        case .bang:
-            // A pulse: the stem grows by a cell at the peak of the cycle.
-            let tall = phase < 0.5
-            let top = tall ? 0 : 1
-            for r in top...4 { g[r][3] = true }
-            g[6][3] = true
-
-        case .star:
-            // A four-pointed star with a body — a filled diamond, one row
-            // wider on each side moving toward the middle, tapering back to
-            // single-cell tips. Previously a plain `+`, indistinguishable
-            // from `cross` (the same `+`, rotated 45°) except by hue — idle
-            // green versus failed red, the classic colour-vision failure
-            // pair, which defeated "colour means state" (design §4.3: that
-            // only holds if shape carries it too). See
-            // `starAndCrossAreNotJustRotationsOfEachOther` in BadgeTests.swift.
-            set(["...#...",
-                 "..###..",
-                 ".#####.",
-                 "#######",
-                 ".#####.",
-                 "..###..",
-                 "...#..."])
-
-        case .cross:
-            set(["#.....#",
-                 ".#...#.",
-                 "..#.#..",
-                 "...#...",
-                 "..#.#..",
-                 ".#...#.",
-                 "#.....#"])
+        case .check, .cross, .bang:
+            g = Self.disc
+            for (r, c) in holes(at: phase) { g[r][c] = false }
         }
         return g
     }
