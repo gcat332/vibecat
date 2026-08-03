@@ -28,7 +28,12 @@ APP=".build/VibeCat.app"
 echo "building ($CONFIG)…"
 swift build -c "$CONFIG" --product vibecat
 
-echo "assembling $APP…"
+# `${APP}`, braced, not `$APP…`: this machine's `/usr/bin/env bash` is the
+# system bash 3.2.57, which reads the ellipsis's UTF-8 bytes as part of the
+# variable name and so looks up `APP…` — unbound, and `set -u` aborts the whole
+# script before the bundle is ever assembled. Line 28 above escapes this only
+# because `)` happens to terminate the name first.
+echo "assembling ${APP}…"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp "$BIN/vibecat" "$APP/Contents/MacOS/vibecat"
