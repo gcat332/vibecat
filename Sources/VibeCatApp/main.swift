@@ -90,6 +90,16 @@ controller.onSoundEnabledChanged = { [weak soundPlayer] enabled in
     soundPlayer?.settings.enabled = enabled
 }
 
+// Plan 6.4 Task 5: the gear in the drawer's footer is the *only* door to
+// Settings — this app has no Dock icon and no menu bar, so there is no App menu
+// to hang a `Settings…` item on and nothing in AppKit that would reopen the
+// window for us. `SettingsWindowController` guarantees the single instance and
+// raises the one that already exists, so this stays a plain forward with no
+// state of its own. It shares the `preferences` store read above rather than
+// building a second one, because a second store would be a second truth.
+let settings = SettingsWindowController(store: preferences)
+controller.model.onOpenSettings = { settings.show() }
+
 do {
     try model.start()
 } catch {
@@ -100,5 +110,19 @@ do {
 
 controller.refreshGeometry()
 controller.present()
+
+#if DEBUG
+// Plan 6.4 Task 5's own hardware unknown — what activation does to
+// `frontmostApplication` — which needs an unlocked screen and so could not be
+// measured when the task was implemented. Gated exactly like the two probes
+// above, and for the same reason; see `SettingsFocusProbe`'s doc comment for how
+// to run it and how to read what it prints. Deliberately placed *after*
+// `present()`, so the island is up and the probe drives the shipped gear closure
+// rather than a window opened in isolation.
+if CommandLine.arguments.contains("--settings-focus-probe") {
+    SettingsFocusProbe.run(openSettings: { controller.model.onOpenSettings?() },
+                           isOpen: { settings.isOpen })
+}
+#endif
 
 app.run()
