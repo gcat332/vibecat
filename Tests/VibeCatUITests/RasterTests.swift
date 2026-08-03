@@ -28,13 +28,12 @@ import VibeCatCore
                    TaskItem(title: "Add regression coverage", status: .open)]
         e.agents = [AgentItem(name: "Explore (Search API endpoints)", elapsed: "8s", model: "Sonnet 4.6")]
         let s = Session(event: e, now: Date(timeIntervalSince1970: 1_000_000))
-        let accent = Color(IslandState.running.accent)
 
         // One fixed frame for both, so the blank render is the same size as the
         // rich one — a different size would allocate a different block and the
         // bug would not show.
         func draw(_ options: SessionRow.Options) throws -> Raster {
-            try rasterise(SessionBlocks(session: s, options: options, accent: accent)
+            try rasterise(SessionBlocks(session: s, options: options)
                 .frame(width: 388, height: 80, alignment: .topLeading))
         }
 

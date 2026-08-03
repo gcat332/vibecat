@@ -22,6 +22,42 @@ private func session(_ state: Kind, project: String = "api",
     try rasterise(SessionRow(session: s, now: now, options: options).frame(width: 388))
 }
 
+/// `session(_:)` plus §11's line 3, and **deliberately no Tasks and no Agents.**
+///
+/// Two tests below measure a colour that the blocks also draw — `--dim`, and the
+/// 13% white of line 3's rule, which a task marker's antialiased border passes
+/// through. Both were written against a fixture carrying blocks and both survived
+/// the mutation they exist to catch, because the blocks kept the count up on their
+/// own. A three-line row is the smallest fixture that can answer a question about
+/// the three lines.
+@MainActor private func threeLineSession(_ state: Kind = .permission) -> Session {
+    var s = session(state)
+    s.lastUserMessage = "clean the build and rebuild from scratch"
+    return s
+}
+
+/// Every optional field populated, including both blocks.
+@MainActor private func richSession(_ state: Kind = .permission) -> Session {
+    var e = VibeEvent(id: "e", cli: "claude-code", kind: state, session: "s",
+                      cwd: "/Users/dev/api")
+    e.worktree = "auth-hardening"
+    e.model = "Opus 4.8"
+    e.effort = "high"
+    e.origin = Origin(app: "com.googlecode.iterm2")
+    e.title = "Asking to run"
+    e.body = "rm -rf build/"
+    e.tasks = [TaskItem(title: "Audit authentication flow", status: .doing),
+               TaskItem(title: "Add regression coverage", status: .open),
+               TaskItem(title: "Map session state", status: .done)]
+    e.agents = [AgentItem(name: "Explore (Search API endpoints)", elapsed: "8s",
+                          model: "Sonnet 4.6", activity: "Grep: handleRequest"),
+                AgentItem(name: "Explore (Read config files)", elapsed: "Done",
+                          model: "Sonnet 4.6", finished: true)]
+    var s = Session(event: e, now: t0)
+    s.lastUserMessage = "clean the build and rebuild from scratch"
+    return s
+}
+
 /// Does an `n`×`n` square of pixels all within `tolerance` of `colour` exist
 /// anywhere? The point of the square is that **text cannot fake it**: at 11pt a
 /// glyph stem is one or two pixels wide, so a solid 5×5 patch of one exact hue
@@ -49,22 +85,96 @@ extension Raster {
         return false
     }
 
-    /// The leading `w` points of every scanline — the mark's own column.
-    func differingPixelCount(from other: Raster, inLeading w: Int) -> Int {
-        guard width >= w, other.width >= w, height == other.height else {
+    /// One vertical band of every scanline — a single field's own column.
+    func differingPixelCount(from other: Raster, inColumns xs: Range<Int>) -> Int {
+        guard width >= xs.upperBound, other.width >= xs.upperBound, height == other.height else {
             return max(width * height, other.width * other.height)
         }
         var n = 0
         for y in 0..<height {
-            for x in 0..<w where self[x, y] != other[x, y] { n += 1 }
+            for x in xs where self[x, y] != other[x, y] { n += 1 }
         }
         return n
+    }
+
+    /// How many pixels in a band are *covered* in one raster and not the other,
+    /// ignoring colour entirely.
+    ///
+    /// This is the only way to ask "is it the same shape?" separately from "is it
+    /// the same colour?", and §4.3 needs exactly that question asked twice with
+    /// different answers: the mark's shape must not move with the session's state
+    /// and its hue must.
+    func differingCoverageCount(from other: Raster, inColumns xs: Range<Int>) -> Int {
+        guard width >= xs.upperBound, other.width >= xs.upperBound, height == other.height else {
+            return max(width * height, other.width * other.height)
+        }
+        var n = 0
+        for y in 0..<height {
+            for x in xs where self[x, y].isTransparent != other[x, y].isTransparent { n += 1 }
+        }
+        return n
+    }
+
+    /// Ink within `t` points of the raster's outer edge — where an inset outline
+    /// draws and where nothing else in a row does.
+    func opaquePixelCount(inBorderOfWidth t: Int) -> Int {
+        var n = 0
+        for y in 0..<height {
+            for x in 0..<width where x < t || x >= width - t || y < t || y >= height - t {
+                if !self[x, y].isTransparent { n += 1 }
+            }
+        }
+        return n
+    }
+
+    /// The leftmost column holding a pixel at least `minimumAlpha` opaque.
+    ///
+    /// The threshold is the point: a panel drawn at 3.5% white has an alpha of 9,
+    /// so counting *any* non-transparent pixel would just measure the panel's own
+    /// left edge. Above 100 is content — text, a marker — and nothing else.
+    func leftmostInkedColumn(minimumAlpha: UInt8 = 100) -> Int? {
+        for x in 0..<width {
+            for y in 0..<height where self[x, y].a >= minimumAlpha { return x }
+        }
+        return nil
+    }
+
+    /// The tallest unbroken vertical run of one colour at a single x.
+    ///
+    /// Distinguishes a **drawn rule** from a glyph that looks like one: both are
+    /// thin and vertical, but they cannot be the same colour, because a glyph
+    /// takes the text's ink and a rule takes its own.
+    func longestVerticalRun(of colour: RGBA, tolerance: Int = 6) -> Int {
+        let t = (Int((colour.r * 255).rounded()),
+                 Int((colour.g * 255).rounded()),
+                 Int((colour.b * 255).rounded()))
+        func near(_ p: Pixel) -> Bool {
+            p.a > 200 && abs(Int(p.r) - t.0) <= tolerance
+                && abs(Int(p.g) - t.1) <= tolerance && abs(Int(p.b) - t.2) <= tolerance
+        }
+        var best = 0
+        for x in 0..<width {
+            var run = 0
+            for y in 0..<height {
+                run = near(self[x, y]) ? run + 1 : 0
+                best = max(best, run)
+            }
+        }
+        return best
     }
 }
 
 /// §11's line 1 carries "Project, worktree, state" — and the state is carried
 /// by colour (§4.3), so the row must paint the accent of the state it is in and
 /// not of any other.
+///
+/// **Scoped to a session with no Tasks and no Agents, and that is now load-bearing
+/// rather than incidental.** The mockup's `.rblock` markers are tinted by the
+/// *item's* state, not the row's — `.tk.doing i` is `var(--running)` and
+/// `.ag i.ok` is `var(--idle)`, both of which stay themselves inside an amber or a
+/// red row. So "one hue per row" is a claim about the row's own three lines: a
+/// task in progress is running whatever has become of the session around it. See
+/// `TaskMarker` in `SessionBlocks.swift`.
 @MainActor @Test func theRowWearsItsOwnStatesAccent() throws {
     for (kind, state) in [(Kind.permission, IslandState.waiting),
                           (.failed, .failed), (.running, .running)] {
@@ -130,22 +240,37 @@ extension Raster {
 }
 
 /// §4.3, and the one rule in this row that is not merely about appearance:
-/// **hue means state, shape means identity.** So the mark's own column must be
-/// pixel-identical between two sessions that differ only in state, and the
-/// state's colour must appear as a *filled* pip at the other end of the line.
+/// **shape says who, hue says what state, both on the same mark.**
 ///
-/// Mutation-verified, both halves:
-/// - Passing `colour: accent` to `CLIMarkView` in `SessionRow.body`: the leading
-///   column differs by 72 pixels between waiting and failed and the first
-///   `#expect` fails. Before: 0 differing, passes. After: fails.
-/// - Deleting the `Circle()` from `headline`: no solid 5×5 accent square
-///   survives (the state's word alone cannot make one) and the second `#expect`
-///   fails. Before: passes for all three states. After: fails for all three.
-@MainActor @Test func stateColourLivesInThePipAndNeverInTheMark() throws {
+/// The previous wave asserted the opposite of the first half of this — that the
+/// mark's column must not change with the state at all — under an instruction not
+/// to tint a mark by state, which it flagged as contradicting both §4.3's closing
+/// sentence ("Everything tinted by the current state — **marks**, cat, badge,
+/// counts, the aura — uses the same `--accent`") and `.mark{color:var(--accent)}`.
+/// The instruction was withdrawn. What §4.3's "never by hue" actually forbids is
+/// hue carrying **identity** — so the demand on the mark is that its *coverage* be
+/// identical across states while its *colour* is not, which is two questions and
+/// needs two measurements.
+///
+/// Mutation-verified, all three halves:
+/// - `colour: Color(boneColour)` at the call site (the previous behaviour): the
+///   mark's column differs by 0 pixels between waiting and failed, so the second
+///   `#expect` fails. Before: 76 differing, passes.
+/// - `CLIMarkView(mark: CLIMark(cli: session.cli), side: 12, colour: accent)` — a
+///   mark whose *shape* moves with nothing but which no longer matches the other
+///   render's coverage: the first `#expect` fails.
+/// - Deleting the `Circle()` from `headline`: no solid 5×5 accent square survives
+///   (the state's word alone cannot make one) and the third fails.
+@MainActor @Test func theMarksShapeSaysWhoAndItsHueSaysWhatState() throws {
     let waiting = try row(session(.permission))
     let failed = try row(session(.failed))
-    #expect(waiting.differingPixelCount(from: failed, inLeading: 16) == 0,
-            "the leading 16pt column changed with the session's state — the mark is tinted by state, so the row's first glyph says *how it is doing* where §4.3 puts *which agent it is*")
+    // 10pt of row padding, then the 16pt mark.
+    let markColumns = 10..<26
+
+    #expect(waiting.differingCoverageCount(from: failed, inColumns: markColumns) == 0,
+            "the mark covered different pixels in a waiting row than in a failed one — its *shape* moved with the session's state, and shape is the only thing a person who cannot separate amber from red has to tell one agent from another")
+    #expect(waiting.differingPixelCount(from: failed, inColumns: markColumns) > 0,
+            "the mark's column is pixel-identical across two states — it is not tinted, so §4.3's `--accent` list and the mockup's `.mark{color:var(--accent)}` are both unhonoured")
 
     for (kind, state) in [(Kind.permission, IslandState.waiting),
                           (.failed, .failed), (.running, .running)] {
@@ -256,16 +381,21 @@ extension Raster {
 /// used to join them with a space, so no downstream view could tell them apart.
 ///
 /// Three renders of the same words, differing only in which field they arrive
-/// in, compared by how much **bone** (the command's ink) and how much **haze**
-/// (the sentence's) each contains. A view that styled the two halves alike
-/// would put the same amount of each in all three.
+/// in, compared by how much of the command's own ink and how much **haze** (the
+/// sentence's) each contains. A view that styled the two halves alike would put
+/// the same amount of each in all three.
+///
+/// That ink is `commandColour` — `#B9C4D6` — and not `boneColour` as of the second
+/// mockup-fidelity wave. `.ract em`'s hex is the only colour in the prototype's row
+/// CSS that is neither a `--var` nor a state hue; substituting `--bone` kept the
+/// emphasis and overstated it, letting line 2 claim the same weight as line 1's
+/// project name. This test now measures the tier the field actually has, which is
+/// also why it grew teeth it did not have: with both fields drawn in `--bone`, the
+/// project name contributed to every count.
 ///
 /// Mutation-verified: giving the command `hazeColour` and the sentence's font
-/// makes the bone counts collapse onto each other and the first two `#expect`s
-/// fail. Measured — before: bone 127 in `split`, 171 in `commandOnly`, 50 in
-/// `sentenceOnly` (the project name, which all three share); haze 30 in `split`
-/// against 0 in `commandOnly`. After: `split` bone falls to 50, exactly
-/// `sentenceOnly`'s.
+/// makes the two counts collapse onto each other (39 → 0 of `commandColour` in
+/// every render) and the first two `#expect`s fail.
 @MainActor @Test func theCommandIsItsOwnEmphasisedFieldOnLineTwo() throws {
     func withActivity(_ activity: Session.Activity) throws -> Raster {
         var e = VibeEvent(id: "e", cli: "claude-code", kind: .running, session: "s",
@@ -279,9 +409,9 @@ extension Raster {
     let sentenceOnly = try withActivity(.init(sentence: "Editing src/routes/pricing.tsx"))
     let commandOnly = try withActivity(.init(command: "Editing src/routes/pricing.tsx"))
 
-    #expect(split.pixelCount(near: boneColour) > sentenceOnly.pixelCount(near: boneColour),
-            "the same text drew no more of the command's ink when half of it arrived as the command (\(split.pixelCount(near: boneColour)) against \(sentenceOnly.pixelCount(near: boneColour))) — the command is not emphasised, so line 2 is one field again")
-    #expect(commandOnly.pixelCount(near: boneColour) > sentenceOnly.pixelCount(near: boneColour),
+    #expect(split.pixelCount(near: commandColour) > sentenceOnly.pixelCount(near: commandColour),
+            "the same text drew no more of the command's ink when half of it arrived as the command (\(split.pixelCount(near: commandColour)) against \(sentenceOnly.pixelCount(near: commandColour))) — the command is not emphasised, so line 2 is one field again")
+    #expect(commandOnly.pixelCount(near: commandColour) > sentenceOnly.pixelCount(near: commandColour),
             "a whole line 2 arriving as the command drew no more emphasis than one arriving as the sentence — the two fields are styled the same")
     #expect(split.pixelCount(near: hazeColour) > commandOnly.pixelCount(near: hazeColour),
             "the sentence contributed none of line 2's quieter ink — it is being drawn as the command is")
@@ -296,11 +426,18 @@ extension Raster {
 /// pixels. Mutation-verified: returning `IslandState(session.state).label`
 /// unconditionally fails the first `#expect`; returning the elapsed time
 /// unconditionally fails the other three. Before: passes. After: fails.
+///
+/// The first expectation is against the **mockup's own literal** — `SESSIONS[1]`
+/// carries `state:'2m 14s'` and this fixture is 134 seconds old — rather than
+/// against `RevealContent.elapsed(134)`, which it used to be. Restating the call
+/// the implementation makes cannot catch the implementation calling it with the
+/// wrong granularity, and that is precisely the defect this wave fixed: the row
+/// read `2m`. Mutation-verified separately: dropping `precision: .fine` from
+/// `stateLabel` yields `2m` and fails.
 @Test func onlyARunningRowShowsAnElapsedTimeAsItsState() {
     let now = t0.addingTimeInterval(134)
-    #expect(SessionRow.stateLabel(for: session(.running), now: now)
-            == RevealContent.elapsed(134),
-            "a running row showed a word where the mockup shows how long it has been running")
+    #expect(SessionRow.stateLabel(for: session(.running), now: now) == "2m 14s",
+            "a running row showed `\(SessionRow.stateLabel(for: session(.running), now: now))` where the mockup's own 134-second session shows `2m 14s`")
     #expect(SessionRow.stateLabel(for: session(.permission), now: now) == "Needs you")
     #expect(SessionRow.stateLabel(for: session(.failed), now: now) == "Failed")
     #expect(SessionRow.stateLabel(for: session(.done), now: now) == "Idle")
@@ -377,4 +514,113 @@ extension Raster {
     let long = try rowFor("clean the build and rebuild it from scratch, then run the whole suite twice and tell me which tests flake")
     #expect(long.height == short.height,
             "a long last message rendered the row \(long.height)pt tall against \(short.height)pt — it wrapped, so §11's three lines became four")
+}
+
+// MARK: - The ink hierarchy
+
+/// The prototype's text palette is **three** rungs — `--bone`, `--haze`, `--dim` —
+/// and a row spends all three plus the command's own `#B9C4D6`. Until the second
+/// mockup-fidelity wave we had two: everything below `--bone` was `hazeColour`,
+/// which collapsed "a field you read" and "a field you refer back to" into one
+/// weight and is why the assembled list read busier than the mockup it came from.
+///
+/// Measured on a **three-line row with no blocks**, and the first version of this
+/// test — which used a fixture carrying both blocks — is the reason that matters:
+/// repointing the *row's* `--dim` fields at `--haze` still left the blocks' four
+/// `--dim` fields painting, so the count stayed above the floor and the test
+/// passed against the defect it was written for. A test whose fixture can satisfy
+/// it by a different route than the one under examination is not a test. The
+/// blocks' own share of the tier is pinned separately, in `SessionBlocksTests`.
+///
+/// **`tolerance: 0`, at `scale: 2`**, and this is the second thing the first
+/// version of this test got wrong. Antialiasing a glyph is a gradient from the
+/// text's ink to the ground behind it, so it passes through *every* intermediate
+/// colour — including the tier below. Measured: with the row's `--dim` fields
+/// repointed at `--haze`, `pixelCount(near: dimColour)` at this file's usual
+/// tolerance of 6 still reads **93**, purely from the edges of haze glyphs. At
+/// tolerance 0 the same render reads 0 against 1451 for the correct one, because a
+/// gradient may pass through a value but a glyph *core* is the only thing that
+/// sits on it. Scale 2 for the reason `RevealContentTests` already gives: at
+/// scale 1 an 11pt glyph anti-aliases so diffusely that its core is a couple of
+/// dozen pixels.
+///
+/// Mutation-verified, once per tier: repointing this row's `dimColour` users at
+/// `hazeColour` takes dim from 1451 to **0**, and the command at `boneColour`
+/// takes that count from 386 to 0. Both fail.
+@MainActor @Test func theRowSpendsAllFourOfItsInkTiers() throws {
+    let raster = try rasterise(
+        SessionRow(session: threeLineSession(), now: t0).frame(width: 388)
+            .background(Color(islandGroundColour)), scale: 2)
+    for (name, colour) in [("--bone (the project)", boneColour),
+                           ("--haze (the sentence)", hazeColour),
+                           ("--dim (the meta, the worktree, the last message)", dimColour),
+                           ("#B9C4D6 (the command)", commandColour)] {
+        let n = raster.pixelCount(near: colour, tolerance: 0)
+        #expect(n > 100,
+                "the row drew \(n) pixels of exactly \(name) — a tier of the prototype's ink ladder is missing, so two fields that should differ in weight are being drawn at the same one")
+    }
+}
+
+/// `.rmeta` and `.rwt` are `font-family:ui-monospace` in the mockup, and the row
+/// drew both in the sentence's proportional face.
+///
+/// Asserted by **behaviour rather than by restating a font descriptor**: a
+/// monospaced right-aligned field starts at the same x whatever glyphs are in it,
+/// and a proportional one moves. Eight `i`s against eight `m`s is the widest such
+/// pair there is.
+///
+/// Mutation-verified: dropping `design: .monospaced` from the meta line's font
+/// moves the field's left edge from 297/296 to **331/259** — 72pt apart — and this
+/// fails. Before: 1pt apart, passes.
+@MainActor @Test func theMetaColumnDoesNotMoveWithTheWidthOfItsGlyphs() throws {
+    func metaStart(_ model: String) throws -> Int {
+        var e = VibeEvent(id: "e", cli: "claude-code", kind: .running, session: "s",
+                          cwd: "/tmp/api")
+        e.model = model
+        let raster = try row(Session(event: e, now: t0))
+        // The right half only: the meta is the sole field there, since this
+        // fixture carries no activity for line 2's left half to draw.
+        var leftmost = raster.width
+        for y in 0..<raster.height {
+            for x in (raster.width / 2)..<raster.width where raster[x, y].a > 100 {
+                leftmost = min(leftmost, x)
+                break
+            }
+        }
+        return leftmost
+    }
+
+    let narrow = try metaStart("iiiiiiii")
+    let wide = try metaStart("mmmmmmmm")
+    #expect(abs(narrow - wide) <= 2,
+            "eight `i`s and eight `m`s put the meta field's left edge \(abs(narrow - wide))pt apart (\(narrow) against \(wide)) — it is drawn in a proportional face, so the column dances as a model name changes")
+}
+
+/// `.rsaid::before` — line 3's rule is a **1.5px drawn bar**, not a `│` inside the
+/// string. A glyph takes the text's own ink; the bar takes 13% white, which no
+/// text in the row uses.
+///
+/// The measurement is a *vertical run* of that composite rather than a count of
+/// it: antialiasing a `--dim` glyph over the island's ground passes through the
+/// same value in ones and twos, so a count alone would survive the glyph. A run of
+/// ten pixels at one x would not.
+///
+/// **A row with no blocks**, for a reason that only showed up under mutation: a
+/// task marker is a 9pt rounded square outlined in 22% white, and the antialiased
+/// column along its own left edge is both the right colour and nine pixels tall.
+/// With blocks in the fixture this test passed with line 3's rule reverted to a
+/// glyph — it was measuring a task marker's border and calling it a rule.
+///
+/// Mutation-verified: restoring `Text("│ \(asked)")` in `dimColour` takes the run
+/// from **13** to 0 and this fails. (`--dim`'s own longest run in the same render
+/// is 8, which is what a glyph stem looks like — in the wrong colour.)
+@MainActor @Test func lineThreesRuleIsADrawnBarAndNotAGlyph() throws {
+    let raster = try rasterise(
+        SessionRow(session: threeLineSession(), now: t0).frame(width: 388)
+            .background(Color(islandGroundColour)))
+    // `rgba(255,255,255,.13)` over `--void`, which is what the eye sees and
+    // therefore what a raster can measure.
+    let rule = RGBA(hex: "#26272B")!
+    #expect(raster.longestVerticalRun(of: rule) >= 8,
+            "the tallest run of 13%-white in the row is \(raster.longestVerticalRun(of: rule))px — line 3's rule is being drawn in the text's ink, so it is a character in the string rather than the mockup's bar")
 }

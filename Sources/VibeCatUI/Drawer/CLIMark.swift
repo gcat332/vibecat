@@ -123,14 +123,18 @@ enum CLIMark: String, CaseIterable, Sendable {
 
 /// One mark, at the prototype's own `.mark{width:16px;height:16px}`.
 ///
-/// **`colour` is not the session's accent, and that is deliberate.** §4.3's
-/// last sentence does list marks among the things tinted by `--accent`, and the
-/// prototype's CSS does exactly that — but the same section's *rule* is that
-/// hue means state and shape means identity, and this row already carries state
-/// in a pip immediately beside the state's own word. Tinting the mark as well
-/// would make the row's leading glyph say state twice and identity once, which
-/// is the arrangement this file was written to end. Recorded rather than
-/// silently chosen: flipping it back is this one default.
+/// **Shape says who, hue says what state, both on the same mark.** `SessionRow`
+/// passes the session's accent, matching `.mark{color:var(--accent)}` and §4.3's
+/// closing sentence, which lists marks first among the things `--accent` tints.
+/// The rule that reads as forbidding it — "which agent is speaking is carried by
+/// its icon shape, never by hue" — is about **identity**: the shape has to answer
+/// *which agent* on its own, so that a person who cannot separate orange from
+/// blue still can. It does, and the hue is then free to answer a second question.
+///
+/// `colour` keeps a default rather than becoming a required argument because the
+/// contact sheet draws the four marks as a legend, where no session and therefore
+/// no state exists. `boneColour` is the right neutral for that and the wrong
+/// choice inside a row; the row says so explicitly at its call site.
 struct CLIMarkView: View {
     let mark: CLIMark
     var side: CGFloat = 16

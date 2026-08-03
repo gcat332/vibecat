@@ -84,6 +84,12 @@ struct SessionRow: View {
     /// duration formatters in one app is how the collapsed bar and the list
     /// start disagreeing about how long a run has taken.
     ///
+    /// `precision: .fine`, which is a **granularity on the shared formatter** and
+    /// not a widening of the reveal's format. The mockup's running rows read
+    /// `2m 14s` and `0m 38s`; the reveal, which shows the same duration, must stay
+    /// at one unit because it has 150pt for a project name as well. One formatter,
+    /// two callers, each asking for what its own width can carry.
+    ///
     /// A `nonisolated static` pure function rather than a computed property, so
     /// a test can assert the *string* — "a running row shows `2m` and a waiting
     /// one shows `Needs you`" — instead of inferring it from a pixel diff, which
@@ -92,7 +98,8 @@ struct SessionRow: View {
     /// infers `@MainActor` onto every member of the type.)
     nonisolated static func stateLabel(for session: Session, now: Date) -> String {
         switch session.state {
-        case .running: RevealContent.elapsed(now.timeIntervalSince(session.updatedAt))
+        case .running: RevealContent.elapsed(now.timeIntervalSince(session.updatedAt),
+                                            precision: .fine)
         case .idle, .waiting, .failed: IslandState(session.state).label
         }
     }
@@ -106,26 +113,31 @@ struct SessionRow: View {
         // `.row{display:flex;align-items:flex-start;gap:10px}` with
         // `.row > .mark{margin-top:1px}`. §11's own sketch indents the same way.
         HStack(alignment: .top, spacing: 10) {
-            CLIMarkView(mark: CLIMark(cli: session.cli))
+            // `.mark{color:var(--accent)}` (mockup line 200) with `--accent` set
+            // per row from `s.colour`, and §4.3's closing sentence — "Everything
+            // tinted by the current state — **marks**, cat, badge, counts, the
+            // aura — uses the same `--accent`."
+            //
+            // The previous wave drew this in `boneColour` under an instruction
+            // not to tint a mark by state, and flagged the instruction as wrong;
+            // it was. §4.3's "never by hue" governs **identity** — which agent is
+            // speaking must be legible without colour vision — and says nothing
+            // against a mark also carrying state. Shape says who, hue says what
+            // state, both on the same mark.
+            CLIMarkView(mark: CLIMark(cli: session.cli), colour: accent)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
                 headline
                 secondLine
                 if options.contains(.lastMessage), let asked = session.lastUserMessage {
-                    // `.lineLimit(1)`, not 2. The mockup's `.rsaid` is
-                    // `white-space:nowrap` with an ellipsis, and §11's first
-                    // words are "**Three** lines per row" — a two-line line 3
-                    // makes four, the same defect the project name already
-                    // shipped with once.
-                    Text("│ \(asked)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color(hazeColour))
-                        .lineLimit(1)
+                    lastMessageLine(asked)
                 }
-                SessionBlocks(session: session, options: options, accent: accent)
+                SessionBlocks(session: session, options: options)
             }
         }
+        // `.row{padding:8px 10px}`.
         .padding(.vertical, 8)
+        .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -155,9 +167,13 @@ struct SessionRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             if options.contains(.worktree), let worktree = session.worktree {
+                // `.rwt{font-family:…monospace;font-size:10.5px;color:var(--dim)}`
+                // — mono and `--dim`, both of which this had as the sentence's
+                // 11pt sans in `--haze`. A branch name is an identifier, which is
+                // the same reason line 2's command is mono.
                 Text("⑂ \(worktree)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color(hazeColour))
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(Color(dimColour))
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -178,6 +194,39 @@ struct SessionRow: View {
             }
             .fixedSize()
         }
+    }
+
+    /// §11's line 3, the last thing you asked — the mockup's `.rsaid`.
+    ///
+    /// The rule on the left is **a drawn bar, not a `│` in the string**:
+    /// `.rsaid::before` is a 1.5px, 13%-white, 1px-rounded rectangle inset 2px
+    /// from the line's own top and bottom, with the text starting at
+    /// `padding-left:11px`. A glyph cannot be any of those things — it inherits
+    /// the text's colour and its own baseline, so it lands as a `--dim` mark
+    /// floating on the cap line rather than a quiet rule spanning the line.
+    ///
+    /// `.lineLimit(1)`, not 2. `.rsaid` is `white-space:nowrap` with an ellipsis,
+    /// and §11's first words are "**Three** lines per row" — a two-line line 3
+    /// makes four, the same defect the project name already shipped with once.
+    /// An `.overlay` on the padded text rather than a sibling in an `HStack`, and
+    /// that is the whole reason it is written this way: a bare `Shape` beside a
+    /// `Text` has no height of its own and stretches to whatever the stack gives
+    /// it, while `::before` on `.rsaid` is positioned against *that line's* box.
+    /// The overlay inherits the text's own box, so `padding(.vertical, 2)`
+    /// reproduces `top:2px;bottom:2px` exactly.
+    private func lastMessageLine(_ asked: String) -> some View {
+        Text(asked)
+            .font(.system(size: 11))
+            .foregroundStyle(Color(dimColour))
+            .lineLimit(1)
+            .padding(.leading, 11)
+            .overlay(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 0.75)
+                    .fill(Color.white.opacity(0.13))
+                    .frame(width: 1.5)
+                    .padding(.vertical, 2)
+                    .padding(.leading, 2)
+            }
     }
 
     /// §11's line 2: "What the agent is doing right now · where and how it
@@ -217,7 +266,7 @@ struct SessionRow: View {
                         if let command = activity.command {
                             Text(command)
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Color(boneColour))
+                                .foregroundStyle(Color(commandColour))
                                 .lineLimit(1)
                                 // The same reasoning as the drawer's command
                                 // body: the end of a command is its target, so
@@ -234,9 +283,17 @@ struct SessionRow: View {
                 }
                 Spacer(minLength: 8)
                 if !meta.isEmpty {
+                    // `.rmeta{font-family:…monospace;font-size:10px;color:var(--dim)}`.
+                    // This was 11pt sans in `--haze`, and the size is not a
+                    // cosmetic difference: at 11pt the meta line is wide enough
+                    // to push the sentence beside it into an ellipsis inside the
+                    // drawer's content width — `Asking to r…` in the rendered
+                    // list — which the mockup fits at the same width because it
+                    // sets 10pt here. The truncation was a type-ladder artefact,
+                    // not a layout one.
                     Text(meta)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color(hazeColour))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Color(dimColour))
                         .lineLimit(1)
                         .fixedSize()
                 }
