@@ -514,19 +514,73 @@ struct IslandBody: View {
         let localOrigin = IslandFrames(body: body, panel: panel.panel).bodyInPanel.origin
         let cell: CGFloat = 1
 
+        // Plan 5, Task 1: **two** silhouette rects, not one.
+        //
+        // One rect could not carry two different widths, and since Task 8 it was
+        // being asked to. `body.height` includes an open drawer's own height, and
+        // Plan 4 deliberately made the drawer's width hover-independent — so a
+        // single hover-coupled rect spanning both painted `hoverReveal` points of
+        // island ground straight down the right of the drawer, over ~92% of its
+        // height, appearing and disappearing with the cursor. Measured before
+        // this: the ground colour at 2pt past the drawer's own right edge, 60pt
+        // below the notch line.
+        //
+        // The collapsed half rounds nothing while the drawer is open
+        // (`roundsBottom:`) — two rounded shapes stacked would put a pair of
+        // corners across the middle of one body, a seam at exactly the line the
+        // island is meant to read as continuous across.
+        let drawerBelow = max(0, body.height - model.geometry.notch.height)
+
         ZStack(alignment: .topLeading) {
             Color.clear
-            IslandShape()
-                .fill(Color(islandGroundColour))
-                .overlay(alignment: .topLeading) { content(cell: cell) }
-                .clipShape(IslandShape())
-                // A shadow on the shape traces its rendered alpha, rounded
-                // corners included, so the aura follows the silhouette rather
-                // than a bounding box — and follows the drawer down for free.
-                .shadow(color: Color(auraTint.colour)
-                            .opacity(model.aura.opacity(at: now, tint: auraTint)),
-                        radius: 18, x: 0, y: 2)
-                .frame(width: restingWidth + hoverRevealWidth, height: body.height)
+            // `.leading`, never the default `.center`: the two halves are
+            // different widths by design, and a centred stack would push the
+            // narrower one's right edge *past* `drawerWidth` by half the
+            // difference — which reproduced the very sliver this split removes,
+            // just shifted. It would also unpin the left edge §5.3 exists to
+            // keep fixed.
+            VStack(alignment: .leading, spacing: 0) {
+                IslandShape(roundsBottom: drawerBelow == 0)
+                    .fill(Color(islandGroundColour))
+                    .overlay(alignment: .topLeading) { content(cell: cell) }
+                    .clipShape(IslandShape(roundsBottom: drawerBelow == 0))
+                    // The reveal is dropped while a drawer is open, and this is
+                    // the second half of the sliver fix rather than an extra.
+                    //
+                    // `model.hovering` is *true* throughout an open drawer in
+                    // production, which is not obvious: `click()` toggles
+                    // `model.drawerOpen` and never touches `NotchController.tier`,
+                    // so that tier stays `.hover` and `reflow()`'s
+                    // `model.hovering = (tier == .hover)` stays true — and it has
+                    // to, because `panel.acceptsClicks` is gated on it, so a
+                    // drawer you cannot hover is a drawer you cannot answer.
+                    //
+                    // So without this, an open drawer permanently showed a
+                    // collapsed bar `hoverReveal` points wider than itself: a
+                    // step off to the right of every question, for as long as the
+                    // question was up. §6.1's tiers are progressive — Rest, then
+                    // Hover, then Click — so once the drawer is open the reveal
+                    // has already done its job, and dropping it makes the bar and
+                    // the drawer exactly the same width (`restingWidth` and
+                    // `drawerWidth` are both 273.1 on the mbp14 fixture). One
+                    // column, which is what §9.1's "one body with mass" asks for
+                    // and what the prototype does with its single element.
+                    .frame(width: restingWidth + (drawerBelow > 0 ? 0 : hoverRevealWidth),
+                           height: model.geometry.notch.height)
+                if drawerBelow > 0 {
+                    IslandShape()
+                        .fill(Color(islandGroundColour))
+                        .frame(width: model.drawerWidth, height: drawerBelow)
+                }
+            }
+            // The aura traces the *whole* rendered alpha, rounded corners
+            // included (§9.2) — so it goes on the stack, not on either half.
+            // Applied per-half it would trace two shapes and draw a seam of glow
+            // between them, and §9.2's own reason for being a shadow rather than
+            // an overlay is that it follows the drawer down for free.
+            .shadow(color: Color(auraTint.colour)
+                        .opacity(model.aura.opacity(at: now, tint: auraTint)),
+                    radius: 18, x: 0, y: 2)
                 .offset(x: localOrigin.x, y: localOrigin.y)
                 // Design §9.1. Width overshoots more than height so the island
                 // reads as one body with mass rather than a resizing box. The

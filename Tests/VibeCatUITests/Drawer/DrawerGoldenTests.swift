@@ -459,6 +459,96 @@ private func destructiveQuestion(body: String = "rm -rf build/") -> VibeEvent {
             "only \(raster.pixelCount(near: haze)) --haze pixels — the command body and the non-recommended rows are not drawn in the prototype's secondary tone")
 }
 
+/// Plan 5, Task 1. The sliver `theDrawersContentDoesNotShiftWhenOnlyHoverChanges`
+/// records as a known residual: `IslandBody` painted one silhouette rect at the
+/// hover-coupled width across the *whole* body height, and since Task 8 that
+/// height includes an open drawer — while Plan 4 deliberately made the drawer's
+/// own width hover-independent. So hovering painted `hoverReveal` points of
+/// island ground down the right of the drawer, over ~92% of its height.
+///
+/// Asserted as the rule itself rather than by sampling a column: **hover must
+/// change the collapsed row's painted width by exactly the reveal, and the
+/// drawer row's by nothing.** A first draft of this test sampled one pixel at
+/// `drawerWidth + 2` and failed against a correct implementation, because the
+/// painted region starts at the panel's own leading offset (24pt here), not at
+/// column 0 — so that column was still inside the drawer. Measuring the extent
+/// needs no offset arithmetic to get wrong.
+@MainActor @Test func hoverWidensTheCollapsedRowAndLeavesTheDrawerRowAlone() throws {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    // .idle, not .waiting, for the same reason the hover test below uses it: a
+    // continuous mood takes IslandView's TimelineView branch and reads the real
+    // wall clock per render, which made two-render comparisons flake.
+    model.state = .idle
+    model.sessionCount = 3
+    model.question = QuestionModel(event: threeChoices(multi: false))
+    model.drawerOpen = true
+
+    /// The painted run's width on one row, in points.
+    func paintedWidth(_ raster: Raster, row y: Int) -> Int {
+        var first = -1, last = -1
+        for x in 0..<raster.width where !raster[x, y].isTransparent {
+            if first < 0 { first = x }
+            last = x
+        }
+        return first < 0 ? 0 : last - first + 1
+    }
+
+    let inTheBar = Int(model.geometry.notch.height) / 2
+    let belowTheNotch = Int(model.geometry.notch.height) + 60
+
+    model.hovering = false
+    let atRest = try rasterise(IslandView(model: model))
+    model.hovering = true
+    let hovered = try rasterise(IslandView(model: model))
+
+    let drawerAtRest = paintedWidth(atRest, row: belowTheNotch)
+    let drawerHovered = paintedWidth(hovered, row: belowTheNotch)
+    #expect(drawerAtRest > 0, "setup: nothing is painted below the notch line at all")
+    #expect(drawerHovered == drawerAtRest,
+            "the drawer row went from \(drawerAtRest)pt to \(drawerHovered)pt wide on hover — the reveal is dragging the hover-independent drawer with it, which is the sliver")
+
+    // With the drawer open the reveal is dropped entirely, so the bar matches
+    // the drawer rather than stepping past it — see the `.frame` comment in
+    // `IslandBody`. So the bar must not move on hover *either*, while open.
+    let barAtRest = paintedWidth(atRest, row: inTheBar)
+    let barHovered = paintedWidth(hovered, row: inTheBar)
+    #expect(barHovered == barAtRest,
+            "the collapsed bar went \(barAtRest)pt → \(barHovered)pt on hover with the drawer open — §6.1's tiers are progressive, and a bar wider than the drawer under it is a step off to the right of every question")
+    #expect(barHovered == drawerHovered,
+            "bar \(barHovered)pt against drawer \(drawerHovered)pt — with the drawer open the two must be one column, not two widths")
+}
+
+/// The other half of the same rule, and the one that keeps the fix above from
+/// being "delete the hover reveal": with the drawer **closed**, hover must still
+/// widen the island by exactly the reveal. A single test asserting only the open
+/// case would pass against a `hoverRevealWidth` hardcoded to zero.
+@MainActor @Test func hoverStillWidensTheIslandWhenNoDrawerIsOpen() throws {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    model.state = .idle
+    model.sessionCount = 3
+
+    func paintedWidth(_ raster: Raster, row y: Int) -> Int {
+        var first = -1, last = -1
+        for x in 0..<raster.width where !raster[x, y].isTransparent {
+            if first < 0 { first = x }
+            last = x
+        }
+        return first < 0 ? 0 : last - first + 1
+    }
+    let inTheBar = Int(model.geometry.notch.height) / 2
+
+    model.hovering = false
+    let atRest = try rasterise(IslandView(model: model))
+    model.hovering = true
+    let hovered = try rasterise(IslandView(model: model))
+
+    #expect(paintedWidth(hovered, row: inTheBar) - paintedWidth(atRest, row: inTheBar)
+                == Int(CollapsedLayout.hoverReveal),
+            "hover changed the closed island's width by \(paintedWidth(hovered, row: inTheBar) - paintedWidth(atRest, row: inTheBar))pt, not \(Int(CollapsedLayout.hoverReveal)) — the reveal itself is gone")
+}
+
 /// The drawer is the island's, so it wears the island's colour (§4.3).
 @MainActor @Test func theDrawerWearsTheStatesAccent() throws {
     for state in [IslandState.waiting, .failed] {
@@ -720,20 +810,22 @@ private func isNear(_ p: Raster.Pixel, _ colour: RGBA, tolerance: Int = 6) -> Bo
 /// property nothing reads stayed constant.
 ///
 /// Scoped to the drawer's own painted columns (`0..<model.drawerWidth`), not
-/// the full raster width — a known, minor, and deliberately unfixed residual:
-/// `IslandBody`'s own silhouette is one shape spanning the *whole* body
-/// height (collapsed content and drawer both, since `body.height` already
-/// includes the open drawer's own height), drawn at `restingWidth +
-/// hoverRevealWidth` regardless of what `DrawerView` does with its own
-/// width. While hovering, that shape is wider than the now hover-independent
-/// drawer sitting on top of it, so a same-coloured sliver of it (with its
-/// own, differently-positioned rounded bottom corner) is visible to the
-/// right of the drawer, only while hovering. Fixing that would mean teaching
-/// `IslandBody`'s own hover reveal to stop widening while a drawer happens
-/// to be open — a real change to a different, more heavily-relied-on
-/// mechanism (Task 9/10's collapsed-pill width split) for a same-colour,
-/// off-to-the-side cosmetic detail, and out of scope for what this finding
-/// asked: the drawer's *own* content must hold still, which this proves.
+/// the full raster width.
+///
+/// **That scoping used to be a concession and no longer is.** It carried a long
+/// note here describing a "known, minor, and deliberately unfixed residual": the
+/// silhouette was one shape spanning the whole body height at the hover-coupled
+/// width, so hovering painted a same-coloured sliver of it to the right of the
+/// hover-independent drawer. Plan 5's Task 1 split the silhouette in two and that
+/// sliver is gone — see
+/// `hoverWidensTheCollapsedRowAndLeavesTheDrawerRowAlone`, and the mutation
+/// behind it: with the old single rect restored, the drawer row measures 423pt
+/// wide hovered against 273pt at rest, exactly `hoverReveal` of sliver.
+///
+/// The scoping stays anyway, because it is the right scope for *this* test's own
+/// question — the drawer's own content holding still is a claim about the
+/// drawer's own columns — and because narrowing a passing test's scope is not
+/// something to do on the strength of one fix.
 @MainActor @Test func theDrawersContentDoesNotShiftWhenOnlyHoverChanges() throws {
     let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
                             motion: MotionPreference(chosen: .full, systemWantsReduced: false))
@@ -777,6 +869,12 @@ private func isNear(_ p: Raster.Pixel, _ colour: RGBA, tolerance: Int = 6) -> Bo
     // runs), a residual rendering-jitter magnitude nowhere near the 2015
     // pixels the actual bug this test exists to catch produces (confirmed by
     // this test's own mutation check, see the task report).
-    #expect(differing <= 30,
+    // `== 0`, not `<= 30`. The 30 was measured against real jitter (4, 4, 8
+    // across separate full-suite runs) while the sliver still existed; with the
+    // silhouette split this measures **0**, so the allowance is no longer
+    // absorbing anything and a tolerance that absorbs nothing should not be
+    // spent. If jitter returns, raise it deliberately and record the magnitude —
+    // do not restore a number whose original reason is gone.
+    #expect(differing == 0,
             "\(differing) pixels within the drawer's own width changed when only `hovering` toggled — the drawer's own content moved with the hover reveal")
 }

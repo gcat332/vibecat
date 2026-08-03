@@ -149,6 +149,57 @@ struct ContactSheetTool {
         print("contact sheet: \(raster.width)x\(raster.height) -> \(path)")
     }
 
+    /// The whole `IslandView` as the panel actually composes it, in the four
+    /// combinations of hover and drawer-open — the one thing the contact sheet
+    /// above cannot show, because it renders the pieces rather than the
+    /// composition.
+    ///
+    /// Added for Plan 5's Task 1, whose entire subject was a defect *between*
+    /// two composed parts: the silhouette painted at the hover-coupled width
+    /// while the drawer on top of it was hover-independent, so hovering with the
+    /// drawer open left 150pt of ground down its right. Nothing that renders the
+    /// drawer alone, or the island alone, can show that. Kept because the rest of
+    /// Plan 5 puts a second face into the same composition.
+    ///
+    ///     VIBECAT_ISLAND_SHOT=/tmp/island.png swift test --filter islandShot
+    @MainActor
+    static func islandComposition() -> some View {
+        func island(_ hovering: Bool, _ open: Bool) -> some View {
+            let m = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                                motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+            // .idle, not a continuous mood: this is a still image, and a mood
+            // with a timeline samples the real wall clock per render.
+            m.state = .idle
+            m.sessionCount = 3
+            m.hovering = hovering
+            if open {
+                m.question = Self.singleSelectLongLabel()
+                m.drawerOpen = true
+            }
+            return VStack(alignment: .leading, spacing: 4) {
+                Text("hover \(hovering ? "on" : "off") · drawer \(open ? "open" : "closed")")
+                    .font(.system(size: 10)).foregroundStyle(Color(hazeColour))
+                IslandView(model: m)
+            }
+        }
+        return HStack(alignment: .top, spacing: 12) {
+            island(false, false)
+            island(true, false)
+            island(false, true)
+            island(true, true)
+        }
+        .padding(12)
+        .background(Color.black)
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["VIBECAT_ISLAND_SHOT"] != nil))
+    @MainActor func islandShot() throws {
+        let path = ProcessInfo.processInfo.environment["VIBECAT_ISLAND_SHOT"]!
+        let raster = try rasterise(Self.islandComposition(), scale: Self.scale)
+        #expect(raster.writePNG(to: path), "could not write \(path)")
+        print("island composition: \(raster.width)x\(raster.height) -> \(path)")
+    }
+
     /// A filmstrip: every badge across one full cycle, one column per sampled
     /// phase. Shows which frames actually *differ* — which is the point, since
     /// `squares` has four distinct frames and is drawn twelve times a second,

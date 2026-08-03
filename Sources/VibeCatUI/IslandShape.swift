@@ -15,10 +15,24 @@ import SwiftUI
 /// On a rect too small to hold the bottom radius at full size, the radius
 /// shrinks to fit rather than folding the contour back on itself.
 public struct IslandShape: Shape, Sendable {
-    public init() {}
+    /// Whether to round the bottom corners at all.
+    ///
+    /// `true` for every caller until Plan 5, and still the default. The
+    /// exception is the *collapsed* half of an open island: Plan 5 split the
+    /// silhouette in two so the hover reveal could widen the collapsed part
+    /// without dragging the hover-independent drawer with it, and two rounded
+    /// shapes stacked would put a pair of corners across the middle of one
+    /// body — a seam at the notch line, exactly where the island is supposed to
+    /// read as continuous. So the top half rounds nothing while a drawer hangs
+    /// below it, and the drawer's own bottom carries the radius for both.
+    public let roundsBottom: Bool
+
+    public init(roundsBottom: Bool = true) {
+        self.roundsBottom = roundsBottom
+    }
 
     public func path(in rect: CGRect) -> Path {
-        let r0 = IslandGeometry.bottomRadius
+        let r0 = roundsBottom ? IslandGeometry.bottomRadius : 0
         // Two invariants keep the contour from folding back on itself: the two
         // corners cannot be taller than the rect, nor wider than it.
         let r = min(r0, rect.height, rect.width / 2)
