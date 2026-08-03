@@ -174,22 +174,32 @@ struct SettingsRootView: View {
         // Control and the zoom button behave the way every other window does.
         window.title = "VibeCat Settings"
 
-        // ARC and AppKit disagree about who owns a window, and the default is
-        // AppKit's answer: an `NSWindow` created in code is
-        // `isReleasedWhenClosed == true`. This class holds a strong reference
-        // and clears it in the close observer below, which is one release; the
-        // AppKit behaviour is a second one, so on paper leaving this at its
-        // default makes a close a use-after-free rather than a leak.
+        // **`isReleasedWhenClosed` is deliberately left at AppKit's own default
+        // of `true`, and this comment exists so nobody sets it to `false`
+        // again.** Task 5 did, reasoning that this class holds a strong
+        // reference and clears it in the close observer below, so AppKit's
+        // release would be a *second* one and a close would be a
+        // use-after-free.
         //
-        // **Unverified, and deliberately labelled as such.** Deleting this line
-        // leaves every test in `SettingsWindowTests` green, close-then-reopen
-        // included — measured, not assumed (Task 5's report, mutation 5). So
-        // either the extra release is balanced by a retain this process cannot
-        // see, or the crash needs a run loop that `swift test` never pumps.
-        // The line stays because it is the documented contract for an
-        // ARC-held window and because the failure mode it prevents is a crash
-        // in someone's Settings window, not because anything here proves it.
-        window.isReleasedWhenClosed = false
+        // **That reasoning is inverted, and the measurement says so.**
+        // `NSWindow.willCloseNotification` is posted *before* the close
+        // completes, so `windowDidClose()`'s `window = nil` runs first and
+        // AppKit's release is the one that balances its own window-list
+        // retain — not a second release of a reference this class still holds.
+        // With `false`, nothing balances it at all: ten `show()`/
+        // `performClose(nil)` cycles through one controller, inside an
+        // `autoreleasepool` and followed by a two-second run-loop drain, took
+        // `NSApp.windows` from 0 to 10 with all ten still titled "VibeCat
+        // Settings" and all ten weak references still live — one `NSWindow`
+        // leaked per open/close, permanently, in an `LSUIElement` app that runs
+        // for the whole login session. At the default the same probe reads
+        // 0 -> 10 -> 0 with every weak reference nil and no crash.
+        //
+        // `aClosedWindowIsDeallocatedRatherThanLeakedForever` in
+        // `SettingsWindowTests` holds this: it is a weak reference to the
+        // window, checked after the close, which is headless and cheap and is
+        // what should have been written the first time instead of a labelled
+        // guess.
 
         // The prototype is a dark sheet, and this app has no light variant to
         // switch to — pinning the appearance rather than following the system

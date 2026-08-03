@@ -61,13 +61,13 @@ import VibeCatCore
     // fails if `show()` hands back a window that was already closed.
     //
     // It was written expecting to also catch `isReleasedWhenClosed = false`
-    // being removed — an `NSWindow` created in code defaults to `true`, so a
-    // controller that holds a strong reference *and* clears it on close should
-    // release it twice. **It does not catch that: deleting that line leaves all
-    // nine tests in this file green** (see this task's report). So the line
-    // stays for the documented AppKit contract, not because anything here
-    // proves it, and this comment says so rather than claiming a guard the
-    // suite does not have.
+    // being removed, and it does not — a controller that has already dropped
+    // its reference builds a fresh window either way, so this test cannot tell
+    // a released window from a leaked one. That gap is now covered by
+    // `aClosedWindowIsDeallocatedRatherThanLeakedForever` below, which reads a
+    // weak reference instead of an identity; the line itself is gone, because
+    // measuring it showed it leaked one window per close rather than preventing
+    // a double release (see `makeWindow()`'s own comment).
     let c = SettingsWindowController(store: InMemoryPreferenceStore())
     c.show()
     let first = c.windowForTesting
@@ -75,6 +75,41 @@ import VibeCatCore
     c.show()
     #expect(c.isOpen)
     #expect(c.windowForTesting !== first, "a closed window was reused after release")
+}
+
+@Test @MainActor func closingTheWindowTakesItOutOfTheApplicationsWindowList() {
+    // The invariant `CLAUDE.md` states as "anything with a lifecycle tears
+    // itself down", applied to the one object in this file that AppKit — not
+    // ARC — owns. An `LSUIElement` app runs for the whole login session and its
+    // Settings window sits behind a gear someone can press any number of times,
+    // so one `NSWindow` retained per open/close is unbounded growth.
+    //
+    // **Identity, not a count, and not a weak reference.** A count would be
+    // wrong because `NSApp.windows` is process-global and this suite runs in
+    // parallel — every other test in this file builds a window titled "VibeCat
+    // Settings". Asking whether *our own* window is still listed is unaffected
+    // by any of them.
+    //
+    // A weak reference was tried first and does not work here, which is worth
+    // recording because it looks like the obvious test. Measured: with
+    // `isReleasedWhenClosed` at its default, ten open/close cycles leave
+    // `NSApp.windows` at 0 — but all ten `NSWindow` objects are still alive with
+    // a retain count of 8 each, after 50 run-loop spins. AppKit finishes tearing
+    // a closed window down inside `NSApplication.run()`, which `swift test`
+    // never calls, so "is it deallocated yet" has no stable answer in this
+    // process. "Is it still in the window list" does, and it is the thing that
+    // grows without bound: with `window.isReleasedWhenClosed = false` restored,
+    // the same ten cycles take `NSApp.windows` from 0 to 10 with all ten still
+    // titled "VibeCat Settings", and this test fails on the first one.
+    let app = NSApplication.shared
+    let c = SettingsWindowController(store: InMemoryPreferenceStore())
+    c.show()
+    let opened = c.windowForTesting
+    #expect(opened != nil && app.windows.contains { $0 === opened },
+            "an open window that is not in NSApp.windows means this test cannot detect a leak either")
+    c.windowForTesting?.performClose(nil)
+    #expect(!app.windows.contains { $0 === opened },
+            "the closed window is still in NSApp.windows — one NSWindow accumulates there per open/close, for the process's whole life")
 }
 
 @Test @MainActor func theWindowHostsSwiftUIRatherThanAnEmptyContentView() {
