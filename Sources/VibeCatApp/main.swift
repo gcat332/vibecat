@@ -44,7 +44,16 @@ if CommandLine.arguments.contains("--badge-cpu-probe") {
 BackdropSampler.requestAccessIfAskedTo()
 
 let model = AppModel(socketPath: SocketPath.default)
-let controller = NotchController(model: model)
+
+// Plan 6.4 Task 4: the single persisted source of `Preferences.soundEnabled`
+// — read once here so both the panel's own mute glyph (via `controller`) and
+// the sound engine (via `soundPlayer` below) start in step with whatever was
+// on disk from a previous launch, rather than each defaulting independently
+// and disagreeing until the first toggle. §2.3 fail-open concern: `load()`
+// is a synchronous `UserDefaults` read with no I/O that can block, so this
+// cannot be the thing that hangs a terminal.
+let preferences = UserDefaultsPreferenceStore()
+let controller = NotchController(model: model, preferences: preferences)
 
 // §12's cues. The player is owned here rather than by AppModel or
 // NotchController: AppModel stays free of AVFoundation so it remains testable
@@ -57,7 +66,11 @@ let controller = NotchController(model: model)
 // permission serves. It is a no-op once the user has decided either way.
 let quietHours = FocusStatusQuietHours()
 quietHours.requestAuthorizationIfNeeded()
-let soundPlayer = SoundPlayer(quietHours: quietHours)
+// `SoundSettings(enabled:)` seeded from the same `preferences` read above —
+// see that `let`'s own comment. A stored mute must be honoured from the very
+// first cue, not only after the first toggle of this session.
+let soundPlayer = SoundPlayer(settings: SoundSettings(enabled: preferences.load().soundEnabled),
+                              quietHours: quietHours)
 // Renders all five cues on `SoundPlayer`'s own serial queue, before any event
 // arrives. Measured at 858ms for `error` alone in a debug build — which is what
 // `Scripts/build-app.sh` produces — so paying it here, off the main actor and once,
@@ -65,6 +78,17 @@ let soundPlayer = SoundPlayer(quietHours: quietHours)
 // SoundPlayer's doc comment for the getrusage table.
 soundPlayer.prewarm()
 model.onCue = { [weak soundPlayer] in soundPlayer?.play($0) }
+// Plan 6.4 Task 4's own seam: a mute toggle from the panel reaches
+// `NotchController.toggleMute()`, which persists it and reports the fresh
+// `Preferences.soundEnabled` value here — the one place that knows about
+// both a `PreferenceStoring` and a `SoundPlayer`. `settings.enabled = _`
+// mutates `SoundPlayer`'s own cache key (see its doc comment on `rendered`),
+// which invalidates every cached cue on the very next `play`/`buffer(for:)` —
+// see this task's own report for whether repeated toggling makes that a real
+// cost.
+controller.onSoundEnabledChanged = { [weak soundPlayer] enabled in
+    soundPlayer?.settings.enabled = enabled
+}
 
 do {
     try model.start()

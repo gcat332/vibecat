@@ -180,7 +180,10 @@ public struct IslandView: View {
                 // regardless of where the cursor drifts while it is open.
                 DrawerView(question: model.question, sessions: model.sessions,
                            accent: model.state.accent, width: model.drawerWidth,
-                           onAnswer: { model.onAnswer?($0) })
+                           onAnswer: { model.onAnswer?($0) },
+                           muted: model.muted,
+                           onToggleMute: { model.onToggleMute?() },
+                           onOpenSettings: { model.onOpenSettings?() })
                     .padding(.leading, drawerLeadingOffset)
                     .padding(.top, model.geometry.notch.height)
             }

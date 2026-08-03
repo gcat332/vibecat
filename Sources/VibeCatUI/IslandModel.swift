@@ -73,6 +73,33 @@ import VibeCatCore
     @ObservationIgnored
     public var onAnswer: (@MainActor (Reply) -> Void)?
 
+    /// Whether the drawer's own footer should show the muted glyph. **The
+    /// same setting as `Preferences.soundEnabled`** — `island-motion.html:1060`
+    /// states the coupling explicitly: "the panel's mute button and the
+    /// app's sound toggle are the same setting." `NotchController` is the
+    /// only writer (see its own `toggleMute()`), kept in step with whichever
+    /// `PreferenceStoring` main.swift handed it at construction — never a
+    /// second, private copy `PanelBar` or `DrawerView` could disagree with.
+    /// Plain (not `@ObservationIgnored`): unlike the closures below, this is
+    /// content the drawer actually draws, so a change must invalidate the view.
+    public var muted: Bool = false
+
+    /// Fires when the drawer's own mute button (`PanelBar`'s `#pmute`) is
+    /// tapped. Wired by `NotchController.present()` to `toggleMute()`, which
+    /// persists the flip and reports the fresh `Preferences.soundEnabled`
+    /// value onward so main.swift can keep the running `SoundPlayer` in
+    /// step. `@ObservationIgnored` for the same reason as `onAnswer`: this is
+    /// wiring, not content, and reassigning it should not itself invalidate
+    /// anything.
+    @ObservationIgnored
+    public var onToggleMute: (@MainActor () -> Void)?
+
+    /// Fires when the drawer's own gear button (`PanelBar`'s `#pgear`) is
+    /// tapped. Left unwired by this plan's Task 4 — Task 5 builds the
+    /// window this is meant to open.
+    @ObservationIgnored
+    public var onOpenSettings: (@MainActor () -> Void)?
+
     public init(geometry: IslandGeometry, coat: Coat = .tabby, motion: MotionPreference) {
         self.geometry = geometry
         self.coat = coat

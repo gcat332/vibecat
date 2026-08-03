@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import VibeCatCore
 
 /// Owns the panel, the geometry and the hover monitor, and keeps the
 /// `IslandModel` in step with the app model and with the display.
@@ -30,6 +31,13 @@ import SwiftUI
     /// so a stray unqualified `model` would still compile against either one.
     private let appModel: AppModel
     private let metrics: @MainActor () -> ScreenMetrics?
+    /// Plan 6.4 Task 4's own addition: the single source of truth for
+    /// `Preferences.soundEnabled`, which `model.muted` is the negation of.
+    /// Defaulted to a fresh `InMemoryPreferenceStore()` at every call site
+    /// that doesn't pass one (every existing test), so nothing outside
+    /// main.swift ever touches the user's real `UserDefaults` just by
+    /// constructing a controller.
+    private let preferences: PreferenceStoring
     private var panel: NotchPanel?
     private var hover: HoverMonitor?
     private var bloomEnd: Task<Void, Never>?
@@ -71,6 +79,18 @@ import SwiftUI
     /// production) already does.
     private weak var currentPending: PendingQuestion?
 
+    /// Fires with the freshly-persisted `Preferences.soundEnabled` value
+    /// right after a mute toggle is saved — main.swift wires this to
+    /// `SoundPlayer.settings.enabled`, so the engine's own render gate
+    /// (`CueRenderer.render`'s `guard settings.enabled`) and what
+    /// `Preferences` says on disk never disagree. `SoundPlayer` itself is
+    /// deliberately not known to this file — it is owned by main.swift for
+    /// the reason given right next to where it's constructed there (keeps
+    /// `AppModel`/`NotchController` free of `AVFoundation`) — so this is the
+    /// seam that lets a UI-level tap reach it without this file importing
+    /// sound at all.
+    public var onSoundEnabledChanged: (@MainActor (Bool) -> Void)?
+
     /// The surface the aura has to be seen against: the menu bar strip the
     /// island sits in, as wide as the panel so it covers where the glow
     /// spreads sideways.
@@ -108,15 +128,22 @@ import SwiftUI
                       width: frames.panel.width, height: frames.body.height)
     }
 
-    public init(model appModel: AppModel, metrics: @escaping @MainActor () -> ScreenMetrics?) {
+    public init(model appModel: AppModel, metrics: @escaping @MainActor () -> ScreenMetrics?,
+                preferences: PreferenceStoring = InMemoryPreferenceStore()) {
         self.appModel = appModel
         self.metrics = metrics
+        self.preferences = preferences
         let geometry = IslandGeometry(screen: metrics() ?? .zeroFallback)
         self.model = IslandModel(geometry: geometry, motion: MotionPreference.current())
+        // Read once, here, rather than left at IslandModel's own `false`
+        // default — a relaunch with sound already muted must show muted
+        // immediately, not flip visibly once something else happens to
+        // touch `model.muted` first.
+        self.model.muted = !preferences.load().soundEnabled
     }
 
-    public convenience init(model: AppModel) {
-        self.init(model: model, metrics: { ScreenMetrics.current() })
+    public convenience init(model: AppModel, preferences: PreferenceStoring = InMemoryPreferenceStore()) {
+        self.init(model: model, metrics: { ScreenMetrics.current() }, preferences: preferences)
     }
 
     /// The live panel, for `NotchControllerTests` only — deliberately not
@@ -227,6 +254,9 @@ import SwiftUI
         // dismiss() re-wires them rather than leaving stale closures.
         model.onIslandClick = { [weak self] in self?.click() }
         model.onAnswer = { [weak self] reply in self?.appModel.answer(reply) }
+        // The footer's mute button — see `toggleMute()` and
+        // `onSoundEnabledChanged`'s own doc comments.
+        model.onToggleMute = { [weak self] in self?.toggleMute() }
 
         // Escape while the drawer is open dismisses without answering — see
         // dismissOnEscape's own doc comment. Torn down and rebuilt the same
@@ -262,6 +292,7 @@ import SwiftUI
         appModel.onQuestion = nil
         model.onIslandClick = nil
         model.onAnswer = nil
+        model.onToggleMute = nil
         bloomEnd?.cancel()
         bloomEnd = nil
         lapseCheck?.cancel()
@@ -465,6 +496,32 @@ import SwiftUI
     func click() {
         model.drawerOpen.toggle()
         reflow()
+    }
+
+    /// `model.onToggleMute`'s handler, wired in `present()`. Flips the one
+    /// setting `island-motion.html:1060` names as shared between the panel's
+    /// mute button and the app's own sound toggle, persists it through
+    /// whichever `PreferenceStoring` this controller was built with, updates
+    /// `model.muted` so the footer redraws, and reports the fresh value
+    /// outward through `onSoundEnabledChanged` so main.swift can keep the
+    /// running `SoundPlayer` in step.
+    ///
+    /// `internal`, not `private`: mirrors `click()`/`setHovering(_:)` above —
+    /// this file's own tests drive wiring entry points directly rather than
+    /// only through a simulated tap. Calling this directly proves the store
+    /// is written and `model.muted`/`onSoundEnabledChanged` follow; it
+    /// cannot prove that `PanelBar`'s real `Button(action:)` is the thing
+    /// that reaches `model.onToggleMute` in the first place — that half is
+    /// the same permanent gap `PanelBarTests
+    /// .tappingEachButtonCallsItsOwnClosureAndNotTheOther` already records,
+    /// for the same reason: no ViewInspector-style dependency, and this
+    /// project takes none.
+    func toggleMute() {
+        var prefs = preferences.load()
+        prefs.soundEnabled.toggle()
+        preferences.save(prefs)
+        model.muted = !prefs.soundEnabled
+        onSoundEnabledChanged?(prefs.soundEnabled)
     }
 
     /// The escape monitor's own decision, factored out so a test can drive it

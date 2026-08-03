@@ -27,6 +27,21 @@ struct DrawerView: View {
     /// cares whether a tap answers anything) keeps compiling unchanged.
     var onAnswer: (Reply) -> Void = { _ in }
 
+    /// Forwarded straight to `PanelBar`'s own `muted` — never held as a
+    /// `@State` of its own. `island-motion.html:1060`'s coupling
+    /// ("the panel's mute button and the app's sound toggle are the same
+    /// setting") is exactly what a local copy here would silently violate.
+    /// Defaulted so every existing call site (none of which cares) keeps
+    /// compiling unchanged.
+    var muted: Bool = false
+    /// Forwarded straight to `PanelBar`'s own `onToggleMute`. Defaulted for
+    /// the same reason as `onAnswer` above.
+    var onToggleMute: () -> Void = {}
+    /// Forwarded straight to `PanelBar`'s own `onOpenSettings`. Still a
+    /// no-op in production until Plan 6.4 Task 5 builds the settings
+    /// window; defaulted for the same reason as `onAnswer` above.
+    var onOpenSettings: () -> Void = {}
+
     /// A pending question always wins — `IslandModel.face`'s own rule,
     /// restated here because this file has to decide *which branch to draw*,
     /// not just report which one is showing.
@@ -58,6 +73,13 @@ struct DrawerView: View {
     /// per this plan's own rule about a mutation that stays green — the fix is
     /// below: render the real `DrawerView` and inspect its actual bottom
     /// strip, which cannot help but go through `body`.
+    ///
+    /// Plan 6.4, Task 4: `muted`/`onToggleMute`/`onOpenSettings` above are now
+    /// forwarded rather than hardcoded — `IslandView` threads them down from
+    /// `IslandModel`, which `NotchController` keeps in step with
+    /// `Preferences.soundEnabled`. `onOpenSettings` stays a no-op in
+    /// production (Task 5's job), wired through anyway so Task 5 has nothing
+    /// left to touch in this file.
     static let footerHeight: CGFloat = 44
 
     private var accentColor: Color { Color(accent) }
@@ -107,16 +129,18 @@ struct DrawerView: View {
                     }
                     .animation(.easeInOut(duration: FaceCrossfade.duration), value: question == nil)
                     // The reservation itself, now claimed by `PanelBar`.
-                    // `muted` hardcoded `false` and both closures no-ops:
-                    // Task 4 owns wiring this to `Preferences.soundEnabled`
-                    // and a real settings-window opener. A button that calls
-                    // nothing yet is still correct chrome — the
-                    // alternative, an empty 44pt gap, is exactly what this
-                    // task replaces. Built directly here, not through a
-                    // shared static a test could call around `body` — see
-                    // `footerHeight`'s own doc comment for why that
-                    // indirection let a real mutation go uncaught.
-                    PanelBar(muted: false, onToggleMute: {}, onOpenSettings: {})
+                    // Task 4: `muted`/`onToggleMute`/`onOpenSettings` above are
+                    // forwarded straight through rather than hardcoded — see
+                    // this struct's own doc comments on those properties for
+                    // why none of the three is a local copy. `onOpenSettings`
+                    // still calls nothing in production (Task 5's job — a
+                    // button that calls nothing yet is still correct chrome,
+                    // the alternative being an empty 44pt gap). Built directly
+                    // here, not through a shared static a test could call
+                    // around `body` — see `footerHeight`'s own doc comment
+                    // for why that indirection let a real mutation go
+                    // uncaught.
+                    PanelBar(muted: muted, onToggleMute: onToggleMute, onOpenSettings: onOpenSettings)
                         .frame(height: Self.footerHeight)
                 }
             }
