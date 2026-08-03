@@ -604,6 +604,38 @@ implementation detail:
   exactly one test and nothing in `Sources/`. Plan 4 created the second one, so
   the reconciliation belongs with whoever next touches the motion and tier code.
 
+## Carried out of the second mockup-fidelity wave
+
+Full account: [`.superpowers/sdd/mockup-fidelity-wave2.md`](../../../.superpowers/sdd/mockup-fidelity-wave2.md).
+Nine of the eleven items on that wave's list are closed. What is left is here
+because it is owned elsewhere, not because it was skipped.
+
+- **The list panel is 388pt where the mockup's is 560px, and in production it is
+  narrower still.** This is the real cause of line 2 truncating to `As…` in the
+  rendered list — *not* the type ladder, which the wave matched to the mockup and
+  measured as costing 40pt rather than saving any (10pt mono is wider than 11pt
+  sans on `iTerm2 · Opus 4.8 · high`). The row's ink saturates at **420pt**; the
+  mockup gives its rows 524. `IslandModel.drawerWidth` derives the drawer's width
+  from the collapsed island's own resting layout — 273.1pt on the `mbp14` fixture
+  — so the widest the list ever gets is a side effect of how many tallies are on
+  the bar. §6.3 fixes the drawer's *height* per face and says nothing about width.
+  **A per-face width, the way there is already a per-face height, is the fix.**
+  Whoever owns §6.3 owns this; it is not a row-fidelity item.
+- **`.pip.live` and `.ract.live .caret` are still not animated** (1.8s and 1.4s
+  `softpulse`). Held back for two reasons, both deliberate: every raster assertion
+  in the drawer suite becomes time-dependent the moment a row animates, and an
+  open session list already costs +7 to +14pp of a core before any per-row
+  animation is added — which touches an open cost decision the owner has not made.
+  The hook exists: `SessionListFace` already runs a 1Hz `TimelineView` while
+  anything is running, and `IslandView` already derives phase from a `now`. Do it
+  with `MotionPreference` respected and the goldens rendered at a pinned phase.
+- **`.rtop` is `align-items:baseline` in the mockup and centre-aligned here.** Left
+  alone: the previous wave's `.lineLimit(1)` on the project name removed the case
+  where it was visible (a wrapped name dragging the state pip off the baseline),
+  so this is now a sub-pixel difference with a real risk of disturbing two golden
+  heights. Worth doing in the same pass as the width above, where the row's layout
+  is being re-measured anyway.
+
 ## Plan 7 — generic adapter and custom sources (§3)
 
 §18 puts this in **v1**, and `Sources/VibeCatCore/Adapters/` still contains one
