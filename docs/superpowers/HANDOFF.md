@@ -1,15 +1,21 @@
-# Handoff — 2026-08-03
+# Handoff — 2026-08-03 (end of Plan 5)
 
-Where VibeCat is, what to do next, and the three things a newcomer would
-otherwise have to rediscover.
+Where VibeCat is, what to decide next, and the things a newcomer would otherwise
+have to rediscover the hard way.
+
+> Supersedes the earlier 2026-08-03 handoff, which was written mid-session and had
+> gone materially stale: it reported 373 tests and 168 commits, said "Plans 1–4
+> done", listed five already-finished items under "do these first", and told a
+> reader `ImageRenderer` was trustworthy. That last one is now known to be false —
+> see below.
 
 ## State
 
-`main`, clean, **373 tests**, **168 commits ahead of `origin/main` and
-deliberately unpushed**. Plans 1–4 done.
+`main`, clean, **419 tests**, **213 commits ahead of `origin/main`**, **MIT
+licensed** (`LICENSE` in the root). **Plans 1–5 done**, including Plan 4.5.
 
 ```bash
-swift test                                   # 373, ~2s
+swift test                                   # 419, ~3s
 Scripts/build-app.sh && open .build/VibeCat.app
 ```
 
@@ -18,136 +24,99 @@ shell the responsible process and the app loses its own permission identity.
 
 ## What works, verified on hardware rather than argued
 
-On 2026-08-02, from a signed bundle, with a real `rm -rf build/` permission
-event through the real hook and socket:
+From a signed bundle, with real hook events through the real socket:
 
-- The island sits in the notch, click-through, at 0.35% of a core when idle.
-- A question does **not** open the drawer by itself. Clicking the island does —
-  the panel grew from `y 0..56` to `y 0..344`, which is notch 32 + face 288 +
-  `auraMargin` 24, exactly.
-- **Focus is never stolen.** Finder was activated first so the reading was not
-  confounded, and stayed frontmost through the island click, the row click and
-  the confirming tap.
-- The round trip completes: two taps — pick, then confirm, because §10.3's second
-  ask fired for real — and the hook printed claude-code's own
-  `permissionDecision`.
+- The island sits in the notch, click-through, and answers a real `rm -rf build/`
+  permission event end to end — pick, then confirm, because §10.3's second ask
+  fires for real, and the hook prints claude-code's own `permissionDecision`.
+- **Focus is never stolen**, and the panel takes keyboard input **exclusively**:
+  verified with a TextEdit witness plus a control run, not just `isKeyWindow`.
+  [The key-input spike](spikes/2026-08-03-notch-panel-key-input.md).
+- §11's session list renders and opens, and there is a committed visual fixture for
+  it (`VIBECAT_LIST_SHOT=…`) — the first one, because `ImageRenderer` cannot render
+  a `ScrollView` at all.
 
-Fail-open was enumerated across all ten ways a question can end. Every one
-reaches `nil`, so a crashed or silent island can never hang a terminal.
+Fail-open was enumerated across all ten ways a question can end. Every one reaches
+`nil`, so a crashed or silent island can never hang a terminal.
 
-## Do these first
+## Two decisions waiting on the owner
 
-In this order. The first is the only one that touches safety.
+Neither is a bug to fix; both are calls only you can make.
 
-1. **`.truncationMode(.middle)` on the drawer's command body.** `.lineLimit(1)`
-   stopped the confirmation banner clipping, but SwiftUI's default `.tail`
-   truncation eats the *destination*: `rm -rf /Users/dev/projects/vibe…`. A
-   person is asked to authorise a destructive command unable to see its target.
-2. ~~**Measure the badge transforms with `getrusage`.**~~ **Done 2026-08-03 —
-   and the idle island's 0.35% is gone.** [The
-   spike](spikes/2026-08-03-badge-transform-cost.md) has the numbers, the
-   decomposition, and the two wrong turns. The `Canvas` half of the assumption
-   held exactly (0.0 draws/s, against 47.9/s once a timeline is involved); the
-   cost half did not. **Dormant now measures 12.26% of a core in release against
-   0.35% before badges animated — 35× — and roughly 3× worse than the
-   cell-swapping badges the transform replaced.** Reproduced in debug (10.63%),
-   so it is not a build artefact. `BadgeCanvas` also never consults
-   `MotionPreference`, so no setting turns it off.
-
-   **This is now the thing to decide, and it is a decision, not a fix:** revert
-   to still badges and lose the fidelity, gate them on `MotionPreference` so the
-   cost is at least a choice, find a mechanism that is genuinely
-   render-server-only, or accept 12% knowingly and write that down. The probe
-   that produced these numbers is `Sources/VibeCatApp/BadgeCPUProbe.swift` — its
-   doc comment says how to run it, and re-running it is how any of those options
-   gets checked.
-3. ~~**Run `KeyDownProbe`** on an unlocked machine.~~ **Done 2026-08-03 —
-   Path A.** [The spike](spikes/2026-08-03-notch-panel-key-input.md): the panel
-   becomes key, takes every keystroke **exclusively** (verified with a TextEdit
-   witness and a control run, not just `isKeyWindow`), and
-   `frontmostApplication` never changes. Plan 6's keyboard items are unblocked —
-   with one constraint the brief never anticipated: **key status may be held only
-   while a question is open**, because exclusive delivery plus an unchanged
-   `frontmost` means a resting key panel silently eats everything typed into a
-   terminal that still looks focused. Also: `NSApp.isActive` is not a usable
-   proxy, it read `true` in every run.
-
-   It settled the plan's one genuine unknown —
-   whether a `.nonactivatingPanel` at `.statusBar` can take *key* events without
-   stealing terminal focus. Mouse input was measured and does not. The probe
-   prints `frontmostApplication` before and after and aborts on `loginwindow`,
-   because an earlier attempt at that measurement was void for exactly that
-   reason and nearly became a recorded fact.
-
-   **Corrected 2026-08-03.** This said `VIBECAT_KEYDOWN_PROBE=1`, and so did
-   `plans/README.md`. No such environment variable exists anywhere in the
-   source: `main.swift` gates the probe on a **command-line argument**, under
-   `#if DEBUG`. The invocation, from `KeyDownProbe`'s own doc comment, which
-   records why each part of it is necessary — click some other app first, so
-   "did frontmost change" is a real question:
-
-   ```bash
-   Scripts/build-app.sh
-   open -n --stdout /tmp/keydown-probe.log --stderr /tmp/keydown-probe.log \
-        .build/VibeCat.app --args --keydown-probe
-   tail -f /tmp/keydown-probe.log
-   ```
-
-   `-n` matters: without it `open` re-activates the running instance instead of
-   launching a process that takes the probe branch. `open`'s own flags must
-   come *before* `--args`, or they silently become the app's argv instead —
-   both already learned the hard way once.
-4. `@MainActor` on `theConfirmationBannerNamesTheControlThatActuallyConfirms` —
-   the branch's one compiler warning.
-5. **Cache `CatPalette`'s five accent-derived tones.** `ground` and `white` are
-   already cached; the rest rebuild on every subscript access, 210 cells a frame.
+1. **Opening the session list costs +13.6pp of a core** — 31.28% against
+   `running`'s 17.69%, roughly 9× the probe's noise floor, with `draws/s`
+   unchanged so it is not extra badge redraws. That **reopens the ~12% resting cost
+   accepted earlier**, which was accepted on the explicit condition that "several
+   sprites at once" would reopen it. [The spike](spikes/2026-08-03-badge-transform-cost.md)
+   has the numbers and the leading hypothesis (whole-window recompositing while any
+   animation is live), recorded as a hypothesis and not a finding.
+2. **That measurement was taken on battery with Low Power Mode on**, unlike every
+   other figure in that file. The within-run delta survives the confound; the
+   absolute numbers do not. **A mains-power re-run is the file's most urgent
+   outstanding item.**
 
 ## Then the plans
 
-[plans/README.md](superpowers/plans/README.md) is the map — it says which plan
-owns what and, for everything that once had no owner, where it went and why.
-Short version: **Plan 4.5 (match the prototype) → Plan 5 (session list) → Plan 6
-(sound, jump, settings) → Plan 7 (generic adapter) → Plan 8 (motion cost)**, with
-Plan 7 and the fix-now items safe to run in parallel and Plan 4.5 deliberately
-not, because 5 and 6 build surface on the foundations it tunes.
+[plans/README.md](superpowers/plans/README.md) is the map, and it now also carries
+**Plan 5's carried findings** — eleven items its final review deliberately did not
+close, each with a ruling. Read that section before starting Plan 6; two of its
+entries are things to fix *before* the next plan rather than during it.
 
-## Three things that would otherwise be rediscovered
+Order: **Plan 6** (sound, jump, all four Settings sections, and everything that was
+gated on keyboard input — now unblocked) → **Plan 7** (generic adapter and custom
+sources) → **Plan 8** (matching motion cost to motion content, which Plan 5's
+measurement reframes again).
 
-**The tools already exist. Use them.**
-`Tests/VibeCatUITests/Raster.swift` renders any SwiftUI view offscreen with
-`ImageRenderer` — no window server, works on a locked machine, and it *does* run
-`Canvas` renderer closures. `ContactSheet.swift` dumps every badge, coat, mood
-and drawer state to one PNG (`VIBECAT_CONTACT_SHEET=…`), a filmstrip
-(`VIBECAT_FILMSTRIP=…`), and an animated GIF (`VIBECAT_GIF=…`). Three plans
-shipped artwork nobody had looked at; two of the three defects that found were
-invisible to a green suite. Open the PNG.
+## Five things that would otherwise be rediscovered
 
-**This project's tests agree with its code unless forced not to.**
-Over twenty tests that would have passed against a broken implementation were
-found during Plan 4 alone, several by implementers on their own work, one in a
-*reviewer's suggested fix*. Mutate anything you claim. If a test does not fail
+**`ImageRenderer` returns a reused backing store, and a view that draws nothing
+does not clear it.** This is the big one. A blank render read `[0, 474, 474, …]`
+across twelve consecutive calls — deterministic, single-threaded, under `--filter`.
+It surfaced as an intermittent full-suite failure and was first misdiagnosed twice:
+as "another test's pixels leaking under concurrency" (it is not a race — there is
+nothing to serialise) and as escaping-inout UB in our own buffer (a correctly
+allocated, longer-lived buffer read the same wrong value). `rasterise` now draws
+into a context we allocate and zero ourselves. **And `--filter` is not a
+trustworthy mode — it is only a quieter one.** Any new golden test must prove itself
+over repeated *full-suite* runs.
+
+**`ImageRenderer` also cannot render a `ScrollView`** — measured, a bare `Text`
+gives 165 opaque pixels and the identical `Text` inside a `ScrollView` gives 0. Use
+the `NSHostingView` + `cacheDisplay(in:to:)` path in `Raster.swift` for anything
+that scrolls. That is what finally let anyone see §11's list, and it immediately
+found a real §11 violation no test could see.
+
+**`@Observable` gates assignment but not mutation.** A plain assignment goes through
+the generated `set`, which **is** equality-gated for an `Equatable` property — so
+`model.aura = model.aura` notifies nothing. A **mutating call** goes through
+`_modify`, which notifies **unconditionally**. That distinction was a real bug:
+the bloom-end nudge was an equal write, so it ended no bloom, so a still mood kept a
+live 8fps timeline forever — about 3.3% of a core, permanently, in the state §6.1
+says must look idle. Do not "simplify" `model.aura.endBloom()` back into an
+assignment.
+
+**This project's tests agree with its code unless forced not to.** Over twenty tests
+that would have passed against a broken implementation were found in Plan 4 alone,
+and Plan 5 replaced two more that could not fail at all — one of which *asserted the
+bug it was written to prevent*. Mutate anything you claim. If a test does not fail
 against the specific breakage it names, it is decoration.
 
-**A measurement can be honest and still be the wrong measurement.**
-Badge animation was ruled out by a real `getrusage` figure — 3.6–4.1% of a core
-against 0.35%. That figure priced a `TimelineView` re-evaluating a `Canvas`,
-which is how *this implementation* animated, not how the design asks. The
-prototype animates by transform, which needs no timeline. Two plans treated it as
-settled. Ask what mechanism a measurement priced, especially when the
-implementation came first.
+**A measurement can be honest and still price the wrong mechanism.** This has now
+happened four times on this project: `ps %cpu` against `getrusage`; a badge
+animation figure that priced a `TimelineView` rather than the transform the design
+asks for; a hover-monitor row that still contained the animation it was meant to
+exclude; and the `ImageRenderer` misdiagnoses above. Ask what mechanism a number
+covers before designing around it — especially when the implementation came first.
 
 ## Still open, and known
 
-- ~~**No licence.**~~ **MIT, chosen 2026-08-03** — `LICENSE` in the repo root, README
-  updated. This was the one thing gating a push, so `main` is now publishable.
-- **The cat's motion is the badge mistake one layer down.** `call` scales 1.09,
-  `happy` pops, `dead` rotates ±4° in the prototype, and none is implemented
-  because `ResolvedCat` moves in whole cells to keep the pixel grid crisp. Item 2
-  above decides whether that constraint is real.
-- **The hover sliver**: 150pt of opaque colour over ~92% of the open drawer,
-  appearing with hover. Plan 5 owns it, because fixing it means changing the same
-  hover-reveal mechanism Plan 5 fills.
-- `Other…` is cut until keyboard input works; number-key routing exists and is
-  wired to nothing, pending item 3.
-- §6.2's right flank is not actually configurable, and §16's AppleScript hint
-  cannot exist before jump does. Both Plan 6.
+- **The cat's motion is the badge decision one layer down.** `call` scales 1.09,
+  `happy` pops and `dead` rotates ±4° in the prototype; ours translate instead,
+  because measured, a translate leaves the sprite at 9 distinct colours at any
+  offset while `scale(1.09)` takes it to 95 at 1× and 130 at 2×. Recorded as a
+  deliberate divergence, not a gap.
+- **§6.2's right flank is still not configurable** and §16's AppleScript hint cannot
+  exist before jump does. Both Plan 6.
+- **`lastUserMessage` renders but no adapter populates it** — §11's line 3 will
+  always be absent until an adapter carries the user's own prompt, which needs
+  checking against a real payload first.
