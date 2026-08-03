@@ -12,12 +12,19 @@ import VibeCatCore
     #expect(SessionBlocks.taskSummary(tasks) == "1 done, 1 in progress, 2 open")
 }
 
-/// A summary that only ever reports totals would pass a weaker test. Zero of a
-/// status must not be printed as "0 done" — that is noise on the majority of
-/// real sessions.
-@Test func theTaskSummaryOmitsStatusesWithNothingInThem() {
-    #expect(SessionBlocks.taskSummary([TaskItem(title: "a", status: .open)]) == "1 open")
-    #expect(SessionBlocks.taskSummary([]) == "")
+/// **All three counts, always** — the mockup's `tasksHTML` (line 824) is
+/// unconditional: `${done} done, ${doing} in progress, ${len-done-doing} open`.
+///
+/// This test replaces `theTaskSummaryOmitsStatusesWithNothingInThem`, which
+/// pinned the opposite behaviour and was written to a plan's own guess rather
+/// than to the reference. Three counts in a fixed order are read positionally
+/// down a column of rows; a summary whose fields come and go has to be re-read
+/// as a sentence every time — and "0 done" on a session that has been running
+/// for ten minutes is information, not noise.
+@Test func theTaskSummaryPrintsEveryCountIncludingZeroes() {
+    #expect(SessionBlocks.taskSummary([TaskItem(title: "a", status: .open)])
+            == "0 done, 0 in progress, 1 open")
+    #expect(SessionBlocks.taskSummary([]) == "0 done, 0 in progress, 0 open")
 }
 
 /// §11, and this is the rule that matters most: "When Subagents are hidden the
@@ -83,4 +90,34 @@ import VibeCatCore
             "`.agents` alone drew nothing beyond an empty option set — the Agents block is not gated by `.agents`")
     #expect(tasksOnly.opaquePixelCount != agentsOnly.opaquePixelCount,
             "`.tasks` alone and `.agents` alone drew the same ink — a mistake such as both bits guarding the same block would still pass a test that only ever flips them together")
+}
+
+/// The mockup gates a subagent's own activity line on the *session's* activity
+/// switch — `agentsHTML` line 837, `card.activity && a.sub`. Ours drew it
+/// unconditionally, which made `.activity` a half-switch: a row could be asked
+/// to drop every "what is happening right now" line and would keep the
+/// children's.
+///
+/// The session itself carries **no** activity here, so line 2's own left half is
+/// absent either way and the sub-line is the only thing the switch can move.
+///
+/// Mutation-verified: removing `options.contains(.activity)` from
+/// `SessionBlocks.agentLine` makes both renders the same height and this fails.
+/// Measured — before: 30pt against 45pt, passes. After: 45pt both ways, fails.
+@MainActor @Test func activityOffAlsoHidesASubagentsOwnActivityLine() throws {
+    var e = VibeEvent(id: "e", cli: "claude-code", kind: .running, session: "s", cwd: "/tmp/api")
+    e.agents = [AgentItem(name: "Explore (Search API endpoints)", elapsed: "8s",
+                          model: "Sonnet 4.6", activity: "Grep: handleRequest")]
+    let s = Session(event: e, now: Date(timeIntervalSince1970: 1_000_000))
+    let accent = Color(IslandState.running.accent)
+
+    func draw(_ options: SessionRow.Options) throws -> Raster {
+        try rasterise(SessionBlocks(session: s, options: options, accent: accent)
+            .frame(width: 388))
+    }
+
+    let withActivity = try draw([.agents, .subagents, .activity])
+    let without = try draw([.agents, .subagents])
+    #expect(without.height < withActivity.height,
+            "hiding `.activity` left the subagent's `└ Grep: handleRequest` line in place (\(without.height)pt against \(withActivity.height)pt) — the switch reaches the session's own line 2 and stops there")
 }

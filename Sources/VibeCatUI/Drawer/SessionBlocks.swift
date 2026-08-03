@@ -7,9 +7,18 @@ struct SessionBlocks: View {
     let options: SessionRow.Options
     let accent: Color
 
-    /// §11's "1 done, 1 in progress, 2 open". Statuses with nothing in them are
-    /// omitted rather than printed as a zero — most real sessions have only one
-    /// or two of the three, and "0 done, 0 in progress, 3 open" is noise.
+    /// §11's "1 done, 1 in progress, 2 open" — **all three counts, always,
+    /// zeros included.**
+    ///
+    /// This used to drop statuses with nothing in them, on the reasoning that
+    /// "0 done, 0 in progress, 3 open" is noise. The mockup is unconditional
+    /// (`tasksHTML`, line 824: `${done} done, ${doing} in progress,
+    /// ${len-done-doing} open`) and it is right: three counts in a fixed order
+    /// are a shape the eye learns once and then reads positionally down a
+    /// column of rows, while a summary whose fields come and go has to be read
+    /// as a sentence every time. The zeros also carry information a triage list
+    /// wants — "0 done" on a session that has been running for ten minutes is
+    /// the point.
     ///
     /// `nonisolated` because `SessionBlocks: View` otherwise infers this whole
     /// type — static members included — onto `@MainActor`, and this is a pure
@@ -19,9 +28,7 @@ struct SessionBlocks: View {
                       ("in progress", .doing),
                       ("open", .open)]
         return counts
-            .map { (label, status) in (label, tasks.count { $0.status == status }) }
-            .filter { $0.1 > 0 }
-            .map { "\($0.1) \($0.0)" }
+            .map { (label, status) in "\(tasks.count { $0.status == status }) \(label)" }
             .joined(separator: ", ")
     }
 
@@ -40,6 +47,11 @@ struct SessionBlocks: View {
                         agentLine(agent)
                     }
                 } else {
+                    // NOTE (mockup-fidelity pass, deliberately left alone): the
+                    // mockup prints `${s.agents.length} running` — the *total*,
+                    // labelled "running", which is simply wrong once one of them
+                    // has finished. `running` below counts the unfinished ones.
+                    // See `.superpowers/sdd/mockup-fidelity-report.md`.
                     // §11: collapsed, never absent.
                     let running = session.agents.count { !$0.finished }
                     blockHeader("Agents", detail: "\(running) running")
@@ -88,7 +100,12 @@ struct SessionBlocks: View {
                 Text("\(agent.elapsed) · \(agent.model)").font(.system(size: 11))
                     .foregroundStyle(Color(hazeColour)).lineLimit(1)
             }
-            if let activity = agent.activity {
+            // `card.activity && a.sub` (mockup, `agentsHTML` line 837): the
+            // subagent's own activity line is gated by the same switch as the
+            // session's, and was rendering unconditionally here. A row is meant
+            // to be able to drop *every* "what is happening right now" line at
+            // once; leaving the children's behind made the switch a half-switch.
+            if options.contains(.activity), let activity = agent.activity {
                 Text("  └ \(activity)").font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Color(hazeColour)).lineLimit(1)
             }
