@@ -19,13 +19,19 @@ public struct ToneEnvelope: Sendable {
     public static func amplitude(at t: TimeInterval, duration: TimeInterval, gain: Double) -> Double {
         guard t > 0 else { return floor }
         guard t < duration else { return floor }
+        // Clamped rather than used verbatim: a note shorter than the standard
+        // 6ms would otherwise stop mid-ramp at a non-zero amplitude — the same
+        // audible click `floor` exists to prevent, arriving by a different
+        // route. No cue in the chiptune pack is anywhere near this short (the
+        // shortest is 0.09s), so this never engages for a real note.
+        let attack = min(Self.attack, duration / 2)
         if t < attack {
             return floor * pow(gain / floor, t / attack)
         }
-        // A note whose whole duration fits inside the attack never gets a tail;
-        // the guard above has already returned the floor for it.
+        // `t >= attack` here (the branch above didn't take) and `t < duration`
+        // (the guard above didn't take), so `duration > attack`, which makes
+        // `tail > 0` unconditionally: attack <= duration / 2 < duration.
         let tail = duration - attack
-        guard tail > 0 else { return floor }
         return gain * pow(floor / gain, (t - attack) / tail)
     }
 }

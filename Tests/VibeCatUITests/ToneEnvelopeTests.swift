@@ -40,10 +40,21 @@ import Foundation
     #expect(long > short * 10, "got short=\(short) long=\(long)")
 }
 
-@Test func anEnvelopeShorterThanItsOwnAttackStillFallsToTheFloor() {
-    // No cue in the chiptune pack is this short, but a future pack could be,
-    // and a `duration - attack` of zero or less must not divide by zero.
-    let a = ToneEnvelope.amplitude(at: 0.004, duration: 0.004, gain: 0.07)
-    #expect(a.isFinite, "got \(a)")
-    #expect(abs(a - ToneEnvelope.floor) < 1e-12, "a note that ends inside its attack ends at the floor")
+@Test func aNoteShorterThanTheStandardAttackStillReachesFullGainAndStillReleases() {
+    // No cue in the pack is this short, but a pack could be — and a note
+    // that stops mid-attack ends at a non-zero amplitude, which is the
+    // click `floor` exists to prevent arriving by another route. The attack
+    // compresses to half the note instead of overrunning it.
+    let d = 0.004, g = 0.07
+    #expect(abs(ToneEnvelope.amplitude(at: d / 2, duration: d, gain: g) - g) < 1e-9,
+            "a 4ms note must still reach full gain, at its halfway point")
+    let nearEnd = ToneEnvelope.amplitude(at: d * 0.999, duration: d, gain: g)
+    #expect(nearEnd < g / 100, "and must be nearly at the floor before it stops: \(nearEnd)")
+}
+
+@Test func clampingTheAttackChangesNothingForAnyRealNote() {
+    // The shortest note in the chiptune pack is 0.09s; half of it is 0.045,
+    // far above 6ms. Every real note keeps §12's full hard attack. If
+    // someone clamps more aggressively, this fails.
+    #expect(abs(ToneEnvelope.amplitude(at: 0.006, duration: 0.09, gain: 0.07) - 0.07) < 1e-9)
 }
