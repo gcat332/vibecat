@@ -10,7 +10,8 @@ plan files twice; it is cheaper to keep it written down.
 | 2 | Notch geometry, the panel, the collapsed island, hover, the aura | §5, §6.1–6.2, §9.2 | done |
 | 3 | The cat, its moods and coats, badges, motion | §7, §8, §9.1, §9.3's rule | done |
 | 4 | The drawer and answering — single and multi select, the destructive second ask, the reply round-trip | §6.3, §10 | done |
-| **5** | The session list · **plus the hover reveal's content and the sliver that shares its mechanism** · plus a multi-sprite CPU measurement | §11, §9.1's reveal | **next** |
+| **4.5** | **Matching the prototype** — one systematic diff of colour, radius, type scale, spacing and motion curve, and a written record of every deliberate divergence | the prototypes the spec header names | **next** |
+| 5 | The session list · plus the hover reveal's content and the sliver that shares its mechanism · plus a multi-sprite CPU measurement | §11, §9.1's reveal | after 4.5 |
 | **6** | Sound, jump, all four Settings sections, the Full/Reduced/Off control · **plus everything gated on keyboard input** | §12, §13, §14, §9.3's UI | not written |
 | **7** | Generic adapter and custom sources | §3 | not written |
 | **8** | Matching motion cost to motion content | §9.1's rates | not written |
@@ -38,6 +39,55 @@ These need no design decision, so wrapping them in a plan would be ceremony.
   It is a measurement, not code, and it unblocks two Plan 6 items. It prints the
   frontmost application before and after and aborts on `loginwindow`, so it
   cannot repeat the void reading that nearly became a recorded fact.
+
+## Plan 4.5 — matching the prototype
+
+**The gap this closes is not any one value. It is that nobody has ever diffed
+the implementation against the prototype.** The spec header names
+[`island-motion.html`](../prototypes/island-motion.html) and
+[`settings.html`](../prototypes/settings.html) as the design's own reference,
+and across four plans no task ever compared them. Ten minutes of reading the
+prototype's CSS custom properties turned up five divergences; the honest
+expectation is that there are more.
+
+**It comes before Plan 5**, because Plans 5 and 6 build more surface on the same
+foundations. Tuning after is tuning twice.
+
+What is already known to match, so the diff does not re-litigate it: all four
+state colours (`#3FD99B`, `#5B9DF9`, `#FFA63C`, `#FF5C5C`), dormant's
+`--dim: #5A6273`, and — exactly — all five accent-derived sprite tones,
+`--sp-body/hi/lt/out/sh` against `CatPalette`'s `.body/.highlight/.lightest/
+.outline/.shadow`.
+
+What is known to differ:
+
+- **The island's ground colour.** The prototype's island background is
+  `--void: #07080A`; ours is `#05070B`. That value is the prototype's *sprite
+  outline mix base* (`--sp-out` mixes accent 20% into it), which `CatPalette`
+  uses correctly — we took the sprite's mix base and used it for the background
+  too. Two levels a channel, on the largest area of colour on screen.
+- **The corner radius, and this one is not a defect.** The prototype uses `9px`
+  (`--fillet`, six occurrences). We use `bottomRadius = 15`. The owner asked for
+  the corner to match the *hardware*, and the machine's own notch corner measured
+  ~14–15pt off a screenshot; the prototype's 9 was drawn against a 186px CSS
+  notch, not a measured one. **Keep 15. Record why, so nobody "corrects" it back.**
+- **The motion curves.** The prototype is explicit cubic-beziers over
+  `--t-shape: 440ms` — `--spring-w: cubic-bezier(.32,1.5,.5,1)` (that `1.5` is
+  real overshoot) and `--spring-h: cubic-bezier(.34,1.22,.5,1)`. We use SwiftUI
+  `.spring(response: 0.42, dampingFraction: 0.72)` for width and `0.42/0.78` for
+  height. The *intent* translated — 0.42 ≈ 420ms against 440, and width
+  overshoots more than height in both — but a spring settles asymptotically where
+  a bezier lands exactly, so this is where the feel diverges most and it will not
+  be settled by matching numbers. Render or record both and compare.
+- **`--t-face: 190ms`, the face crossfade, was never implemented.** Already
+  recorded in Plan 3's follow-ups as never assigned to a task.
+- **The type scale has never been compared.** The prototype runs a dense ladder —
+  9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 14.5px — across SF Pro Text and SF
+  Mono. We have `RightFlankFont` and whatever Plan 4's drawer chose.
+
+The deliverable is as much the **written record of deliberate divergences** as
+the fixes. A divergence nobody wrote down gets re-introduced or re-removed by
+the next person who notices it.
 
 ## Plan 5 also owns
 
