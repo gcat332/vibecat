@@ -32,6 +32,12 @@ import VibeCatCore
     /// separate open/closed flag that could disagree with it.
     public var question: QuestionModel?
 
+    /// The session the hover reveal names. §4.2's most urgent one, assigned by
+    /// `NotchController.render()` alongside `state` — the island reports the most
+    /// urgent session, so the reveal names that same one rather than a second
+    /// notion of "current".
+    public var revealed: Session?
+
     /// Whether a click has actually opened the drawer. Deliberately separate
     /// from `question`: a question arriving must not open the drawer by
     /// itself (design §6.1's "Click" tier is a distinct gesture from a

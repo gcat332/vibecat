@@ -641,6 +641,18 @@ struct IslandBody: View {
             Color.clear.frame(width: model.geometry.notch.width)
 
             rightFlank
+
+            // §9.1/§5.2's hover reveal: the session's name and elapsed time,
+            // filling the 150pt `CollapsedLayout.hoverReveal` already reserves
+            // once hovering — see `rightFlankWidth`'s own `reveal` line. Width
+            // (not just opacity) is driven by `model.hovering` too, and
+            // `.clipped()` is load-bearing: §5.1 forbids content in the
+            // cutout's columns, and an unclipped `Text` at width 0 still
+            // paints past its frame.
+            RevealContent(session: model.revealed, now: now)
+                .frame(width: model.hovering ? CollapsedLayout.hoverReveal : 0, alignment: .leading)
+                .clipped()
+                .opacity(model.hovering ? 1 : 0)
         }
         .frame(height: model.geometry.notch.height)
     }
