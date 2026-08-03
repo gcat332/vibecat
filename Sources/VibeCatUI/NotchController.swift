@@ -487,25 +487,20 @@ import SwiftUI
                 await sampler.refresh(region: backdropRegion())
                 model.backdrop = sampler.current
             }
-            // needsTimeline reads the aura, so the view is meant to be
-            // nudged once more when the bloom ends, forcing IslandView.body
-            // to re-evaluate and pick a `.never` schedule instead of the
-            // live one. It doesn't: `self?.model.aura` here is exactly the
-            // aura already stored, and @Observable — confirmed false on this
-            // toolchain, see `anEqualWriteToAnObservablePropertyDoesNotNotify`
-            // — does not notify on an equal write for an Equatable type,
-            // which AuraTrigger is. So this reassignment notifies nothing,
-            // `body` is never re-evaluated, and a `TimelineView`'s own ticks
-            // re-run its content closure rather than the enclosing `body` —
-            // so a mood left still after the first state change keeps a live
-            // 8fps timeline running underneath it regardless. Task 3.5 fixes
-            // this by having `AuraTrigger.endBloom()` produce a value that
-            // genuinely differs instead of relying on the write itself.
+            // needsTimeline reads the aura, so the view is nudged once more
+            // when the bloom ends, forcing IslandView.body to re-evaluate
+            // and pick a `.never` schedule instead of the live one.
+            // `endBloom()`, never `model.aura = model.aura` — see that
+            // method's own comment. An equal write notifies nothing on this
+            // toolchain (confirmed, see
+            // `anEqualWriteToAnObservablePropertyDoesNotNotify`), and this is
+            // the only thing that re-evaluates `IslandView.body` so its
+            // `needsTimeline` branch can drop the TimelineView.
             bloomEnd?.cancel()
             bloomEnd = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(AuraTrigger.duration))
                 guard !Task.isCancelled else { return }
-                self?.model.aura = self?.model.aura ?? AuraTrigger()
+                self?.model.aura.endBloom()
             }
         }
     }

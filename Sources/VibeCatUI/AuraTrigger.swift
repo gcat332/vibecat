@@ -55,4 +55,22 @@ public struct AuraTrigger: Sendable, Equatable {
     public func opacity(at instant: Date, tint: AuraTint) -> Double {
         intensity(at: instant) * tint.peakOpacity
     }
+
+    /// Ends the bloom, and does it by changing the value.
+    ///
+    /// The distinction is the whole point. `NotchController` used to "nudge"
+    /// `model.aura` by assigning it its own current value, on the belief that an
+    /// `@Observable` write notifies regardless of equality. Measured on Swift 6.3.2:
+    /// it does not, for an `Equatable` property. So the nudge notified nothing,
+    /// `IslandView.body` was never re-evaluated, and its `if model.needsTimeline`
+    /// branch kept a `TimelineView` alive forever after the first state change into a
+    /// still mood — about 3.3% of a core, permanently, per the animation spike's own
+    /// 3.61%-against-0.35% figures.
+    ///
+    /// Clearing `firedAt` is honest as well as effective: the bloom really is over,
+    /// `intensity` is already 0 at that instant, and the resulting value differs from
+    /// the one before it, so the observation actually fires.
+    public mutating func endBloom() {
+        firedAt = nil
+    }
 }

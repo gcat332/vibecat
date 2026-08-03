@@ -72,3 +72,27 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     _ = a.observe(.waiting, now: second)
     #expect(a.intensity(at: second) == 0)
 }
+
+/// §9.2: the aura "leaves nothing behind". Once the bloom's duration has elapsed
+/// it is over, and the model has to be able to say so with a value that actually
+/// changes — an equal write notifies nothing (see
+/// `anEqualWriteToAnObservablePropertyDoesNotNotify`), so "nudging" the same
+/// value back in cannot end anything.
+@Test func endingABloomStopsItBlooming() {
+    let fired = Date(timeIntervalSince1970: 1_000_000)
+    var aura = AuraTrigger()
+    _ = aura.observe(.idle, now: fired)          // first observation never blooms
+    // `== true` (rather than a bare call) sidesteps the swift-testing macro
+    // limitation `aChangeFires` documents: #expect's diagnostic expansion for
+    // direct method calls captures the receiver by `let`, which cannot host a
+    // mutating call.
+    #expect(aura.observe(.running, now: fired) == true, "setup: a real change must bloom")
+    #expect(aura.isBlooming(at: fired))
+
+    let before = aura
+    aura.endBloom()
+
+    #expect(!aura.isBlooming(at: fired), "the bloom survived endBloom()")
+    #expect(aura != before,
+            "endBloom() left the value equal to what it was — @Observable would not notify, which is the entire bug this exists to fix")
+}

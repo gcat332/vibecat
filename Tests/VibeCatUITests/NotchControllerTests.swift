@@ -745,3 +745,28 @@ private let externalDisplay = ScreenMetrics(
     #expect(!fires { model.state = .running },
             "an equal write still notified — @Observable no longer deduplicates identical writes on this toolchain, which both render()'s plain assignments and the bloomEnd nudge's opposite assumption depend on")
 }
+
+/// The bug itself, at the level it actually bites: a still mood with a bloom in
+/// flight needs a timeline, and must stop needing one the moment the bloom ends.
+/// Nothing asserted this before, which is why an 8fps timeline could run forever.
+@MainActor @Test func aStillMoodStopsNeedingATimelineOnceTheBloomEnds() {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    model.state = .dormant
+    let now = Date()
+    _ = model.aura.observe(.dormant, now: now)
+    // `== true`, same swift-testing macro limitation `aChangeFires` documents
+    // in AuraTriggerTests.swift: #expect's diagnostic expansion for a direct
+    // method call captures the receiver by `let`, which cannot host a
+    // mutating call.
+    #expect(model.aura.observe(.idle, now: now) == true, "setup: a real change must bloom")
+    model.state = .idle
+    #expect(!model.activeProfile.isContinuous,
+            "setup: idle's mood must be still, or this tests the wrong branch")
+    #expect(model.needsTimeline, "setup: a bloom in flight needs a timeline")
+
+    model.aura.endBloom()
+
+    #expect(!model.needsTimeline,
+            "the island still wants a timeline after the bloom ended — this is ~3.3% of a core running forever in the state §6.1 says must look idle")
+}
