@@ -37,11 +37,25 @@ struct QuestionFace: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            if question.isWritingOther {
-                replyField
-            } else {
-                rows
+            // §9.1's `--t-face: 190ms` crossfade, which the prototype declares
+            // and no plan ever implemented (recorded unassigned in Plan 3's
+            // follow-ups, then again in Plan 4.5's diff). "Faces never slide in
+            // from outside; they fade in *inside* a shape that is already the
+            // right size" — so this is a transition on the *content*, never on
+            // the drawer's own frame, and `DrawerView` keeps sizing itself from
+            // `question.face.height` exactly as before.
+            //
+            // Today's only face swap is rows ↔ the reply field. Plan 5's session
+            // list is the second, and it gets this for free by being another
+            // branch here.
+            Group {
+                if question.isWritingOther {
+                    replyField.transition(.faceCrossfade)
+                } else {
+                    rows.transition(.faceCrossfade)
+                }
             }
+            .animation(.easeInOut(duration: FaceCrossfade.duration), value: question.isWritingOther)
         }
         .padding(.horizontal, Self.leadingPadding)
         .padding(.top, 16)
@@ -50,9 +64,13 @@ struct QuestionFace: View {
 
     @ViewBuilder private var header: some View {
         if let title = question.event.title {
+            // Plan 4.5: the prototype's `.ask-q` is `--bone` at 14.5px. It used
+            // `RightFlankFont` — the *collapsed island's* 12pt count font — which
+            // was never chosen for this and would drag the island with it if
+            // tuned here.
             Text(title)
-                .font(RightFlankFont.swiftUI)
-                .foregroundStyle(Color.white)
+                .font(.system(size: 14.5, weight: .semibold))
+                .foregroundStyle(Color(boneColour))
         }
         if let body = question.event.body {
             // It is a command, so it reads as one (monospaced).
@@ -90,8 +108,8 @@ struct QuestionFace: View {
             // not see what it was aimed at. §10.3's second ask is worth
             // nothing if the first one is unreadable.
             Text(body)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(Color.white.opacity(0.65))
+                .font(.system(size: 11.5, design: .monospaced))
+                .foregroundStyle(Color(hazeColour))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .fixedSize(horizontal: false, vertical: true)
@@ -220,8 +238,8 @@ struct QuestionFace: View {
     private var sendRow: some View {
         HStack {
             Text("\(question.tally) selected")
-                .font(.system(size: 11))
-                .foregroundStyle(Color.white.opacity(0.55))
+                .font(.system(size: 11.5))
+                .foregroundStyle(Color(hazeColour))
             Spacer()
             // §10.2: "Send is disabled at zero" — and disabled has to look
             // disabled, which stays true regardless of the tap gesture below:
@@ -233,10 +251,10 @@ struct QuestionFace: View {
             // correct treatment, not a violation of it.
             Text("Send")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(question.canSend ? Color.black : Color.white.opacity(0.35))
+                .foregroundStyle(question.canSend ? Color(RGBA(hex: "#0A0B0D")!) : Color(hazeColour))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(Capsule().fill(question.canSend ? accent : Color.white.opacity(0.08)))
+                .background(Capsule().fill(question.canSend ? accent : Color.white.opacity(hairlineOpacity)))
                 .contentShape(Capsule())
                 .onTapGesture { sendTapped() }
         }
@@ -245,8 +263,8 @@ struct QuestionFace: View {
     private var replyField: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Reply")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color.white.opacity(0.5))
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(Color(hazeColour))
             // A real `TextField` was tried here first and rendered as a
             // solid accent bar with a system "prohibited" glyph and no
             // visible text at all under `ImageRenderer` — confirmed by
@@ -260,11 +278,11 @@ struct QuestionFace: View {
             // typed into anyway.
             Text(question.otherText.isEmpty ? "Type your answer…" : question.otherText)
                 .font(.system(size: 13, design: .monospaced))
-                .foregroundStyle(question.otherText.isEmpty ? Color.white.opacity(0.4) : Color.white)
+                .foregroundStyle(question.otherText.isEmpty ? Color(hazeColour) : Color(boneColour))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.06)))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(hairlineOpacity)))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(accent.opacity(0.6), lineWidth: 1))
         }
     }

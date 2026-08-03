@@ -422,6 +422,43 @@ private func destructiveQuestion(body: String = "rm -rf build/") -> VibeEvent {
             "the two commands differ only in their target — `…/cache/tmp` against `…/cache/src` — and rendered with \(harmless.differingPixelCount(from: disaster)) differing pixels: the target is being truncated away, so a person is asked to authorise a command they cannot see the end of")
 }
 
+/// Plan 4.5, colour. The prototype has two named text greys and uses them 32
+/// times between them — `--bone: #EDEFF4` for primary text, `--haze: #8A93A6`
+/// for secondary. Which label takes which is read off its own drawer markup:
+/// `.ask-q` (the question) is `--bone`; `.detail.mono` (the command body) is
+/// `--haze`; `.choice.alt` — a non-recommended row — is `--haze`;
+/// `.confirm .tally` is `--haze`.
+///
+/// We had neither. Every label was `Color.white` or `Color.white.opacity(…)`,
+/// which is a different family rather than a near miss: white at 65% over
+/// `islandGroundColour` renders ≈(168,169,169), dead neutral, where `--haze` is
+/// (138,147,166) — about 30 levels darker **and cool**, `b − r = 28` against our
+/// 1. No opacity value reaches a hue.
+///
+/// **Both floors are measured, and the white one is the load-bearing half.**
+/// Pure white sits 18/16/11 levels from `--bone`, outside
+/// `pixelCount(near:)`'s tolerance of 6, so a title still painted `Color.white`
+/// leaves a core of white glyph pixels — 437 of them before this change, 0 after.
+/// A bare `pixelCount(near: bone) > 0` would *not* have caught it: antialiasing
+/// white text over a near-black ground incidentally produces pixels within
+/// tolerance of `--bone`, so that assertion passed before the tones existed. The
+/// floors below are set against what the tones actually draw.
+@MainActor @Test func theDrawersTextUsesThePrototypesTonesRatherThanWhiteAtAnOpacity() throws {
+    let bone = try #require(RGBA(hex: "#EDEFF4"), "the prototype's --bone")
+    let haze = try #require(RGBA(hex: "#8A93A6"), "the prototype's --haze")
+    let pureWhite = try #require(RGBA(hex: "#FFFFFF"))
+    let m = QuestionModel(event: threeChoices(multi: false))
+    let raster = try rasterise(DrawerView(question: m, accent: IslandState.waiting.accent,
+                                          width: 420))
+
+    #expect(raster.pixelCount(near: pureWhite) == 0,
+            "\(raster.pixelCount(near: pureWhite)) pure-white pixels remain — text is still `Color.white`, which is 18 levels off --bone (437 before this change)")
+    #expect(raster.pixelCount(near: bone) > 150,
+            "only \(raster.pixelCount(near: bone)) --bone pixels — the question title is not drawn in the prototype's primary tone")
+    #expect(raster.pixelCount(near: haze) > 150,
+            "only \(raster.pixelCount(near: haze)) --haze pixels — the command body and the non-recommended rows are not drawn in the prototype's secondary tone")
+}
+
 /// The drawer is the island's, so it wears the island's colour (§4.3).
 @MainActor @Test func theDrawerWearsTheStatesAccent() throws {
     for state in [IslandState.waiting, .failed] {

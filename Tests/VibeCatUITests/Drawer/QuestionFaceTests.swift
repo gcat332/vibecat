@@ -159,6 +159,59 @@ private func threeChoices(multi: Bool, destructive: Bool = false) -> VibeEvent {
             "Send did not confirm and send in one tap once confirmation was already pending")
 }
 
+// MARK: - §9.1's face crossfade
+
+/// §9.1: "Face crossfade `190ms`, fade up 5pt with a 3pt blur", and the
+/// prototype's `--t-face: 190ms`. Specified since the design doc and
+/// unimplemented until Plan 4.5 — recorded unassigned twice before that.
+///
+/// A transition is at identity in any static render, so this asserts the modifier
+/// mid-flight against its identity.
+///
+/// **`presence: 0.5`, not `0`, and the reason is a measured `ImageRenderer`
+/// quirk worth knowing before writing any test against opacity.** Measured
+/// directly: `.opacity(0)` under `ImageRenderer` is *ignored* — a label at
+/// opacity 0 rendered the same 372 opaque pixels as one at full opacity, while
+/// `.offset` and `.blur` both applied normally. And `opaquePixelCount` cannot see
+/// opacity at all in between, because a half-alpha pixel still has `a > 0` (0.5
+/// measured 367 against 372). So an "is it invisible" assertion at the extreme
+/// would have been vacuous twice over. Mid-flight is also the state that actually
+/// matters — it is what a person sees.
+@MainActor @Test func theFaceCrossfadeFadesUpAndBlursRatherThanSliding() throws {
+    let label = Text("Allow once").font(.system(size: 12.5)).foregroundStyle(Color.white)
+        .frame(width: 120, height: 40)
+
+    // Nested one level rather than rasterised bare: the effects need something to
+    // composite against, which is also how they are used — a face inside the
+    // drawer's own VStack.
+    func render(_ presence: Double) throws -> Raster {
+        try rasterise(ZStack { label.modifier(FaceCrossfade(presence: presence)) }
+            .frame(width: 130, height: 50))
+    }
+    let atRest = try render(1)
+    let midFlight = try render(0.5)
+
+    #expect(atRest.width == midFlight.width && atRest.height == midFlight.height,
+            "the crossfade changed the face's *size* — §9.1 says a face fades in inside a shape that is already the right size, so this must never alter layout")
+    #expect(atRest.differingPixelCount(from: midFlight) > 200,
+            "only \(atRest.differingPixelCount(from: midFlight)) pixels differ between rest and mid-crossfade — the rise and blur are not reaching the render")
+    // The blur is the leg with a signature no other effect has: it spreads ink
+    // into pixels that were empty at rest, so mid-flight must draw *more*
+    // non-transparent pixels than the sharp version, not fewer.
+    #expect(midFlight.opaquePixelCount > atRest.opaquePixelCount,
+            "mid-crossfade drew \(midFlight.opaquePixelCount) pixels against \(atRest.opaquePixelCount) sharp — a 3pt blur must spread ink outward, so this leg is missing")
+}
+
+/// The numbers are §9.1's, so they are pinned rather than left to drift with a
+/// later tuning pass. `duration` in particular is read twice — once by the
+/// transition and once by the `.animation` driving it — and a mismatch between
+/// those two would be silent in every render.
+@Test func theFaceCrossfadeCarriesTheDesignsOwnNumbers() {
+    #expect(FaceCrossfade.duration == 0.190, "§9.1 and --t-face both say 190ms")
+    #expect(FaceCrossfade.rise == 5, "§9.1 says fade up 5pt")
+    #expect(FaceCrossfade.blurRadius == 3, "§9.1 says with a 3pt blur")
+}
+
 // MARK: - Confirmation banner copy
 
 /// A whole-branch review minor: the banner's copy used to be one fixed

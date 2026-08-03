@@ -44,16 +44,22 @@ struct ChoiceRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             control
-            // Plain white, not the accent: this is legible body content, not
+            // A neutral tone, not the accent: this is legible body content, not
             // a state signal, and §4.3 ("colour means state, and only
             // state") is about not inventing a *second* hue to carry
             // meaning — it does not make ordinary text illegible by
             // reserving every colour for the accent. The accent stays for
             // the pieces that actually mean something: the badge, the
             // checkbox, the recommended tint.
+            //
+            // Plan 4.5: `--bone` on the recommended row, `--haze` on the rest —
+            // the prototype's `.choice` against `.choice.alt`, which is the one
+            // place it distinguishes rows by text tone rather than by control.
+            // 12.5px, not 13: `.label`/`.choice` is the prototype's most common
+            // size, used nine times.
             Text(choice.label)
-                .font(.system(size: 13))
-                .foregroundStyle(Color.white)
+                .font(.system(size: 12.5))
+                .foregroundStyle(Color(isRecommended ? boneColour : hazeColour))
                 // A label like "Allow all pnpm commands in ~/dev/api for
                 // this session" (§10.1) must wrap onto its own row instead
                 // of being truncated. Without this, a `Text` inside a row
@@ -108,11 +114,11 @@ struct ChoiceRow: View {
             // row is not one of the states an answer can carry. An ellipsis
             // reads as "something else," not "option N."
             Circle()
-                .strokeBorder(Color.white.opacity(0.25), lineWidth: 1.5)
+                .strokeBorder(Color(hazeColour), lineWidth: 1.5)
                 .overlay(
                     Image(systemName: "ellipsis")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.5))
+                        .foregroundStyle(Color(hazeColour))
                 )
                 .frame(width: Self.controlSize, height: Self.controlSize)
         } else {
@@ -128,7 +134,7 @@ struct ChoiceRow: View {
             // filled badge for the pick, an outline for everything else,
             // the same filled/outline language the checkbox already uses.
             Circle()
-                .fill(isSelected ? accent : Color.white.opacity(0.05))
+                .fill(isSelected ? accent : Color.white.opacity(hairlineOpacity))
                 .overlay(Circle().strokeBorder(accent, lineWidth: 1.5))
                 .overlay(
                     Text("\(index + 1)")

@@ -293,6 +293,31 @@ public struct IslandView: View {
 /// with its own copy of the literal to drift from.
 let islandGroundColour = RGBA(hex: "#07080A")!
 
+/// The prototype's two named text tones, `--bone` and `--haze`, which it uses 32
+/// times between them — 16 each — and which we had none of.
+///
+/// **Added 2026-08-03, Plan 4.5.** Every label in the drawer was `Color.white` or
+/// `Color.white.opacity(…)`. That is a different colour family, not a near miss:
+/// white at 65% over `islandGroundColour` renders ≈(168,169,169), dead neutral,
+/// where `--haze` is (138,147,166) — about 30 levels darker **and cool**, with
+/// `b − r = 28` against our 1. No opacity value reaches a hue, so this needed the
+/// tokens rather than a tuning pass.
+///
+/// Which tone a label takes is read off the prototype's own drawer markup, not
+/// guessed: `.ask-q` (the question) is `--bone`; `.detail.mono` (the command
+/// body) is `--haze`; `.choice.alt` — a non-recommended row — is `--haze`, and
+/// `.choice.alt:hover` promotes it to `--bone`; `.confirm .tally` is `--haze`.
+/// `--dim` already exists in `IslandState` as dormant's colour, which is the
+/// third of the same family.
+let boneColour = RGBA(hex: "#EDEFF4")!
+let hazeColour = RGBA(hex: "#8A93A6")!
+
+/// `--hairline: rgba(255,255,255,.09)`. One token in the prototype, against three
+/// different values of ours (`0.05`, `0.06`, `0.08`) for the same job — a divider
+/// or an inert fill. Kept as an opacity rather than a solid because that is what
+/// the prototype does, and it has to composite over whatever is behind it.
+let hairlineOpacity: Double = 0.09
+
 /// The collapsed island. Left flank, dead zone, right flank.
 ///
 /// Design §5.1: the black shape may span the cutout because the cutout is black
