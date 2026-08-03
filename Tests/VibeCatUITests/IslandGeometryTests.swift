@@ -191,3 +191,8 @@ private let externalDisplay = ScreenMetrics(
                         tier: .rest)
     #expect(g.maxCollapsedFrames().body.width - rest.body.width >= CollapsedLayout.hoverReveal)
 }
+
+/// §6.3's table: "Session list — 420pt, rows scroll."
+@Test func theSessionListFaceIsTheHeightTheDesignGivesIt() {
+    #expect(DrawerFace.sessionList.height == 420)
+}

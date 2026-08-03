@@ -23,15 +23,36 @@ public struct SessionStore: Sendable, Equatable {
 
     /// The single session `IslandModel.revealed` names, so the hover reveal
     /// points at the same session `aggregate` already summarises the state
-    /// of — one notion of "most urgent", not two. `min(by:)` over
-    /// `SessionState.urgency` (lower is more urgent) rather than reusing
-    /// `aggregate` plus a lookup, since that would only find *a* session in
-    /// that state, not necessarily the single most urgent one when several
-    /// tie. Ties resolve to whichever comes first in `sessions` — a full,
-    /// deterministic ordering across ties belongs to whatever renders the
-    /// scrolling session list, not to this.
+    /// of — one notion of "most urgent", not two.
+    ///
+    /// Expressed as `mostUrgentFirst.first` rather than a second `min(by:)`
+    /// over the same comparator: two independent orderings of "most urgent"
+    /// in one file is exactly the kind of drift that would let the island's
+    /// hover reveal and the session list disagree about which session
+    /// matters, so there is only one comparator and this just asks it for
+    /// its head. `mostUrgentFirst`'s own stable tie-break — earliest arrival
+    /// wins — is what makes this equivalent to the old direct
+    /// `sessions.min { $0.state.urgency < $1.state.urgency }`: `min(by:)`
+    /// with a strict `<` also keeps the first-encountered minimum on a tie,
+    /// so neither behaviour nor the existing tests here changed.
     public var mostUrgentSession: Session? {
-        sessions.min { $0.state.urgency < $1.state.urgency }
+        mostUrgentFirst.first
+    }
+
+    /// §11: most urgent first, using §4.2's own ordering so the list and the
+    /// island never disagree about which session matters. A **stable** sort,
+    /// so two sessions of one state keep the order they arrived in rather
+    /// than shuffling on every render — `sorted(by:)` is not documented as
+    /// stable, so the index is part of the comparator rather than trusted to
+    /// be preserved.
+    public var mostUrgentFirst: [Session] {
+        sessions.enumerated()
+            .sorted {
+                $0.element.state.urgency == $1.element.state.urgency
+                    ? $0.offset < $1.offset
+                    : $0.element.state.urgency < $1.element.state.urgency
+            }
+            .map(\.element)
     }
 
     public var counts: [SessionState: Int] {

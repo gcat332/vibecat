@@ -95,3 +95,23 @@ private func event(_ kind: Kind, session: String, cli: String = "claude-code") -
     store.prune(idleFor: 3600, now: t0.addingTimeInterval(60))
     #expect(store.sessions.count == 1)
 }
+
+/// §11: "Sort order defaults to most urgent first" — the same
+/// `waiting > failed > running > idle` §4.2 gives the island, so the list and
+/// the island agree about which session matters.
+///
+/// The fixture is deliberately in the *opposite* order and includes two
+/// sessions of one state, because a sort that merely reverses, or one that is
+/// unstable within a state, both satisfy a weaker assertion.
+@Test func theListPutsTheMostUrgentSessionFirst() {
+    var store = SessionStore()
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    for (session, kind) in [("a", Kind.idle), ("b", .running),
+                            ("c", .running), ("d", .failed), ("e", .permission)] {
+        store.apply(VibeEvent(id: session, cli: "claude-code", kind: kind,
+                              session: session, cwd: "/tmp/\(session)"), now: now)
+    }
+    let order = store.mostUrgentFirst.map(\.id.session)
+    #expect(order == ["e", "d", "b", "c", "a"],
+            "got \(order) — expected waiting, failed, then the two running in the order they arrived, then idle")
+}

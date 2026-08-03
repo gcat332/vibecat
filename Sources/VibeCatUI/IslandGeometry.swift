@@ -17,17 +17,16 @@ public enum IslandTier: Sendable, Equatable {
 /// choices with a field, and §6.3 says the drawer follows its content rather
 /// than leaving dead space.
 ///
-/// `.sessionList` (420pt) is Plan 5's and is deliberately absent — adding a
-/// case nothing constructs would be an unreachable branch, which this project
-/// has shipped once already.
+/// `.sessionList` is Plan 5's (§6.3: "Session list — 420pt, rows scroll.").
 public enum DrawerFace: Sendable, Equatable, CaseIterable {
-    case question, questionWithReply, questionMulti
+    case question, questionWithReply, questionMulti, sessionList
 
     public var height: CGFloat {
         switch self {
         case .question:          288
         case .questionWithReply: 184
         case .questionMulti:     300
+        case .sessionList:       420
         }
     }
 }
