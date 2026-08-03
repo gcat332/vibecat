@@ -13,11 +13,20 @@ A pixel cat sleeps in your notch. It trots while an agent works, sits up with a
 
 ## Status
 
-Headless event pipeline implemented and tested — the hook binary, the socket
-transport, the session store and the Claude Code adapter. The notch shell now
-runs, too: a borderless panel pinned above the menu bar shows the collapsed
-island and reacts to real hook events and to hover. The cat sprite, replying,
-the session list and settings are still to come.
+**Answering works, end to end, verified on hardware.** A real `rm -rf build/`
+permission event travels through the hook and the socket, the island shows it,
+clicking opens a drawer below the notch, two taps answer it — two, because a
+destructive command asks twice — and claude-code acts on the reply. The
+terminal never loses focus and never hangs: if nobody answers, the hook times
+out and the CLI prompts for itself.
+
+Done: the event pipeline and hook, the notch geometry and panel, the cat with
+five moods and five coats, the badges, the aura, and the drawer. **373 tests.**
+
+Still to come: the session list, sound, jump-to-terminal, settings, and a
+generic adapter for CLIs other than Claude Code. See the
+[handoff](docs/superpowers/HANDOFF.md) for what to pick up first and
+[the plan map](docs/superpowers/plans/README.md) for who owns what.
 
 ## Contents
 
