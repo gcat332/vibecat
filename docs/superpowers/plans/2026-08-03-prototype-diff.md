@@ -1,7 +1,7 @@
 # Plan 4.5 — The Prototype Diff
 
 **Date:** 2026-08-03
-**Status:** In progress. Colour partly closed, radius resolved, motion blocked on a cost decision.
+**Status:** Colour, radius, type scale, motion and the face crossfade all closed. Two deliberate divergences recorded. Nothing left open on this plan's own list.
 **Reference:** [`island-motion.html`](../prototypes/island-motion.html) — the design's own, named in the [spec](../specs/2026-07-31-vibecat-design.md) header.
 
 Plan 4.5 exists because across four plans nobody diffed the implementation
@@ -75,9 +75,9 @@ All four state colours (`#3FD99B`, `#5B9DF9`, `#FFA63C`, `#FF5C5C`), dormant's
 
 ---
 
-## Open defects
+## Closed, continued
 
-### Every piece of text in the drawer is the wrong colour family
+### Every piece of text in the drawer was the wrong colour family — fixed
 
 The prototype has two named text greys and uses them 32 times between them:
 
@@ -101,26 +101,60 @@ has `b − r = 1`. The prototype's secondary text is a deliberate cool blue-grey
 ours is dead neutral, so no opacity value can reach it — this needs the tokens,
 not a tuning pass.
 
-**Not yet fixed** because it is more than a constant swap: it needs `--bone` /
-`--haze` / `--hairline` (`rgba(255,255,255,.09)`) introduced as named tones beside
-`islandGroundColour`, and a judgement per label about which role it plays, read off
-the prototype's own drawer markup rather than guessed.
+**Fixed 2026-08-03.** `boneColour`, `hazeColour` and `hairlineOpacity` now sit
+beside `islandGroundColour`, and which tone each label takes is read off the
+prototype's own markup rather than guessed: `.ask-q` → `--bone`; `.detail.mono` →
+`--haze`; `.choice` → `--bone` on the recommended row and `--haze` on the rest,
+which is the prototype's `.choice` against `.choice.alt`; `.confirm .tally` →
+`--haze`; Send's label → the prototype's own `#0A0B0D` on the accent.
 
-### The type scale has still never been compared
+The assertion that catches a regression is the **absence of pure white**: 437
+white glyph pixels before, 0 after. A bare "is there any `--bone`" check would
+*not* have caught it — antialiasing white text over a near-black ground
+incidentally produces pixels within tolerance of `--bone`, so that assertion
+passed before the tones existed. Recorded in the test, because it is the same trap
+as the four hardcoded ground pixels above.
+
+### The type scale has now been compared — and aligned
 
 The prototype runs a dense ten-step ladder: **9, 9.5, 10, 10.5, 11, 11.5, 12,
 12.5, 13, 14.5px**, with `12.5px` (9 uses) and `11px` (8 uses) dominant.
 
-We use **10, 11, 12, 13** and `RightFlankFont.size = 12`. Nothing at 12.5, which is
-the prototype's single most common size. Whether the half-steps matter at these
-sizes is a real question — SF at 12 vs 12.5 differs by less than a pixel of cap
-height — but it has not been asked, let alone answered.
+We used **10, 11, 12, 13** and `RightFlankFont.size = 12`, with nothing at 12.5 —
+the prototype's most common size.
 
-### `--t-face: 190ms`, the face crossfade, is still not implemented
+**Aligned 2026-08-03** for the drawer, which is where the ladder actually applies:
+the question title 14.5 (`.ask-q`, and it was borrowing `RightFlankFont`, the
+*collapsed island's* count font, which was never chosen for it and would have
+dragged the island along if tuned there); the command body 11.5 mono
+(`.detail.mono`); choice labels 12.5 (`.choice`); the tally and the reply label
+11.5 (`.confirm .tally`).
 
-§9.1 specifies it ("Face crossfade `190ms`, fade up 5pt with a 3pt blur") and the
-prototype declares it. Already recorded as never assigned to a task in Plan 3's
-follow-ups; still true.
+Deliberately **not** touched: `RightFlankFont.size = 12` itself. It is measured
+against a real digit advance for `CollapsedLayout.Metrics.standard`, so changing it
+moves the island's geometry, not just its type — that belongs with a geometry pass,
+not a type pass.
+
+### `--t-face: 190ms`, the face crossfade — implemented
+
+§9.1 specifies it ("Face crossfade `190ms`, fade up 5pt with a 3pt blur"), the
+prototype declares it, and it had been recorded as unassigned twice — Plan 3's
+follow-ups and then this document.
+
+`FaceCrossfade` carries all three of §9.1's numbers, and applies them to a face's
+own *content* rather than to the drawer's frame, because §9.1's rule is that
+"faces never slide in from outside; they fade in **inside** a shape that is
+already the right size". `DrawerView` still sizes itself from
+`question.face.height`; the height spring remains the only thing that moves the
+shape. Today's one face swap is rows ↔ the reply field; Plan 5's session list gets
+it free by being another branch.
+
+**One measured `ImageRenderer` quirk found writing the test, worth knowing before
+anyone tests opacity again:** `.opacity(0)` is *ignored* — a label at opacity 0
+rendered the same 372 opaque pixels as one at full opacity, while `.offset` and
+`.blur` applied normally. And `opaquePixelCount` cannot see opacity in between
+either, since a half-alpha pixel still has `a > 0`. So the test asserts mid-flight
+against rest, which is both robust and the state a person actually sees.
 
 ---
 
@@ -233,16 +267,43 @@ things follow from *how* the cost behaves, though, and they shape the order:
   second set of frames drawn at the larger size. That is a fidelity choice, not a
   budget one, and it is still open.
 
-### The motion curves are the one motion item that is not cost-blocked
+### The motion curves — measured, and retuned
 
 `--spring-w: cubic-bezier(.32,1.5,.5,1)` and `--spring-h: cubic-bezier(.34,1.22,.5,1)`
 over `--t-shape: 440ms`, against our `.spring(response: 0.42, dampingFraction:
-0.72)` and `0.42/0.78`. The intent translated — 0.42 ≈ 420ms against 440, and
-width overshoots more than height in both — but a spring settles asymptotically
-where a bezier lands exactly, so this is where the feel diverges most and it will
-not be settled by matching numbers. These fire on a state change and then stop, so
-they are not part of the resting cost. **Render or record both and compare with an
-eye**; `VIBECAT_GIF=…` exists for exactly this.
+0.72)` and `0.42/0.78`.
+
+This document's own earlier note said the difference "will not be settled by
+matching numbers", because a spring settles asymptotically where a bezier lands
+exactly. **That is true about the curve shape and it was the wrong conclusion to
+stop at.** `Spring` is evaluable (macOS 14+, this package's floor) and a
+cubic-bezier is four control points, so both can be sampled and subtracted —
+`MotionCurveComparison`, env-gated with `VIBECAT_MOTION_CURVES=1`.
+
+What that turned up is not a matter of feel:
+
+| | prototype | ours, before | ours, now |
+|---|---|---|---|
+| width overshoot | **8.0%** | 3.8% (`0.72`) | **8.3%** (`0.62`) |
+| height overshoot | **1.5%** | 2.0% (`0.78`) | **1.5%** (`0.80`) |
+| width ÷ height | **5.3×** | **1.9×** | **5.5×** |
+
+**§9.1 states a rule — "width overshoots more than height, so the island reads as
+one body with mass rather than a resizing box" — and the old values very nearly
+erased it.** 1.9× against the prototype's 5.3×, and nothing anywhere asserted the
+rule at all. It now has a test with a floor set from the prototype's own ratio, so
+a later tuning pass that flattens it fails rather than passing on a technicality.
+The two literals also moved into `IslandMotion`; they had been sitting ~350 lines
+apart in `IslandView`, which is part of why the relationship between them went
+unexamined.
+
+**Still not matched, and permanently so:** the prototype's width curve is at 65.6%
+of its travel by 75ms where ours is at 35.8% — worst deviation 29.8%, all of it
+front-loading. A bezier can leap from rest; a spring accelerates. That is inherent
+to the two mechanisms and no parameter closes it. Recorded here so nobody hunts for
+one.
+
+These fire on a state change and then stop, so none of it touches the resting cost.
 
 ---
 

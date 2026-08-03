@@ -178,7 +178,8 @@ public struct IslandView: View {
                     .padding(.top, model.geometry.notch.height)
             }
         }
-        .animation(.spring(response: 0.42, dampingFraction: 0.78), value: drawerHeight)
+        .animation(.spring(response: IslandMotion.response,
+                           dampingFraction: IslandMotion.heightDamping), value: drawerHeight)
     }
 
     /// 0 with the drawer closed, else the open face's own height — the one
@@ -531,7 +532,8 @@ struct IslandBody: View {
                 // reads as one body with mass rather than a resizing box. The
                 // panel itself never moves (Task 9's whole point) — only this
                 // silhouette, inside it, animates.
-                .animation(.spring(response: 0.42, dampingFraction: 0.72),
+                .animation(.spring(response: IslandMotion.response,
+                                   dampingFraction: IslandMotion.widthDamping),
                            value: restingWidth)
                 // Design §9.1's OTHER named animation: hover reveal, 280ms,
                 // max-width 0 → 150pt — a distinct transition from the width
