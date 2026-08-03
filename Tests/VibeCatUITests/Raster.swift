@@ -109,6 +109,36 @@ struct Raster: Sendable {
     }
 }
 
+/// Encodes a sequence of rasters as an animated GIF.
+///
+/// A filmstrip shows which frames differ; this shows what the motion actually
+/// looks like, which is a different question and the one an eye answers. Used
+/// only by the env-gated preview tools — nothing asserts on a GIF.
+@discardableResult
+func writeAnimatedGIF(_ frames: [Raster], secondsPerFrame: Double, to path: String) -> Bool {
+    guard let first = frames.first,
+          let dst = CGImageDestinationCreateWithURL(
+            URL(fileURLWithPath: path) as CFURL, "com.compuserve.gif" as CFString,
+            frames.count, nil)
+    else { return false }
+    _ = first
+    CGImageDestinationSetProperties(dst, [
+        kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]
+    ] as CFDictionary)
+    for f in frames {
+        var bytes = f.bytes
+        guard let ctx = CGContext(data: &bytes, width: f.width, height: f.height,
+                                  bitsPerComponent: 8, bytesPerRow: f.width * 4,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let image = ctx.makeImage() else { return false }
+        CGImageDestinationAddImage(dst, image, [
+            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: secondsPerFrame]
+        ] as CFDictionary)
+    }
+    return CGImageDestinationFinalize(dst)
+}
+
 enum RasterError: Error, CustomStringConvertible {
     case renderProducedNothing
     case contextUnavailable
