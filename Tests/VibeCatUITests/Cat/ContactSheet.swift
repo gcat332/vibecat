@@ -148,4 +148,48 @@ struct ContactSheetTool {
         #expect(raster.writePNG(to: path), "could not write \(path)")
         print("contact sheet: \(raster.width)x\(raster.height) -> \(path)")
     }
+
+    /// A filmstrip: every badge across one full cycle, one column per sampled
+    /// phase. Shows which frames actually *differ* — which is the point, since
+    /// `squares` has four distinct frames and is drawn twelve times a second,
+    /// and `bang` has two.
+    ///
+    ///     VIBECAT_FILMSTRIP=/tmp/strip.png swift test --filter badgeFilmstrip
+    @MainActor
+    static func filmstrip() -> some View {
+        let steps = 12
+        return VStack(alignment: .leading, spacing: 8) {
+            ForEach(IslandState.allCases, id: \.self) { state in
+                let badge = Badge(state: state)
+                HStack(spacing: 6) {
+                    Text(badge.rawValue)
+                        .font(.system(size: 8)).foregroundStyle(.white)
+                        .frame(width: 52, alignment: .leading)
+                    ForEach(0..<steps, id: \.self) { i in
+                        BadgeCanvas(badge: badge, phase: Double(i) / Double(steps),
+                                    tint: state.accent, cellSize: cell)
+                    }
+                    Text(badge.motion.isContinuous
+                         ? "\(Int(badge.motion.framesPerSecond))fps · \(badge.motion.cycle)s"
+                         : "still")
+                        .font(.system(size: 7)).foregroundStyle(.gray)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(red: 0.02, green: 0.027, blue: 0.043))
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["VIBECAT_FILMSTRIP"] != nil))
+    @MainActor func badgeFilmstrip() throws {
+        let path = ProcessInfo.processInfo.environment["VIBECAT_FILMSTRIP"]!
+        let raster = try rasterise(Self.filmstrip(), scale: Self.scale)
+        #expect(raster.writePNG(to: path))
+        print("filmstrip: \(raster.width)x\(raster.height) -> \(path)")
+        for state in IslandState.allCases {
+            let b = Badge(state: state)
+            let frames = Set((0..<48).map { "\(b.cells(at: Double($0) / 48.0))" })
+            print("  \(b.rawValue): \(frames.count) distinct frame(s)")
+        }
+    }
 }

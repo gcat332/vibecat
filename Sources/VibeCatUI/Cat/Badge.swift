@@ -103,17 +103,39 @@ public enum Badge: String, Sendable, CaseIterable {
             // A short left arm and a long right one. A symmetric V would read
             // as a V, and — worse — would be a mirror image of itself, leaving
             // nothing for a desaturated eye or a test to tell it from `cross`.
-            return [(4, 1), (5, 2), (4, 3), (3, 4), (2, 5)]
+            //
+            // Three rows, down from four. The first version reached rows 2–5
+            // and read as a slash across the disc rather than a mark inside it.
+            //
+            // The flat two-cell elbow at the bottom is what keeps it legible at
+            // this height. A purely diagonal four-cell version was tried and
+            // rendered as a V: at three rows there is not enough difference
+            // between a one-step left arm and a two-step right one for the
+            // asymmetry to read, and the asymmetry is the whole discriminator
+            // against `cross`. The elbow gives the eye a vertex to sit on.
+            return [(3, 1), (4, 2), (4, 3), (3, 4), (2, 5)]
         case .cross:
+            // Three by three, and **this is the largest an X fits.** Both of its
+            // diagonals through the centre run out to (1,1)/(1,5)/(5,1)/(5,5),
+            // and those four cells are the disc's own shoulders — rows 1 and 5
+            // are only five wide. Punching them would open the silhouette at
+            // the corners and it would read as a bitten circle, not a circle
+            // with a mark in it. Growing this needs a bigger grid than §8's
+            // fixed 14pt slot allows, or a less round disc.
+            //
+            // It carries the most cells of the three glyphs, which is what
+            // gives it its weight.
             return [(2, 2), (2, 4), (3, 3), (4, 2), (4, 4)]
         case .bang:
-            // §8 asks this badge to pulse, and it still does: the stem loses
-            // its top cell for half the cycle. Whole cells, because a pixel
-            // grid cannot scale a disc without blurring the grid that drawing
-            // on one is for.
-            return phase < 0.5
-                ? [(1, 3), (2, 3), (3, 3), (5, 3)]
-                : [(2, 3), (3, 3), (5, 3)]
+            // §8 asks this badge to pulse, and it still does — but by *moving*
+            // rather than by growing. The stem-lengthening version had to reach
+            // row 1 at its tallest, spanning rows 1–5 and dominating the disc;
+            // this keeps a constant two-cell stem, a one-cell gap and a dot,
+            // four rows in all, and shifts the whole mark up a cell for half
+            // the cycle. Whole cells, because a pixel grid cannot scale without
+            // blurring the grid that drawing on one is for.
+            let top = phase < 0.5 ? 2 : 1
+            return [(top, 3), (top + 1, 3), (top + 3, 3)]
         case .zzz, .squares:
             return []
         }
