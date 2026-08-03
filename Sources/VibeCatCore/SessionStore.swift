@@ -40,11 +40,19 @@ public struct SessionStore: Sendable, Equatable {
     }
 
     /// §11: most urgent first, using §4.2's own ordering so the list and the
-    /// island never disagree about which session matters. A **stable** sort,
-    /// so two sessions of one state keep the order they arrived in rather
-    /// than shuffling on every render — `sorted(by:)` is not documented as
-    /// stable, so the index is part of the comparator rather than trusted to
-    /// be preserved.
+    /// island never disagree about which session matters. Two sessions of
+    /// one state should keep the order they arrived in rather than shuffling
+    /// on every render, so the index is carried in the comparator explicitly
+    /// (`$0.offset < $1.offset` on a tie) rather than leaning on `sorted(by:)`
+    /// itself to preserve order — that way this ordering's correctness
+    /// doesn't depend on the sort's stability at all, whatever that turns
+    /// out to be. Whether `sorted(by:)` is in fact guaranteed stable on this
+    /// toolchain is an open question this comment does not settle either
+    /// way: dropping this tie-break does not currently make
+    /// `theListPutsTheMostUrgentSessionFirst` fail, because the sort behaves
+    /// stably here in practice — so that half of the test cannot fail today,
+    /// and the tie-break is kept for independence from that fact rather than
+    /// because a mutation proved it necessary.
     public var mostUrgentFirst: [Session] {
         sessions.enumerated()
             .sorted {
