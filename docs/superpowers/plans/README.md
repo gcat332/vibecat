@@ -271,6 +271,16 @@ list, not because the list needs them.
   because `AuraTrigger.observe` never blooms on its first observation and
   `BadgeCPUProbe` sets the state once. Fixed by `AuraTrigger.endBloom()` —
   Plan 5's inserted Task 3.5.
+
+  **Refined 2026-08-03, from `-dump-macro-expansions`:** the two call shapes are
+  gated differently, and only one of them is gated at all. A plain **assignment**
+  (`model.aura = …`) goes through the generated `set`, which *is* equality-gated —
+  that is why the old nudge notified nothing. A **mutating call** through the
+  property (`model.aura.endBloom()`) goes through `_modify`, which notifies
+  **unconditionally**, whether or not the value ends up different. So the fix does
+  not depend on `firedAt` changing; it works because it is a mutating call rather
+  than an assignment. Worth knowing before anyone "optimises" a mutating call into
+  an assignment, or writes another equal-value nudge expecting it to fire.
 - **A CPU measurement, as a task.** Plan 3's numbers are all single-sprite, on
   mains power, on a 120Hz built-in display. Plan 8 needs multi-sprite numbers to
   aim at, and Plan 5 is the first thing that produces several sprites. Measure

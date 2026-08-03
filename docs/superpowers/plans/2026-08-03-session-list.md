@@ -596,9 +596,14 @@ In `AuraTrigger`:
 /// still mood — about 3.3% of a core, permanently, per the animation spike's own
 /// 3.61%-against-0.35% figures.
 ///
-/// Clearing `firedAt` is honest as well as effective: the bloom really is over,
-/// `intensity` is already 0 at that instant, and the resulting value differs from
-/// the one before it, so the observation actually fires.
+/// Clearing `firedAt` is honest as well as effective: the bloom really is over and
+/// `intensity` is already 0 at that instant.
+///
+/// **Measured refinement:** what makes the observation fire is that this is a
+/// *mutating call* through an observed property, which routes through `_modify`
+/// and notifies unconditionally — not that the value differs. Plain assignment's
+/// generated `set` is the equality-gated one, which is why the old nudge notified
+/// nothing. Do not turn this back into an assignment.
 public mutating func endBloom() {
     firedAt = nil
 }
