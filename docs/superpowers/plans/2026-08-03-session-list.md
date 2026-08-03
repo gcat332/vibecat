@@ -38,7 +38,7 @@
 
 ---
 
-## Task 1: Split the silhouette so hover stops widening the drawer
+## Task 1: Split the silhouette so hover stops widening the drawer — **DONE** (`d72627b`)
 
 **Files:**
 - Modify: `Sources/VibeCatUI/IslandView.swift` — `IslandBody.body`, the `.frame(width: restingWidth + hoverRevealWidth, height: body.height)` line and its two `.animation` modifiers
@@ -50,7 +50,7 @@
 
 **Why this is first:** it is a visible defect — a 150pt opaque rectangle over ~92% of the open drawer's height, appearing and disappearing with hover — and Task 2 puts content inside the same mechanism. Doing them in the other order means tuning twice.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```swift
 /// The sliver `theDrawersContentDoesNotShiftWhenOnlyHoverChanges` records as a
@@ -83,12 +83,12 @@
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `swift test --filter hoverDoesNotPaintASliverBesideTheOpenDrawer`
 Expected: FAIL, reporting the ground colour `#07080A@255` where transparency was required.
 
-- [ ] **Step 3: Split the silhouette**
+- [x] **Step 3: Split the silhouette**
 
 Replace the single `IslandShape()` fill in `IslandBody.body` with two, stacked. The collapsed part keeps the hover reveal; the drawer part does not.
 
@@ -125,16 +125,16 @@ VStack(spacing: 0) {
 
 The `.shadow` moves **outward**, onto the stack: §9.2 requires the aura to trace the whole rendered alpha "including the fillets", and it "follows the panel down for free when the drawer opens". Applied per-rect it would trace two separate shapes and draw a seam between them.
 
-- [ ] **Step 4: Run the test, then the whole suite**
+- [x] **Step 4: Run the test, then the whole suite**
 
 Run: `swift test --filter hoverDoesNotPaintASliverBesideTheOpenDrawer` → PASS
 Run: `swift test` → all pass. Expect `theDrawersContentDoesNotShiftWhenOnlyHoverChanges` to now hold with a **much smaller** differing count than its `<= 30` allowance; tighten that allowance to `<= 10` and update its comment, since the residual it was tolerating is the thing this task removed.
 
-- [ ] **Step 5: Look at it**
+- [x] **Step 5: Look at it**
 
 Run: `VIBECAT_CONTACT_SHEET=/tmp/sheet.png swift test --filter contactSheet` and open the PNG. Three plans shipped artwork nobody looked at; two of the three defects that found were invisible to a green suite.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Sources/VibeCatUI/IslandView.swift Tests/VibeCatUITests/Drawer/DrawerGoldenTests.swift
@@ -142,6 +142,35 @@ git commit -m "fix: one silhouette rect could not carry two different widths"
 ```
 
 ---
+
+### What Task 1 actually took, beyond what this plan said
+
+Recorded because the plan was wrong in two ways that only executing it revealed,
+and neither would have shown up as a failing test:
+
+- **`IslandShape` needed a new parameter.** The plan stacked two `IslandShape`s
+  and did not notice that the shape "always draws a flat top and rounded bottom
+  corners regardless of the rect it is given" — so two of them stacked put a pair
+  of rounded corners across the *middle* of one body, a seam at exactly the notch
+  line the island must read as continuous across. `IslandShape(roundsBottom:)` is
+  new, defaulting to `true` for every existing caller.
+- **The VStack's default alignment reproduced the bug.** `.center` centres the
+  narrower half and pushes its right edge past `drawerWidth` by half the
+  difference — the same sliver, shifted. `.leading` is required, and it is also
+  what keeps §5.3's fixed left edge fixed.
+- **Dropping the reveal while the drawer is open was a second half the plan did
+  not anticipate.** Splitting the rects alone replaced the sliver with a *step*: a
+  bar 150pt wider than the drawer beneath it. And `model.hovering` is true for the
+  whole life of an open drawer in production — `click()` never touches
+  `NotchController.tier`, so it stays `.hover`, and it must, because
+  `panel.acceptsClicks` is gated on it. So the step would have been permanent, not
+  transient. §6.1's tiers are progressive, so the reveal is dropped once the
+  drawer opens and bar and drawer become one column.
+
+**The note this task was written from understated the defect.** It called the
+sliver something that appears "and disappears with hover". It never disappeared
+while a question was up, for the reason above — you must hover to be able to click,
+and clicking does not clear hover.
 
 ## Task 2: Fill the hover reveal with §9.1's promised name and elapsed time
 
