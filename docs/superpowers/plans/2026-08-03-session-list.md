@@ -673,7 +673,7 @@ git commit -m "fix: an equal write cannot end a bloom, so the timeline never sto
 @Test func theListPutsTheMostUrgentSessionFirst() {
     var store = SessionStore()
     let now = Date(timeIntervalSince1970: 1_000_000)
-    for (session, kind) in [("a", VibeEvent.Kind.idle), ("b", .running),
+    for (session, kind) in [("a", Kind.idle), ("b", .running),
                             ("c", .running), ("d", .failed), ("e", .permission)] {
         store.apply(VibeEvent(id: session, cli: "claude-code", kind: kind,
                               session: session, cwd: "/tmp/\(session)"), now: now)
@@ -739,6 +739,10 @@ git commit -m "feat: the list's order is the island's own, so the two cannot dis
 
 **Interfaces:**
 - Consumes: `Session`, `RevealContent.elapsed`, `boneColour`, `hazeColour`
+- **Does NOT consume `SessionBlocks`.** That type is Task 6's, and it takes
+  `SessionRow.Options`, which this task defines — so the call site belongs in
+  Task 6 or the two tasks cannot be built in either order. Corrected 2026-08-03,
+  before dispatch; the original plan had `SessionRow.body` calling it.
 - Produces:
   - `struct SessionRow: View { init(session: Session, now: Date, options: SessionRow.Options = .all) }`
   - `struct SessionRow.Options: OptionSet` with `.activity`, `.lastMessage`, `.tasks`, `.agents`, `.subagents`, and `.all`
@@ -748,7 +752,7 @@ git commit -m "feat: the list's order is the island's own, so the two cannot dis
 - [ ] **Step 1: Write the failing tests**
 
 ```swift
-private func session(_ state: VibeEvent.Kind, project: String = "api") -> Session {
+private func session(_ state: Kind, project: String = "api") -> Session {
     var e = VibeEvent(id: "e", cli: "claude-code", kind: state, session: "s",
                       cwd: "/Users/dev/\(project)")
     e.worktree = "auth-hardening"
@@ -763,7 +767,7 @@ private func session(_ state: VibeEvent.Kind, project: String = "api") -> Sessio
 /// by colour (§4.3), so the row must paint the accent of the state it is in and
 /// not of any other.
 @MainActor @Test func theRowWearsItsOwnStatesAccent() throws {
-    for (kind, state) in [(VibeEvent.Kind.permission, IslandState.waiting),
+    for (kind, state) in [(Kind.permission, IslandState.waiting),
                           (.failed, .failed), (.running, .running)] {
         let raster = try rasterise(SessionRow(session: session(kind),
                                               now: Date(timeIntervalSince1970: 1_000_030))
@@ -846,7 +850,10 @@ struct SessionRow: View {
                     .foregroundStyle(Color(hazeColour))
                     .lineLimit(2)
             }
-            SessionBlocks(session: session, options: options, accent: accent)
+            // `SessionBlocks` is Task 6's deliverable and is wired in there, not
+            // here: it consumes `SessionRow.Options`, which this task defines, so
+            // calling it from this task would make the two circular and leave
+            // Task 5 unable to compile on its own.
         }
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -954,6 +961,11 @@ git commit -m "feat: a session row says what it is doing and where it lives"
 - Consumes: `Session.tasks`, `Session.agents`, `SessionRow.Options`
 - Produces:
   - `struct SessionBlocks: View { init(session: Session, options: SessionRow.Options, accent: Color) }`
+  - **and the call site in `SessionRow.body`**, which Task 5 deliberately left out
+    to avoid a circular dependency (Task 6's type consumes Task 5's `Options`).
+    Add `SessionBlocks(session: session, options: options, accent: accent)` as the
+    last element of `SessionRow.body`'s `VStack`, replacing the comment Task 5
+    left there.
   - `static func SessionBlocks.taskSummary(_ tasks: [TaskItem]) -> String`
 
 - [ ] **Step 1: Write the failing tests**
