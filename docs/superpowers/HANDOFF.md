@@ -11,8 +11,11 @@ have to rediscover the hard way.
 
 ## State
 
-`main`, clean, **419 tests**, **213 commits ahead of `origin/main`**, **MIT
+`main`, clean, **419 tests**, **pushed and current with `origin/main`**, **MIT
 licensed** (`LICENSE` in the root). **Plans 1–5 done**, including Plan 4.5.
+
+That push, on 2026-08-03, was the first in the project's life — 214 commits. The
+licence was the one thing gating it.
 
 ```bash
 swift test                                   # 419, ~3s
@@ -39,29 +42,35 @@ From a signed bundle, with real hook events through the real socket:
 Fail-open was enumerated across all ten ways a question can end. Every one reaches
 `nil`, so a crashed or silent island can never hang a terminal.
 
-## Two decisions waiting on the owner
+## One decision waiting on the owner
 
-Neither is a bug to fix; both are calls only you can make.
+It started as two. The mains re-run on 2026-08-03 closed the first and narrowed the
+second, so what is left is a single question — and it is a call only you can make, not
+a bug to fix.
 
-1. **Opening the session list costs +13.6pp of a core** — 31.28% against
-   `running`'s 17.69%, roughly 9× the probe's noise floor, with `draws/s`
-   unchanged so it is not extra badge redraws. That **reopens the ~12% resting cost
-   accepted earlier**, which was accepted on the explicit condition that "several
-   sprites at once" would reopen it. [The spike](spikes/2026-08-03-badge-transform-cost.md)
-   has the numbers and the leading hypothesis (whole-window recompositing while any
-   animation is live), recorded as a hypothesis and not a finding.
-2. ~~That measurement was taken on battery…~~ **Re-measured on mains 2026-08-03, and
-   it splits the question in two.** The **resting** figure is confirmed, not revised:
-   dormant reads 13.14% against the accepted 12.26%, inside the ±1.5pp noise floor —
-   **Plan 5 did not raise the island's resting cost.** What is new is the **list-open**
-   figure: **~27% of a core**, +11.04pp over `running`, about 2.1× resting. The battery
-   run was directionally right and ~19% pessimistic (+13.6pp there).
+**The accepted ~12% resting cost survives.** Measured on mains, Low Power Mode off:
+dormant reads 13.14% against the 12.26% recorded and accepted, inside the ±1.5pp noise
+floor. **Plan 5 did not raise the island's resting cost**, which is what the acceptance
+was about. That half is settled.
 
-   The narrowed open question: **is that cost per-row or fixed?** Twelve sessions cost
-   +11.04pp; if linear that is ~0.9pp each, making a typical three-session list ~+2.8pp
-   and a non-issue. One data point cannot establish linearity, and the right response
-   differs sharply between the two answers. One more probe row at a smaller session
-   count settles it.
+**What is new: having a session list open costs ~27% of a core** — +11.04pp over
+`running`, about 2.1× resting, with `draws/s` unchanged (47.9 → 48.3) so it is not
+extra badge redraws. The acceptance decision did not have this figure.
+
+**The open question is whether that cost is per-row or fixed.** Twelve sessions cost
++11.04pp. If it were linear that is ~0.9pp per visible session, making a typical
+three-session list ~+2.8pp and a non-issue — and the right response differs sharply
+between the two answers. **One data point cannot establish linearity.** One more probe
+row at a smaller session count settles it, in about two minutes.
+
+Once it is settled, the options on the table are: accept and record (as was done for
+the badge transform); move the drawer's content out of whatever subtree recomposites
+while an animation is live (the recorded hypothesis, still unconfirmed); gate motion on
+`MotionPreference` so the cost becomes the user's choice — which would also close §9.3's
+three bypasses; or reduce what a row draws by default.
+
+[The spike](spikes/2026-08-03-badge-transform-cost.md) has both runs, the noise floor,
+and what the battery/mains comparison established about Low Power Mode's distortion.
 
 ## Then the plans
 
