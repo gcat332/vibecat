@@ -15,28 +15,27 @@ public struct BadgeCanvas: View {
         self.cellSize = cellSize
     }
 
-    /// The lit cells' rects, unioned into one path.
-    ///
-    /// A plain property rather than logic inside `Canvas`'s renderer closure,
-    /// for the same reason as `CatCanvas.fillsByTone`: the closure only runs
-    /// when SwiftUI actually draws, so the walk has to happen here for merely
-    /// evaluating `body` (what CanvasTests.swift's trap-catching tests do) to
-    /// exercise it at all.
-    private var litPath: Path {
-        guard cellSize > 0 else { return Path() }
-        var path = Path()
-        for (row, line) in badge.cells(at: phase).enumerated() {
-            for (col, lit) in line.enumerated() where lit {
-                path.addRect(CGRect(x: (CGFloat(col) * cellSize).rounded(),
-                                    y: (CGFloat(row) * cellSize).rounded(),
-                                    width: cellSize, height: cellSize))
-            }
-        }
-        return path
-    }
-
     /// Flipped once on appear so the implicit animations have somewhere to go.
     @State private var pulsing = false
+
+    #if DEBUG
+    /// Counts invocations of the `Canvas` renderer below — actual draws, not
+    /// body builds. Read by `BadgeCPUProbe` to settle the question `Badge
+    /// .pulse` records as unmeasured: whether the repeating `.scaleEffect`/
+    /// `.opacity` this file declares is run by the render server without
+    /// asking SwiftUI to draw again, or re-invokes this renderer every frame.
+    /// If the latter, the badges cost what the cell-swapping version they
+    /// replaced cost and the idle island's 0.35% of a core is gone.
+    ///
+    /// It has to live inside the closure to mean that. `theBadgeDrawCounter
+    /// CountsDrawsRatherThanBodyEvaluations` in CanvasTests.swift pins both
+    /// halves — body evaluation must not move it, a real render must.
+    ///
+    /// `#if DEBUG`-gated for the same reason `IslandView.buildCount` is: pure
+    /// instrumentation, and `swift test` and `Scripts/build-app.sh`'s default
+    /// both build debug, so nothing that needs it loses it.
+    @MainActor public static var canvasDrawCount = 0
+    #endif
 
     public var body: some View {
         let pulse = badge.pulse
@@ -48,7 +47,12 @@ public struct BadgeCanvas: View {
         // animates while `needsTimeline` depends only on the cat.
         ZStack(alignment: .topLeading) {
             ForEach(Array(badge.parts(at: phase).enumerated()), id: \.offset) { _, part in
-                Canvas { ctx, _ in ctx.fill(Self.path(part.cells, cellSize), with: .color(Color(tint))) }
+                Canvas { ctx, _ in
+                    #if DEBUG
+                    Self.canvasDrawCount += 1
+                    #endif
+                    ctx.fill(Self.path(part.cells, cellSize), with: .color(Color(tint)))
+                }
                     .frame(width: side, height: side)
                     .scaleEffect(pulsing ? pulse.scale.upperBound : pulse.scale.lowerBound)
                     .opacity(pulsing ? pulse.opacity.upperBound : pulse.opacity.lowerBound)

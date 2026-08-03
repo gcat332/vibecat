@@ -25,6 +25,14 @@ if CommandLine.arguments.contains("--keydown-probe") {
     // socket-server startup below with a stray NotchPanel still on screen.
     fatalError("KeyDownProbe returned without exiting the process")
 }
+
+// The badge transforms' own unmeasured claim, gated exactly like the probe
+// above and for the same reason — see BadgeCPUProbe's doc comment.
+if CommandLine.arguments.contains("--badge-cpu-probe") {
+    BadgeCPUProbe.run()
+    app.run()   // pumps the run loop; the probe's own Task calls exit(0)
+    fatalError("BadgeCPUProbe returned without exiting the process")
+}
 #endif
 
 // Shows the screen-recording prompt only when explicitly asked to, with
