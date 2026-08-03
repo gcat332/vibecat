@@ -74,10 +74,20 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
 }
 
 /// §9.2: the aura "leaves nothing behind". Once the bloom's duration has elapsed
-/// it is over, and the model has to be able to say so with a value that actually
-/// changes — an equal write notifies nothing (see
-/// `anEqualWriteToAnObservablePropertyDoesNotNotify`), so "nudging" the same
-/// value back in cannot end anything.
+/// it is over, and `endBloom()` has to actually clear it rather than leave
+/// `firedAt` standing.
+///
+/// This test operates on a bare `AuraTrigger` value, with no `@Observable`
+/// property in the picture at all, so `aura != before` here is a fact about
+/// the struct, not about notification. Whether the value differs is *not*
+/// why `NotchController`'s real call notifies — that is decided by call
+/// shape (a mutating method call routes through the generated `_modify`
+/// accessor, which notifies unconditionally) rather than by whether anything
+/// changed; see `AuraTrigger.endBloom()`'s own comment and
+/// `aMutatingCallThroughAnObservablePropertyNotifiesUnconditionally` for that
+/// measurement. What this test pins is narrower and still worth having:
+/// `endBloom()` produces a value that is honestly different, not just one
+/// that happens to look inert because `intensity` is already 0.
 @Test func endingABloomStopsItBlooming() {
     let fired = Date(timeIntervalSince1970: 1_000_000)
     var aura = AuraTrigger()
@@ -94,5 +104,5 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
 
     #expect(!aura.isBlooming(at: fired), "the bloom survived endBloom()")
     #expect(aura != before,
-            "endBloom() left the value equal to what it was — @Observable would not notify, which is the entire bug this exists to fix")
+            "endBloom() left the value equal to what it was — not honest per §9.2, even though a mutating call would still have notified regardless")
 }

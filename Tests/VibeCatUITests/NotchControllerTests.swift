@@ -799,11 +799,16 @@ private let externalDisplay = ScreenMetrics(
 ///
 /// So `model.aura.endBloom()` — the exact call shape production's `bloomEnd`
 /// Task uses — notifies regardless of whether `firedAt` actually changes.
-/// That is a *stronger* guarantee than `AuraTrigger.endBloom()`'s own doc
-/// comment claims ("the resulting value differs … so the observation
-/// actually fires"): the value differing is what makes clearing `firedAt`
-/// honest per §9.2, not what makes the notification fire. This test pins the
-/// measured mechanism instead of the assumed one.
+/// A first draft of `AuraTrigger.endBloom()`'s own doc comment attributed the
+/// fix to the resulting value differing from the one before it; that
+/// comment has since been corrected (see its current text) to say what this
+/// test actually measured: the fix works because it is a *mutating call*
+/// through `_modify`, not because of anything about the value. Whether
+/// `firedAt` ends up different only matters for §9.2's honesty (`intensity`
+/// already reads 0 either way), never for whether the notification fires —
+/// an assignment that also cleared `firedAt` would still route through the
+/// gated `set` and silently reintroduce the bug. This test pins the measured
+/// mechanism, not the assumed one.
 @MainActor @Test func aMutatingCallThroughAnObservablePropertyNotifiesUnconditionally() {
     let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
                             motion: MotionPreference(chosen: .full, systemWantsReduced: false))

@@ -491,11 +491,17 @@ import SwiftUI
             // when the bloom ends, forcing IslandView.body to re-evaluate
             // and pick a `.never` schedule instead of the live one.
             // `endBloom()`, never `model.aura = model.aura` — see that
-            // method's own comment. An equal write notifies nothing on this
-            // toolchain (confirmed, see
-            // `anEqualWriteToAnObservablePropertyDoesNotNotify`), and this is
-            // the only thing that re-evaluates `IslandView.body` so its
-            // `needsTimeline` branch can drop the TimelineView.
+            // method's own comment. The distinction is a mutating call versus
+            // an assignment, not whether the resulting value differs: an
+            // assignment routes through the generated `set`, gated by
+            // `shouldNotifyObservers` and confirmed to notify nothing on an
+            // equal write on this toolchain
+            // (`anEqualWriteToAnObservablePropertyDoesNotNotify`), while a
+            // mutating call routes through `_modify`, which notifies
+            // unconditionally regardless of whether anything changed
+            // (`aMutatingCallThroughAnObservablePropertyNotifiesUnconditionally`).
+            // Rewriting this line back into an assignment would silently
+            // reintroduce the bug even if it still cleared `firedAt`.
             bloomEnd?.cancel()
             bloomEnd = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(AuraTrigger.duration))

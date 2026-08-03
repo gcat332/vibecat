@@ -56,20 +56,36 @@ public struct AuraTrigger: Sendable, Equatable {
         intensity(at: instant) * tint.peakOpacity
     }
 
-    /// Ends the bloom, and does it by changing the value.
+    /// Ends the bloom, and does it with a `mutating func`, not an assignment.
     ///
-    /// The distinction is the whole point. `NotchController` used to "nudge"
-    /// `model.aura` by assigning it its own current value, on the belief that an
-    /// `@Observable` write notifies regardless of equality. Measured on Swift 6.3.2:
-    /// it does not, for an `Equatable` property. So the nudge notified nothing,
-    /// `IslandView.body` was never re-evaluated, and its `if model.needsTimeline`
-    /// branch kept a `TimelineView` alive forever after the first state change into a
-    /// still mood — about 3.3% of a core, permanently, per the animation spike's own
-    /// 3.61%-against-0.35% figures.
+    /// The distinction is the whole point, and it is *not* about the value
+    /// differing. `NotchController` used to "nudge" `model.aura` by assigning
+    /// it its own current value (`model.aura = model.aura ?? AuraTrigger()`).
+    /// That is a plain assignment, and on this toolchain an `@Observable`
+    /// property's generated `set` accessor is gated behind
+    /// `shouldNotifyObservers(old, new)` — `old != new` for an `Equatable`
+    /// type — so assigning an equal value notifies nothing (measured,
+    /// `anEqualWriteToAnObservablePropertyDoesNotNotify`). The nudge notified
+    /// nothing, `IslandView.body` was never re-evaluated, and its `if model
+    /// .needsTimeline` branch kept a `TimelineView` alive forever after the
+    /// first state change into a still mood — about 3.3% of a core,
+    /// permanently, per the animation spike's own 3.61%-against-0.35%
+    /// figures.
     ///
-    /// Clearing `firedAt` is honest as well as effective: the bloom really is over,
-    /// `intensity` is already 0 at that instant, and the resulting value differs from
-    /// the one before it, so the observation actually fires.
+    /// A *mutating method call* through the same property — `model.aura
+    /// .endBloom()`, what `NotchController` calls now — does not go through
+    /// that gate at all: it desugars to the generated `_modify` accessor,
+    /// which calls `willSet`/`didSet` unconditionally, with no equality check
+    /// (measured by dumping macro expansions, pinned by
+    /// `aMutatingCallThroughAnObservablePropertyNotifiesUnconditionally`).
+    /// So this fix works because it is a mutating call, not because clearing
+    /// `firedAt` happens to produce a different value — rewriting this call
+    /// site back into an assignment (even one that "clears" `firedAt`) would
+    /// route through `set` again and silently reintroduce this exact bug.
+    ///
+    /// Clearing `firedAt` is still the right thing to clear, independent of
+    /// notification: the bloom really is over, and `intensity` is already 0
+    /// at that instant, so nothing about what gets painted changes either.
     public mutating func endBloom() {
         firedAt = nil
     }
