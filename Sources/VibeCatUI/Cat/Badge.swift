@@ -74,13 +74,82 @@ public enum Badge: String, Sendable, CaseIterable {
     /// **Not yet measured.** The claim that a repeating `.scaleEffect` does not
     /// re-invoke the `Canvas` renderer is reasoned from how SwiftUI composites,
     /// not from `getrusage`. Measure before relying on it.
-    public var pulse: (period: Double, scale: ClosedRange<Double>, opacity: ClosedRange<Double>)? {
+    public struct Pulse: Sendable, Equatable {
+        public let period: Double
+        public let scale: ClosedRange<Double>
+        public let opacity: ClosedRange<Double>
+        /// Points travelled upward across the cycle. Only `zzz` drifts.
+        public let rise: Double
+    }
+
+    /// One independently-animated piece of a badge, and its delay.
+    ///
+    /// The mockup animates `zzz`'s two z's and `squares`' four blocks on
+    /// *staggered* delays — 0/0.9s and 0/0.14/0.28/0.42s. A single `Canvas` has
+    /// a single animation and cannot express that, which is why a badge is a
+    /// list of parts rather than one mask.
+    public struct Part: Sendable, Equatable {
+        public let cells: [[Bool]]
+        public let delay: Double
+    }
+
+    /// The transform every part of this badge travels through, from the mockup.
+    ///
+    /// **`check`, `cross` and `bang` share one pulse.** They share a silhouette,
+    /// so giving them three different rates broke the family the disc exists to
+    /// create — an earlier version did exactly that, and it was wrong. Urgency
+    /// is carried by the cat's own motion and by colour, not by badge rate.
+    public var pulse: Pulse {
         switch self {
-        case .zzz:     (2.8, 0.92...1.0, 0.55...1.0)   // zfloat
-        case .check:   (2.2, 0.62...1.0, 0.55...1.0)   // twinkle
-        case .squares: nil                             // its cells already turn
-        case .bang:    (1.1, 0.94...1.06, 0.7...1.0)   // softpulse
-        case .cross:   (2.4, 0.96...1.04, 0.75...1.0)  // shudder
+        case .zzz:
+            // zfloat: fades in from below, drifts up, fades out. Eleven points
+            // of travel, +4 to −7 in the mockup's own units.
+            Pulse(period: 2.8, scale: 0.8...1.05, opacity: 0.0...1.0, rise: 11)
+        case .squares:
+            // quad. Every block keeps one size — the keyframes are pure scale
+            // and opacity — which is why the cells must stop resizing per frame.
+            Pulse(period: 1.15, scale: 0.5...1.18, opacity: 0.28...1.0, rise: 0)
+        case .check, .cross, .bang:
+            // twinkle's numbers, for all three, because they are one family.
+            Pulse(period: 2.2, scale: 0.62...1.0, opacity: 0.55...1.0, rise: 0)
+        }
+    }
+
+    /// The pieces this badge animates, each on its own delay.
+    public func parts(at phase: Double) -> [Part] {
+        func mask(_ set: [(Int, Int)]) -> [[Bool]] {
+            var g = [[Bool]](repeating: [Bool](repeating: false, count: Self.size),
+                             count: Self.size)
+            for (r, c) in set { g[r][c] = true }
+            return g
+        }
+        switch self {
+        case .zzz:
+            // The mockup puts the leading z low and left with no delay, and the
+            // second above and right, 0.9s behind — so they drift as a pair
+            // rather than in lockstep.
+            return [
+                Part(cells: mask([(3, 0), (3, 1), (3, 2), (3, 3),
+                                  (4, 2), (5, 1),
+                                  (6, 0), (6, 1), (6, 2), (6, 3)]), delay: 0),
+                Part(cells: mask([(0, 4), (0, 5), (0, 6),
+                                  (1, 5),
+                                  (2, 4), (2, 5), (2, 6)]), delay: 0.9),
+            ]
+        case .squares:
+            // Four 2×2 blocks: 4px on a 2pt grid, with a one-cell gap, so
+            // 2+1+2 centred in seven leaves a cell of margin — the mockup's own
+            // 4px/2px/4px inside 14px. Clockwise from the top left, on the
+            // mockup's delays: 0, .14 top right, .28 bottom right, .42 bottom
+            // left.
+            return [((1, 1), 0.0), ((1, 4), 0.14), ((4, 4), 0.28), ((4, 1), 0.42)]
+                .map { origin, delay in
+                    Part(cells: mask([(origin.0, origin.1), (origin.0, origin.1 + 1),
+                                      (origin.0 + 1, origin.1), (origin.0 + 1, origin.1 + 1)]),
+                         delay: delay)
+                }
+        case .check, .cross, .bang:
+            return [Part(cells: cells(at: phase), delay: 0)]
         }
     }
 
@@ -97,10 +166,13 @@ public enum Badge: String, Sendable, CaseIterable {
             // The sleeping cat's shut eyes already say "dormant"; the badge
             // does not need to spend a core saying it again.
             .still
-        case .squares: MotionProfile(framesPerSecond: 12, cycle: 1.0, isContinuous: true)
-        case .bang:    MotionProfile(framesPerSecond: 12, cycle: 1.1, isContinuous: true)
+        // Every badge's motion is a transform now, so none needs a timeline.
+        // Cycles are kept because `IslandBody` still derives a phase from them
+        // and `bang`'s one-cell shift rides on it.
+        case .squares: MotionProfile(framesPerSecond: 0, cycle: 1.15, isContinuous: false)
+        case .bang:    MotionProfile(framesPerSecond: 0, cycle: 1.1, isContinuous: false)
         case .check:   MotionProfile(framesPerSecond: 0, cycle: 2.2, isContinuous: false)
-        case .cross:   .still
+        case .cross:   MotionProfile(framesPerSecond: 0, cycle: 2.4, isContinuous: false)
         }
     }
 
@@ -207,20 +279,13 @@ public enum Badge: String, Sendable, CaseIterable {
                  "####..."])
 
         case .squares:
-            // Four squares swelling in turn, clockwise. A pixel grid cannot
-            // rotate cleanly — but it can take turns, and that reads as
-            // rotation without anything actually rotating.
-            let step = Int((phase * 4).rounded(.down)) % 4      // 0…3
-            let origins = [(0, 0), (0, 4), (4, 4), (4, 0)]      // TL, TR, BR, BL
-            for (i, o) in origins.enumerated() {
-                let big = (i == step)
-                let span = big ? 3 : 2
-                let rowOffset = big ? 0 : (o.0 == 0 ? 0 : 1)
-                let colOffset = big ? 0 : (o.1 == 0 ? 0 : 1)
-                for r in 0..<span {
-                    for c in 0..<span {
-                        g[o.0 + rowOffset + r][o.1 + colOffset + c] = true
-                    }
+            // The union of `parts(at:)`. The mockup never changes these blocks'
+            // size — `quad`'s keyframes are pure scale and opacity — so the
+            // earlier version that swelled one block per frame was reading as a
+            // different animation altogether.
+            for part in parts(at: phase) {
+                for r in 0..<Self.size {
+                    for c in 0..<Self.size where part.cells[r][c] { g[r][c] = true }
                 }
             }
 

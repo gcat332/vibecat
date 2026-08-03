@@ -206,40 +206,49 @@ struct ContactSheetTool {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["VIBECAT_GIF"] != nil))
     @MainActor func badgeAnimation() throws {
         let path = ProcessInfo.processInfo.environment["VIBECAT_GIF"]!
-        let steps = 40
-        let seconds = 2.8                       // the longest period, so all loop cleanly
+        let steps = 56
+        let span = 2.8                        // the longest period, so all loop
         func easeInOut(_ t: Double) -> Double {
             t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t)
         }
+        let side = Self.cell * 2 * CGFloat(Badge.size)
         var frames: [Raster] = []
         for i in 0..<steps {
-            let t = Double(i) / Double(steps)
-            let row = HStack(alignment: .center, spacing: 16) {
+            let now = Double(i) / Double(steps) * span
+            let row = HStack(alignment: .center, spacing: 18) {
                 ForEach(IslandState.allCases, id: \.self) { state in
                     let badge = Badge(state: state)
-                    // Its own period, and autoreverses — so one leg of the
-                    // triangle wave over half the period, back over the other.
                     let p = badge.pulse
-                    let local = p.map { (t * seconds).truncatingRemainder(dividingBy: $0.period) / $0.period } ?? 0
-                    let tri = local < 0.5 ? local * 2 : (1 - local) * 2
-                    let e = easeInOut(tri)
-                    let scale = p.map { $0.scale.lowerBound + ($0.scale.upperBound - $0.scale.lowerBound) * e } ?? 1
-                    let alpha = p.map { $0.opacity.lowerBound + ($0.opacity.upperBound - $0.opacity.lowerBound) * e } ?? 1
-                    BadgeCanvas(badge: badge,
-                                phase: (t * seconds / badge.motion.cycle)
-                                    .truncatingRemainder(dividingBy: 1),
-                                tint: state.accent, cellSize: Self.cell * 2)
-                        .scaleEffect(scale)
-                        .opacity(alpha)
-                        .frame(width: Self.cell * 2 * CGFloat(Badge.size) * 1.2,
-                               height: Self.cell * 2 * CGFloat(Badge.size) * 1.2)
+                    ZStack(alignment: .topLeading) {
+                        ForEach(Array(badge.parts(at: (now / badge.motion.cycle)
+                            .truncatingRemainder(dividingBy: 1)).enumerated()),
+                                id: \.offset) { _, part in
+                            // Each part on its own delay, exactly as
+                            // BadgeCanvas declares it — autoreverses, so one leg
+                            // of a triangle wave per half period.
+                            let local = ((now - part.delay) / p.period)
+                                .truncatingRemainder(dividingBy: 1)
+                            let wrapped = local < 0 ? local + 1 : local
+                            let tri = wrapped < 0.5 ? wrapped * 2 : (1 - wrapped) * 2
+                            let e = easeInOut(tri)
+                            Canvas { ctx, _ in
+                                ctx.fill(BadgeCanvas.path(part.cells, Self.cell * 2),
+                                         with: .color(Color(state.accent)))
+                            }
+                            .frame(width: side, height: side)
+                            .scaleEffect(p.scale.lowerBound + (p.scale.upperBound - p.scale.lowerBound) * e)
+                            .opacity(p.opacity.lowerBound + (p.opacity.upperBound - p.opacity.lowerBound) * e)
+                            .offset(y: p.rise / 2 - p.rise * e)
+                        }
+                    }
+                    .frame(width: side * 1.3, height: side * 1.6)
                 }
             }
-            .padding(16)
+            .padding(18)
             .background(Color(red: 0.027, green: 0.031, blue: 0.039))
             frames.append(try rasterise(row, scale: 2))
         }
-        #expect(writeAnimatedGIF(frames, secondsPerFrame: seconds / Double(steps), to: path))
+        #expect(writeAnimatedGIF(frames, secondsPerFrame: span / Double(steps), to: path))
         print("gif: \(frames.count) frames -> \(path)")
     }
 }

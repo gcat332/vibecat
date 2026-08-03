@@ -35,20 +35,32 @@ import Testing
     }
 }
 
-/// The spike's rule again: steady states get no timeline.
+/// **No badge needs a timeline any more, and that is the point.** Every one of
+/// the mockup's badge animations is `scale`, `opacity` or an offset — never a
+/// change to which cells are lit — so all five run as SwiftUI transforms on the
+/// render server. A `TimelineView` re-evaluating a `Canvas` is what cost
+/// 3.6–4.1% of a core for `zzz` against 0.35% with none, and that is now gone
+/// for the whole family. `needsTimeline` depends only on the cat.
 ///
-/// `.zzz` is deliberately in the still column here, not the continuous one:
-/// dormant is the state a machine sits in all day, and a continuously
-/// drifting badge cost 3.6–4.1% of a core for an animation (an I-beam and a
-/// solid square, 3 frames, no fade) that did not read as one — see the
-/// `motion` case comment on `Badge.zzz`. The sleeping cat's shut eyes
-/// already carry "dormant".
-@Test func onlyTheActiveBadgesAnimateContinuously() {
-    #expect(Badge.squares.motion.isContinuous)
-    #expect(Badge.bang.motion.isContinuous)
-    #expect(Badge.zzz.motion.isContinuous == false)
-    #expect(Badge.cross.motion.isContinuous == false)
-    #expect(Badge.check.motion.isContinuous == false)
+/// The cycles survive because `IslandBody` still derives a phase from them and
+/// `bang`'s one-cell shift rides on it.
+@Test func noBadgeNeedsATimelineBecauseEveryMotionIsATransform() {
+    for badge in Badge.allCases {
+        #expect(badge.motion.isContinuous == false,
+                "\(badge) still wants a timeline — its motion should be a transform")
+        #expect(badge.pulse.period > 0, "\(badge) has no pulse at all")
+    }
+}
+
+/// The three verdict badges share a silhouette, so they must share a pulse.
+/// An earlier version gave them three different periods and amplitudes, which
+/// dismantled the family the disc exists to create.
+@Test func theVerdictBadgesShareOnePulse() {
+    #expect(Badge.check.pulse == Badge.cross.pulse)
+    #expect(Badge.cross.pulse == Badge.bang.pulse)
+    // And the ambient two do not — their timings are their own from the mockup.
+    #expect(Badge.zzz.pulse != Badge.check.pulse)
+    #expect(Badge.squares.pulse != Badge.check.pulse)
 }
 
 @Test func continuousBadgesRunInThePixelArtRange() {
@@ -58,28 +70,39 @@ import Testing
     }
 }
 
-/// Four squares taking turns is the whole trick — exactly one is swollen at a
-/// time, so it reads as rotation without anything rotating.
-@Test func theRunningBadgeLightsOneQuadrantAtATime() {
-    var seenLeaders: Set<String> = []
-    for i in 0..<4 {
-        let cells = Badge.squares.cells(at: Double(i) / 4.0 + 0.01)
-        // Broken into named sub-expressions rather than one array literal: as
-        // written inline, this toolchain (Swift 6.3.2) fails the whole
-        // function with "unable to type-check this expression in reasonable
-        // time" — a compile error, not a slow compile. Same four counts, same
-        // order, just given to the type checker one at a time.
-        let topLeft = cells[0...2].flatMap { $0[0...2] }.filter { $0 }.count
-        let topRight = cells[0...2].flatMap { $0[4...6] }.filter { $0 }.count
-        let bottomRight = cells[4...6].flatMap { $0[4...6] }.filter { $0 }.count
-        let bottomLeft = cells[4...6].flatMap { $0[0...2] }.filter { $0 }.count
-        let quadrants = [topLeft, topRight, bottomRight, bottomLeft]
-        let leader = quadrants.firstIndex(of: quadrants.max()!)!
-        #expect(quadrants.filter { $0 == quadrants.max()! }.count == 1,
-                "phase \(i): more than one quadrant is largest")
-        seenLeaders.insert("\(leader)")
+/// The mockup's `quad` keeps every block **one constant size** and animates
+/// only scale and opacity, on four staggered delays. An earlier version swelled
+/// one block per frame instead, which read as a different animation entirely.
+///
+/// So the claim is no longer "one quadrant is largest" — it is that the four
+/// blocks are identical in shape and differ only in *when* they move.
+@Test func theRunningBadgeIsFourEqualBlocksOnStaggeredDelays() {
+    let parts = Badge.squares.parts(at: 0)
+    #expect(parts.count == 4)
+
+    // Identical shape: every part lights exactly four cells, and never changes.
+    for phase in [0.0, 0.3, 0.7, 0.99] {
+        for part in Badge.squares.parts(at: phase) {
+            #expect(part.cells.flatMap { $0 }.filter { $0 }.count == 4,
+                    "a block is not 2×2 at phase \(phase)")
+        }
     }
-    #expect(seenLeaders.count == 4, "the swell does not visit all four quadrants")
+
+    // Four distinct delays, clockwise from the top left on the mockup's values.
+    #expect(parts.map(\.delay) == [0, 0.14, 0.28, 0.42])
+
+    // Four distinct positions, one per corner.
+    #expect(Set(parts.map { "\($0.cells)" }).count == 4, "two blocks occupy the same cells")
+}
+
+/// `zzz`'s two z's drift as a pair rather than in lockstep — the mockup delays
+/// the second by 0.9s, which is the whole reason a badge is a list of parts.
+@Test func theSleepBadgeIsTwoZsOnDifferentDelays() {
+    let parts = Badge.zzz.parts(at: 0)
+    #expect(parts.count == 2)
+    #expect(parts[0].delay == 0)
+    #expect(parts[1].delay == 0.9)
+    #expect(parts[0].cells != parts[1].cells)
 }
 
 @Test func theCycleLengthsMatchTheDesign() {
