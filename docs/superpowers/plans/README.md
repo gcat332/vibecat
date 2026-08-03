@@ -565,6 +565,58 @@ Plan 6 items, deliberately left as behaviour rather than changed:
   sites are in this position today. Worth a `#if DEBUG` counter of the kind
   `IslandView.buildCount` already establishes, if Plan 6 adds a fourth face.
 
+## Plan 6.2's carried findings — sound shipped, four things still need an ear
+
+Full account: [the plan's closing section](2026-08-03-sound.md) and
+[`.superpowers/sdd/2026-08-03-sound/final-review.md`](../../../.superpowers/sdd/2026-08-03-sound/final-review.md).
+509 tests. What is here is owned elsewhere or unmeasurable without a person, not
+skipped.
+
+- **Nobody has heard it.** Every cue is verified by arithmetic — the note tables
+  diffed against `island-motion.html:894-912` value by value, the durations
+  checked against §12's own totals, the waveforms against their Fourier series.
+  **No listening check has been performed and none is claimed anywhere in the
+  source.** Four things need an ear: whether each cue matches the prototype's own
+  sound buttons; whether there is a click at a note's release; whether `done`'s
+  held G6 carries inharmonic hash, which would mean the band-limiting is not
+  working; and whether `isQuiet` reads `true` during a real Focus session, which
+  needs the system Focus toggled. **Compare at `volume: 1.0`** — the prototype has
+  no master gain, so our default of `0.60` is 4.4 dB down and a like-for-like
+  comparison at `0.60` will mislead.
+- **Switching output device is handled defensively but was never reproduced.**
+  `AVAudioEngineConfigurationChange` is observed and `connected` is reset while
+  `attached` is not, because `attach` raises on a second call. Nobody unplugged a
+  real device. Left as a labelled unknown rather than a claim.
+- **`SoundPlayer` schedules serially where the prototype mixes overlapping cues**
+  — written decision 5, not a gap. A burst is bounded by `maximumBacklog` (1.0 s,
+  wall-clock so a missed callback cannot wedge it) and a cue that would start late
+  is dropped rather than queued. If §12's character turns out to need the overlap,
+  this is the one line to change.
+- **`meow` fires from nothing and `SoundSettings` has no persistence** — both
+  Plan 6.4's, both deliberate. §14's Sound section offers `meow` as a per-cue
+  *alternative*, and choosing one is the sheet's job. 6.4 also has to clamp
+  whatever it reads out of `UserDefaults`; `SoundSettings` clamps at its own two
+  entry points, but the boundary is 6.4's to hold.
+- **`Soft`, `System` and `Blip` are not implemented and must not be invented.**
+  `settings.html` offers them; nothing in this repo defines what they sound like.
+  Written decision 3. `SoundPack` is an enum, so adding one is additive.
+- **Rendering is cached, and the cache is the thing to watch.** Keyed on
+  `(settings, sampleRate)`, filled on a dedicated serial queue — not
+  `Task.detached`, which draws on the same small cooperative pool this repo has
+  already been burned by. Uncached, `error` cost **860 ms on the main actor in a
+  debug build**, which is what `Scripts/build-app.sh` produces; cached it is
+  ~1.1 ms, at the measurement floor. Measured with `getrusage`, never `ps %cpu`.
+- **The lesson worth carrying forward, because it is about method not sound.**
+  Executing this plan found **five tests that could not fail** and **two real
+  bugs**, every one surfaced by an implementer reporting a mutation as green
+  instead of adjusting the test until it went red. Two were load-bearing: an
+  unreachable guard concealing a note shorter than 6 ms never releasing, and a
+  prune test that pruned a *waiting* session — which is never removed — and so was
+  blind to the defect it existed to catch. The plan's own self-review also
+  reported a defect class as fixed having fixed one instance of it. **A mutation
+  list in a plan is a prediction, and three of this plan's predictions were
+  wrong** — which is the argument for writing them down, not against.
+
 ## Plan 6 also owns
 
 Everything here used to be gated on one unknown: whether a `.nonactivatingPanel`
