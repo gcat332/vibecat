@@ -177,6 +177,82 @@ were explicitly not measured here:
   this section originally assumed** — though several *separate* animating islands
   is still not the same experiment as several sprites inside one, and has not been
   run.
+
+  **Answered for real 2026-08-03 (Task 8), and the answer is no longer
+  per-island.** §11's session list is the "several sprites inside one" experiment
+  the paragraph above says had not been run. `BadgeCPUProbe` gained a sixth row:
+  the real drawer, opened, holding twelve sessions across all four states
+  (`.permission`, `.failed`, `.running`, `.idle`), sampled the same way as every
+  other row.
+
+  **Conditions, stated because this run's differ from every other row in this
+  file:** MacBook Pro 14″, same machine, macOS 26.5.2. **Power: battery, ~48%→46%
+  discharging, Low Power Mode ON.** Every other figure in this file — the
+  accepted ~12%, the ±1.5pp noise floor, the per-island finding above — was taken
+  on mains power with Low Power Mode off. This run could not wait for mains (see
+  the outstanding item below), so **its absolute percentages are not comparable
+  to any other number in this file.** Its within-run deltas remain informative:
+  Low Power Mode throttles every row of a single run together, so a step change
+  between two rows of the *same* run is not an artefact of the throttle — the
+  throttle cannot manufacture a difference between two rows it applies to
+  equally. Display: built-in Liquid Retina XDR, 120 Hz. Method, sample window,
+  and sample count: identical to every other row (`getrusage(RUSAGE_SELF)`,
+  three 3-second samples, 2-second warm-up). Motion: default (not suppressed) for
+  the list row; the release build was `-Xswiftc -DDEBUG` per the probe's own
+  build recipe, so the figures are a release build, not a debug artefact.
+
+  | what is running | draws/s | CPU (% of one core) | added by this row |
+  |---|---|---|---|
+  | + running (12fps timeline instead of no timeline) | 47.8 | 17.69 (17.38–18.01) | — (battery baseline for this run) |
+  | + session list open, 12 sessions, all four states, drawer open | 47.7 | 31.28 (29.29–33.29) | **+13.6pp** |
+
+  **The delta is the result, and it is unambiguous.** +13.6pp against a ±1.5pp
+  noise floor (mains-measured, assumed no better on battery) is roughly 9× the
+  instrument's own noise — nowhere near the "under ~2pp is not measurable" line.
+  It is also **larger than the entire first-animation cost** (~10pp, the
+  dormant-to-running jump this same file records above), on a machine that is
+  additionally throttled by Low Power Mode, which if anything should have
+  *compressed* the gap rather than inflated it.
+
+  **`draws/s` stayed flat — 47.8 to 47.7 — across that whole +13.6pp.** The
+  badge's `Canvas` is not drawing more often with the list open; whatever the
+  list costs, it is not extra badge redraws. Checked against the actual view
+  code rather than assumed: `IslandView.body` builds `DrawerView` in a
+  `.overlay(alignment: .topLeading)` attached to the same `Group` that holds
+  the `if model.needsTimeline { TimelineView { … } }` branch — the drawer is a
+  **sibling** of the timeline branch, not nested inside `TimelineView`'s own
+  trailing closure (which wraps only `IslandBody`). So the literal claim "the
+  rows are rebuilt by the TimelineView's own closure at 12fps" does not hold —
+  SwiftUI's diffing has no reason to re-invoke `SessionListFace`/`SessionRow`'s
+  bodies just because a sibling's timeline ticks. What is still true, and
+  consistent with this file's own earlier finding for the badge itself (0
+  draws/s, +12pp CPU), is that **something in this SwiftUI/AppKit stack
+  recomposites the *whole* hosted window on every frame any part of it is
+  animating**, not only the animating layer — which would mean the twelve rows'
+  own layout and text/shape content adds real per-frame compositing cost even
+  though nothing in their own view identity changed. That mechanism is
+  plausible and matches the evidence (flat draws/s, large CPU delta,
+  no-timeline branch for the drawer) but is **not confirmed by this probe** —
+  confirming it would need a compositor-level instrument this file does not
+  have, not a code read. Recorded as the leading hypothesis, not a finding.
+
+  **This also revises, not just extends, the "per-island" conclusion above.**
+  That conclusion was drawn from one *animation* (the cat's second `trot`
+  transform) costing +0.75pp. It was never a claim about *rows of content*, and
+  it does not extend to one: twelve rows cost +13.6pp, an order of magnitude
+  more than a second animation and comparable to the first one. "Per-island, not
+  per-animation" stands for animations; it does not make a session list free.
+
+  **What is still owed.** This run answers "several sprites at once" but does
+  so on battery, under Low Power Mode, against a baseline (~12% dormant, ±1.5pp
+  noise) that was never measured under those conditions. **A mains-power,
+  Low-Power-Mode-off re-run of this same sixth row is required before the
+  accepted ~12% is either confirmed or revised for a product that can have a
+  session list open** — this is now a fourth named condition alongside the
+  three the original acceptance listed (battery drain, several sprites,
+  thermals under load), and the most urgent of the four: the within-run delta
+  already shows the list is not free, and only a mains run can say what the
+  *absolute* resting-with-list-open figure actually is.
 - **Thermals under load.** A dev machine running several agents is not idle. This
   probe measured an otherwise quiet system.
 

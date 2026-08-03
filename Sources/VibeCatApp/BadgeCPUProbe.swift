@@ -181,14 +181,36 @@ import VibeCatUI
         controller.model.sessionCount = 2
         await row("+ running (12fps timeline instead of no timeline)")
 
-        // 5. Back to dormant, with motion turned all the way off and the system
+        // 5. Plan 5's own owed measurement. The badge spike accepted ~12% on
+        //    single-sprite numbers and named several sprites as a condition
+        //    that would reopen it. Twelve sessions, all four states, drawer
+        //    open — not just a second animation (measured separately, and
+        //    already known to be cheap), but the session list's own rows,
+        //    each with a state dot of its own.
+        controller.model.sessions = (0..<12).map { i in
+            Session(event: VibeEvent(id: "e\(i)", cli: "claude-code",
+                                     kind: [.permission, .failed, .running, .idle][i % 4],
+                                     session: "s\(i)", cwd: "/tmp/p\(i)"),
+                    now: Date(timeIntervalSince1970: 1_000_000))
+        }
+        controller.model.state = .running
+        controller.model.sessionCount = 12
+        controller.model.drawerOpen = true
+        await row("+ session list open, 12 sessions across all four states")
+
+        // 6. Back to dormant, with motion turned all the way off and the system
         //    asking for reduced motion as well — the strongest suppression §9.3
         //    can express. `BadgeCanvas` never consults `MotionPreference`, so
         //    the prediction is that this changes nothing; if it does not, the
         //    badges are animating in a configuration the design says must not
         //    animate, and row 3's cost cannot be turned off by any setting.
+        //    Also closes the drawer and clears row 5's sessions: this row
+        //    tests motion suppression alone, not motion suppression plus an
+        //    open list — leaving either set would fold row 5's cost in here.
         controller.model.state = .dormant
         controller.model.sessionCount = 0
+        controller.model.drawerOpen = false
+        controller.model.sessions = []
         controller.model.motion = MotionPreference(chosen: .off, systemWantsReduced: true)
         await row("+ dormant again, motion .off and system reduce-motion on")
 
