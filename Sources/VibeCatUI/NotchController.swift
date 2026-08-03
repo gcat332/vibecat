@@ -465,16 +465,12 @@ import SwiftUI
     /// triggered any other way cannot be observed.
     func render() {
         let now = Date()
-        // `@Observable` notifies on the write, not on a change, so an unconditional
-        // assignment invalidates the body even when the value is identical — two or
-        // three times per hook event. Harmless at Plan 4's rates; Plan 5 is what
-        // raises them, by putting a scrolling list on the other end.
-        let state = appModel.islandState
-        let count = appModel.sessionCount
-        let revealed = appModel.store.mostUrgentSession
-        if model.state != state { model.state = state }
-        if model.sessionCount != count { model.sessionCount = count }
-        if model.revealed != revealed { model.revealed = revealed }
+        model.state = appModel.islandState
+        model.sessionCount = appModel.sessionCount
+        // The reveal names the same session the island's own state summary is
+        // about (§4.2) — see `SessionStore.mostUrgentSession`'s own doc
+        // comment for why this isn't just `aggregate` plus a lookup.
+        model.revealed = appModel.store.mostUrgentSession
 
         // AuraTrigger does its own change detection, so this is called
         // unconditionally and only reports true on an actual change.

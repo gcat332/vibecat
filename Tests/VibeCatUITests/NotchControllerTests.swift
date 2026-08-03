@@ -677,44 +677,48 @@ private let externalDisplay = ScreenMetrics(
     c.dismiss()
 }
 
-// MARK: - Task 3 (Plan 5): render() must not notify on a no-op
+// MARK: - Task 3 (Plan 5): characterizing @Observable's own dedupe
 
-/// `@Observable` notifies on the *write*, not on a change, so `render()`'s
-/// unconditional assignments invalidate the body two or three times per hook
-/// event when nothing differs.
+/// Characterizes a fact about this toolchain's `@Observable` macro, pinned
+/// here because a later task's correctness (and `render()`'s own shape)
+/// silently depends on it: an assignment to an `Equatable`-conforming
+/// `@Observable` property that does not actually change the value never
+/// notifies observers. Confirmed directly (`-Xfrontend
+/// -dump-macro-expansions`): the macro's generated setter guards
+/// `withMutation` behind `shouldNotifyObservers(old, new)`, which resolves
+/// (by overload) to `old != new` for any `Equatable` type — which
+/// `IslandState`, `Int`, and `Session?` all are. This is why `render()`'s
+/// `model.state`/`model.sessionCount`/`model.revealed` assignments below are
+/// plain, unguarded writes rather than the explicit `if old != new` checks an
+/// earlier version of this task added: the macro already does that check, and
+/// duplicating it only misleads a future reader into thinking `render()`
+/// needs to.
 ///
-/// The instrument is an observation, not a counter. `IslandBody
-/// .restingWidthReadCount` cannot see this — it only moves when `.body` is built,
-/// which `render()` does not do in a headless test, so it would read 0 whether or
-/// not the guard exists. `withObservationTracking` registers interest in exactly
-/// the properties `render()` assigns and fires when one is written, which is the
-/// behaviour under test rather than a proxy for it.
-///
-/// **Both halves are asserted, and the positive control is the important one:**
-/// `!fired` on its own would pass just as well against a broken instrument that
-/// never fires at all.
-@MainActor @Test func anIdenticalEventDoesNotRewriteTheModel() {
-    let appModel = AppModel(socketPath: "/dev/null/vibecat-test-never-bound.sock")
-    let controller = NotchController(model: appModel, metrics: { IslandGoldenTests.mbp14 })
-    controller.refreshGeometry()
-    appModel.ingest(VibeEvent(id: "e", cli: "claude-code", kind: .running,
-                              session: "s", cwd: "/Users/dev/api"))
-    controller.render()
+/// The opposite dependency lives right below `render()`'s three assignments:
+/// the `bloomEnd` Task's `self?.model.aura = self?.model.aura ?? AuraTrigger()`
+/// nudge exists specifically to force a notification once a bloom ends, and
+/// `AuraTrigger` is *also* `Equatable` — so that reassignment is exactly the
+/// "equal write" this test pins as a no-op, meaning the nudge is currently
+/// dead code on this toolchain. Task 3.5 owns fixing that; this test is the
+/// fact both sides of that disagreement stand on. If this test ever starts
+/// failing, the macro stopped deduplicating and the nudge silently starts
+/// working again; as long as it keeps passing, the nudge needs its own fix.
+@MainActor @Test func anEqualWriteToAnObservablePropertyDoesNotNotify() {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(systemWantsReduced: false))
 
-    func renderFires(_ body: () -> Void) -> Bool {
-        // `nonisolated(unsafe)`, not a plain `var`: `withObservationTracking`'s
-        // `onChange` is `@Sendable`, so it cannot capture a mutable local
-        // without this — the same "Swift 6 flags a capture the main actor
-        // makes perfectly safe" situation `MetricsBox` above exists for, just
-        // on a local rather than a stored property. Safe here for the same
-        // reason: everything in this function runs on the main actor, and
-        // `onChange` fires synchronously within this call, never on another
-        // thread concurrently with the read below.
+    // `nonisolated(unsafe)`, not a plain `var`: `withObservationTracking`'s
+    // `onChange` is `@Sendable`, so it cannot capture a mutable local without
+    // this — the same "Swift 6 flags a capture the main actor makes
+    // perfectly safe" situation `MetricsBox` above exists for, just on a
+    // local rather than a stored property. Safe here for the same reason:
+    // everything in this function runs on the main actor, and `onChange`
+    // fires synchronously within the same call, never on another thread
+    // concurrently with the read below.
+    func fires(_ body: () -> Void) -> Bool {
         nonisolated(unsafe) var fired = false
         withObservationTracking {
-            _ = controller.model.state
-            _ = controller.model.sessionCount
-            _ = controller.model.revealed
+            _ = model.state
         } onChange: {
             fired = true
         }
@@ -722,14 +726,22 @@ private let externalDisplay = ScreenMetrics(
         return fired
     }
 
-    // Positive control: a render that genuinely changes something must fire, or
-    // the assertion below proves nothing.
-    #expect(renderFires {
-        appModel.ingest(VibeEvent(id: "e2", cli: "claude-code", kind: .permission,
-                                  session: "s2", cwd: "/Users/dev/web"))
-        controller.render()
-    }, "a render that changed the state did not notify — the instrument is broken, so the no-op assertion below would be vacuous")
+    // Each flag is read immediately after its own mutation, not at the end of
+    // the test. A `withObservationTracking` registration is one-shot, but
+    // it's only *consumed* by a write that actually notifies — an equal
+    // write leaves it armed, still listening for the next real change. A
+    // first version of this investigation read every flag at the end of the
+    // test, after a later, genuinely different write, and got
+    // `equalWrite == true`: not evidence @Observable had stopped
+    // deduplicating, but that later write retroactively tripping a
+    // registration the equal write never consumed.
 
-    #expect(!renderFires { controller.render() },
-            "a re-render with nothing changed still wrote to the model — @Observable notifies on the write, so render() has to compare first")
+    // Positive control: a genuinely different value must fire, or the
+    // equal-write assertion below would pass just as well against a broken
+    // instrument that never fires at all.
+    #expect(fires { model.state = .running },
+            "a write that changed the value did not notify — the instrument is broken, so the equal-write assertion below would be vacuous")
+
+    #expect(!fires { model.state = .running },
+            "an equal write still notified — @Observable no longer deduplicates identical writes on this toolchain, which both render()'s plain assignments and the bloomEnd nudge's opposite assumption depend on")
 }
