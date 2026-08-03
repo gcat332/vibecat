@@ -13,7 +13,11 @@ plan files twice; it is cheaper to keep it written down.
 | 4.5 | Matching the prototype — one systematic diff of colour, radius, type scale, spacing and motion curve, and a written record of every deliberate divergence | the prototypes the spec header names | **done** — [the diff](2026-08-03-prototype-diff.md); two deliberate divergences recorded |
 | 5 | The session list · plus the hover reveal's content and the sliver that shares its mechanism · plus a multi-sprite CPU measurement | §11, §9.1's reveal | **done** — [the plan](2026-08-03-session-list.md), 8 tasks; 419 tests after the raster and lapse fixes. Carried findings below |
 | 6.2 | Sound — five synthesised cues, the trigger rule, Do Not Disturb | §12 | **done** — [the plan](2026-08-03-sound.md), 7 tasks plus a whole-branch review and one fix round; 509 tests. Five written decisions, and four things still needing an ear (see the plan's own closing section) |
-| **6** | Jump, all four Settings sections, the Full/Reduced/Off control · **plus everything gated on keyboard input** — sound is 6.2 above | §13, §14, §9.3's UI | not written |
+| 6.4 | The Settings **shell** — persisted preferences, the drawer footer's mute and gear, the window the gear opens, its sidebar and the four panes' chrome · **mute wired end to end** | §14's layout, §6.4's footer | **done** — [the plan](2026-08-03-settings-shell.md), 6 tasks plus a whole-branch review and one fix round; 574 tests. **The first plan in this project's history to actually diff `settings.html`** |
+| **6.5** | The Notifications page — where 6.2's `SoundSettings` gets its sheet, its per-cue pickers, its volume slider and a trigger for `meow` | §14's Notifications | not written |
+| **6.6** | The Display page — 21 controls, and the one that re-threads `SessionRow.Options`, picks the list's overflow cue, settles §6.3's per-face width and ships the motion control | §14's Display, §9.3's UI | not written |
+| **6.7** | The General and Integrations pages | §14 | not written |
+| **6** | Jump, and everything else gated on keyboard input — sound is 6.2, the Settings shell is 6.4 | §13, §9.3's UI | not written |
 | **7** | Generic adapter and custom sources | §3 | not written |
 | **8** | Matching motion cost to motion content | §9.1's rates | not written |
 
@@ -616,6 +620,70 @@ skipped.
   reported a defect class as fixed having fixed one instance of it. **A mutation
   list in a plan is a prediction, and three of this plan's predictions were
   wrong** — which is the argument for writing them down, not against.
+
+## Plan 6.4's carried findings — the shell, and the first real `settings.html` diff
+
+574 tests. Full account: [the plan](2026-08-03-settings-shell.md) and
+[`.superpowers/sdd/2026-08-03-settings-shell/final-review.md`](../../../.superpowers/sdd/2026-08-03-settings-shell/final-review.md).
+
+- **`settings.html` was finally diffed, in a browser, and it found two bugs
+  nothing else could.** Task 6 used `getBoundingClientRect` and
+  `getComputedStyle` on every element plus screenshots at 4× against its own
+  rasterised renders. It caught `.continuous` corners where every CSS radius is
+  circular, and a note's 2pt blue rule that — being a doubly-flexible
+  `Rectangle` — stretched to the pane's full height and dragged a 500pt card with
+  it. Neither is visible to any assertion anyone had thought to write. Five
+  further differences are recorded as written decisions. **§14 is four lines of
+  prose over 640 lines of prototype; the prototype won every disagreement.**
+- **Scope: the shell only.** 22 subsections and roughly 47 controls, counted.
+  6.5 owns Notifications, 6.6 Display, 6.7 General and Integrations, and **every
+  pane says so on its own face** — an empty pane that looks finished is worse than
+  one that names its owner.
+- **`--accent` means system blue in Settings and the current state's colour in the
+  island.** §4.3 inverted. Verified: nothing in `Sources/VibeCatUI/Settings/`
+  touches `IslandState` except doc comments, and the four state hues still agree
+  where `settings.html` shares them for the island preview.
+- **Two AppKit facts measured rather than reasoned about**, both because a
+  documented contract pointed the wrong way. `isReleasedWhenClosed = false` leaked
+  one `NSWindow` per open/close — `NSApp.windows` 0→10 across ten cycles, all
+  still titled "VibeCat Settings" — and the comment defending it had the release
+  order backwards, since `willCloseNotification` fires *before* the close. And a
+  weak-reference test for it **cannot work**: AppKit finishes teardown inside
+  `NSApplication.run()`, which `swift test` never calls, so the window sits at
+  retain count 8 after 50 run-loop spins even when correct. The test asserts
+  window-list membership by identity instead.
+- **A symmetric `removePersistentDomain` does not clean up after a test.** The
+  fixture this plan mandated leaked one plist per test into
+  `~/Library/Preferences` — 175 files, 700 KB — and emptying the domain is not
+  enough because `cfprefsd` rewrites it. Isolation now lives in `keyPrefix` on one
+  fixed suite: one bounded file.
+- **Un-muting used to re-pay the full render cost**, 859 ms for the `error` cue,
+  because the cache key was the whole `SoundSettings` and `enabled` is in it —
+  though `enabled` cannot change what a cue *sounds* like. Now 0.170 ms. Measured
+  with `getrusage`, never `ps %cpu`. A **volume** change still re-renders at
+  859 ms, which is correct and is 6.5's to think about when it ships the slider.
+- **Three preferences were persisted and never read**, not one. The ledger caught
+  `selectedPage`; the whole-branch review found `volume` and
+  `quietDuringDoNotDisturb` in the same state, so a plist could say
+  "don't respect Do Not Disturb" and suppression carried on. All three now round
+  trip. **`save()` writes the whole struct, so it is a clobber hazard**: every
+  writer must read-modify-write against the current value and never hold a
+  snapshot. 6.5–6.7 add many more writers.
+- **Seven tests that could not fail were found across this plan, four of them from
+  premises its own author wrote.** The two worth remembering: "muted draws more
+  ink than unmuted" is simply false — muting *hides* the two waves while adding the
+  slash, measured 301 against 308 the wrong way — and a sidebar assertion that two
+  renders *differ* passed happily with the selection inverted, because **"differs"
+  is not "differs in the right direction"**.
+- **Still not testable, and accepted rather than faked:** whether a real click
+  reaches a closure, or which `Binding` a `body` wired. Three separate tasks hit it
+  independently. It needs a ViewInspector-style dependency this project will not
+  add. The *rendered* selection, by contrast, **is** testable and is now tested.
+- **Carried out:** the titlebar's `#232326` is unverified because `cacheDisplay`
+  is untrustworthy for flat fills, and no golden was built on it. Corner style and
+  SVG stroke width remain uncaught by any mutation. **`PanelBar` moved the drawer's
+  footer, so a `prototype-fidelity` dispatch over the whole drawer is worth doing
+  before 6.5.**
 
 ## Plan 6 also owns
 
