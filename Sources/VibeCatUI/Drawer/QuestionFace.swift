@@ -45,9 +45,13 @@ struct QuestionFace: View {
             // the drawer's own frame, and `DrawerView` keeps sizing itself from
             // `question.face.height` exactly as before.
             //
-            // Today's only face swap is rows ↔ the reply field. Plan 5's session
-            // list is the second, and it gets this for free by being another
-            // branch here.
+            // This swap is rows ↔ the reply field. Plan 5's session list did
+            // *not* get it "for free by being another branch here", as this
+            // comment used to claim: it is a branch of `DrawerView`'s own face
+            // switch, one level up, and it hard-cut until F7 of the final
+            // whole-branch review applied the same transition there too. The two
+            // are deliberately keyed to different values — see `DrawerView` for
+            // why nesting them under one key would double-animate this face.
             Group {
                 if question.isWritingOther {
                     replyField.transition(.faceCrossfade)

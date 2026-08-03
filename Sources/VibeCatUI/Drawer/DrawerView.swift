@@ -56,11 +56,42 @@ struct DrawerView: View {
                     // Both faces sit above the same reservation below — the
                     // switch is scoped to the content alone, so neither
                     // branch can duplicate or consume §6.4's 44pt.
-                    if let question {
-                        QuestionFace(question: question, accent: accentColor, onAnswer: onAnswer)
-                    } else {
-                        SessionListFace(sessions: sessions, now: now)
+                    //
+                    // §9.1's `--t-face: 190ms` crossfade, finally on the swap it
+                    // was written for (F7 of the final whole-branch review).
+                    // Plan 4.5 built `AnyTransition.faceCrossfade` and wired
+                    // only its *duration* to `QuestionFace`'s rows ↔ reply-field
+                    // sub-face swap, leaving the transition itself with no
+                    // caller anywhere — while this, the drawer's first real face
+                    // swap, hard-cut.
+                    //
+                    // §9.1's rule still governs: "faces never slide in from
+                    // outside; they fade in **inside** a shape that is already
+                    // the right size." So this is on the face's own content and
+                    // never on the drawer's frame — `.frame(width:height:)`
+                    // below still sizes from `face.height`, and `IslandView`'s
+                    // own height spring keyed to `drawerHeight` remains the only
+                    // thing that moves the shape. A transition that translated
+                    // the frame would be exactly the slide-in §9.1 forbids.
+                    //
+                    // Keyed to `question == nil`, not to `face`: that is
+                    // precisely "which branch of this switch", and nothing else.
+                    // `face` also changes between `.question`,
+                    // `.questionWithReply` and `.questionMulti`, which are
+                    // *sub*-face changes inside `QuestionFace` that its own
+                    // crossfade already animates — keying here on `face` would
+                    // cross-fade the whole question face a second time whenever
+                    // the reply field opened.
+                    Group {
+                        if let question {
+                            QuestionFace(question: question, accent: accentColor, onAnswer: onAnswer)
+                                .transition(.faceCrossfade)
+                        } else {
+                            SessionListFace(sessions: sessions, now: now)
+                                .transition(.faceCrossfade)
+                        }
                     }
+                    .animation(.easeInOut(duration: FaceCrossfade.duration), value: question == nil)
                     // The reservation itself: an explicitly empty, fixed-
                     // height spacer rather than plain absence, so its height
                     // is checkable and its presence is a decision a later

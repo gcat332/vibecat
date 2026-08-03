@@ -7,6 +7,17 @@ import SwiftUI
 /// follow-ups, then again in Plan 4.5's diff as the last item of §9.1 still
 /// missing.
 ///
+/// Two callers, both `.transition(.faceCrossfade)`: `QuestionFace`'s rows ↔
+/// reply-field sub-face swap (Plan 4.5) and `DrawerView`'s `QuestionFace` ↔
+/// `SessionListFace` swap — the drawer's first *real* face swap, and the one
+/// §9.1 is actually written about. Plan 4.5 wired only `duration` to the first
+/// of those and left `faceCrossfade` itself with no caller at all, which is F7
+/// of Plan 5's final whole-branch review. If a future edit leaves this with no
+/// caller again, nothing in the suite will fail: a `.transition` contributes
+/// nothing at identity, which is the only state a static `ImageRenderer` render
+/// can capture, so the tests below this can only pin the modifier's own
+/// geometry and numbers — never that anything applies it.
+///
 /// The rule it exists to obey is the one §9.1 states outright: *"Faces never
 /// slide in from outside; they fade in **inside** a shape that is already the
 /// right size."* So this is a transition on a face's own content, never on the
