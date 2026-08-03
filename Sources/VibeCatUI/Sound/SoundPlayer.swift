@@ -64,6 +64,40 @@ import AVFoundation
     /// rate. `cacheKey` carries both, so the invalidation is not a rule someone
     /// has to remember to apply — a mismatch empties the cache on the next use.
     ///
+    /// **The key is the render-relevant subset of the settings, not the whole
+    /// struct, and that is a fix rather than an optimisation.** `enabled` was in the
+    /// key, so muting *or* un-muting emptied the cache and the next cue of each kind
+    /// re-paid its render — measured with `getrusage(RUSAGE_SELF)` at **837.8ms for
+    /// `error`** in a debug build, which is what `Scripts/build-app.sh` produces.
+    /// `enabled` cannot change what a cue sounds like; it decides only whether one
+    /// plays, which is `wantsSilence`'s job. Same for `quietDuringDoNotDisturb`.
+    ///
+    /// What makes dropping `enabled` from the key safe is that **nothing renders
+    /// while sound is off**: `wantsSilence` covers `enabled` and guards all three
+    /// entry points, `prewarm()` included. Without that guard `CueRenderer.render`
+    /// would return `[]` for a muted player and those empty buffers would be cached
+    /// under a key that says nothing about muting — silence for the rest of the
+    /// session. The invariant is "the cache only ever holds real samples", pinned by
+    /// `aMutedPlayerCachesNothingRatherThanCachingSilence`.
+    ///
+    /// **The two changes turned out to be redundant on cost, and that is measured,
+    /// not assumed.** `getrusage(RUSAGE_SELF)`, debug, `error`, cost of the first
+    /// cue after a mute round trip:
+    ///
+    ///     whole-settings key, no `enabled` in `wantsSilence`   859.0ms  (as shipped)
+    ///     narrowed key alone                                     0.089ms
+    ///     `wantsSilence` guard alone                              0.133ms
+    ///     both                                                    0.170ms
+    ///
+    /// The guard removes the cost by a different route: it returns before
+    /// `discardCacheIfInputsChanged` is ever reached, so with the guard in place a
+    /// key that still carried `enabled` could never act on it. Which means
+    /// `mutingDoesNotThrowAwayTheRenderedCues` **cannot** fail if the key is widened
+    /// back — reported rather than adjusted. What does fail is
+    /// `flippingAGateThatCannotChangeAWaveformKeepsTheCache`: a loud machine reaches
+    /// the cache with the Do Not Disturb switch in either position, so that input
+    /// separates the two changes where `enabled` cannot.
+    ///
     /// `internal` so a test can see whether a cache exists. There is nothing else to
     /// look at: rendering is idempotent, so "did this come from the cache?" is
     /// invisible from the outside.
@@ -71,9 +105,20 @@ import AVFoundation
     private var cacheKey: CacheKey?
     private var renderInFlight: Set<Cue> = []
 
+    /// The inputs `CueRenderer.render` reads to produce samples, and nothing else.
+    /// `enabled` and `quietDuringDoNotDisturb` are deliberately absent — see
+    /// `rendered`. Constructed from a whole `SoundSettings` so that adding a field
+    /// to that type is a deliberate decision here rather than a silent omission.
     private struct CacheKey: Equatable {
-        let settings: SoundSettings
+        let volume: Double
+        let pack: SoundPack
         let sampleRate: Double
+
+        init(settings: SoundSettings, sampleRate: Double) {
+            volume = settings.volume
+            pack = settings.pack
+            self.sampleRate = sampleRate
+        }
     }
 
     /// A dedicated serial queue, deliberately **not** the cooperative pool.
@@ -192,9 +237,18 @@ import AVFoundation
         return samples.isEmpty ? nil : samples
     }
 
-    /// Whether the machine is asking for quiet and the user left that switch on.
+    /// Whether anything should be produced at all: sound turned off, or the machine
+    /// asking for quiet with that switch left on.
+    ///
+    /// **`enabled` is checked here rather than relied on inside
+    /// `CueRenderer.render`.** The renderer does return `[]` for a disabled
+    /// `SoundSettings`, and until the cache key stopped carrying `enabled` that was
+    /// enough. It is not any more: a render that happens while muted would cache
+    /// those empty buffers under a key that cannot tell muted from un-muted. So the
+    /// gate is here, in front of every path that can populate the cache, and the
+    /// renderer's own guard is now a second layer rather than the only one.
     private var wantsSilence: Bool {
-        settings.quietDuringDoNotDisturb && quietHours.isQuiet
+        !settings.enabled || (settings.quietDuringDoNotDisturb && quietHours.isQuiet)
     }
 
     private var outputSampleRate: Double {
@@ -223,11 +277,30 @@ import AVFoundation
     /// a test constructing a player does not start five background renders it never
     /// asked for.
     public func prewarm() {
+        // Muted, or quiet hours: rendering now would fill the cache with `[]` under a
+        // key that says nothing about either. See `wantsSilence`. `setEnabled(true)`
+        // is what re-runs this once sound comes back.
+        guard !wantsSilence else { return }
         let rate = outputSampleRate
         discardCacheIfInputsChanged(sampleRate: rate)
         for cue in Cue.allCases where rendered[cue] == nil {
             render(cue, sampleRate: rate, thenSchedule: false)
         }
+    }
+
+    /// Turns sound on or off, and re-warms the cache when turning it on.
+    ///
+    /// A method rather than letting `main.swift` assign `settings.enabled` directly,
+    /// because the re-warm is the part that is easy to leave out and impossible to
+    /// test in `main.swift`. It matters only in one case — the app launched muted, so
+    /// `prewarm()` at startup rendered nothing — but that case ends with the first
+    /// `error` cue arriving its own 838ms late, which is the one that matters most.
+    /// A mute/un-mute round trip within a session costs nothing at all now: the key
+    /// does not move, so the cache is still there.
+    public func setEnabled(_ enabled: Bool) {
+        guard enabled != settings.enabled else { return }
+        settings.enabled = enabled
+        if enabled { prewarm() }
     }
 
     private func render(_ cue: Cue, sampleRate: Double, thenSchedule: Bool) {

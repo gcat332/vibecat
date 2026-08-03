@@ -85,13 +85,13 @@ model.onCue = { [weak soundPlayer] in soundPlayer?.play($0) }
 // Plan 6.4 Task 4's own seam: a mute toggle from the panel reaches
 // `NotchController.toggleMute()`, which persists it and reports the fresh
 // `Preferences.soundEnabled` value here — the one place that knows about
-// both a `PreferenceStoring` and a `SoundPlayer`. `settings.enabled = _`
-// mutates `SoundPlayer`'s own cache key (see its doc comment on `rendered`),
-// which invalidates every cached cue on the very next `play`/`buffer(for:)` —
-// see this task's own report for whether repeated toggling makes that a real
-// cost.
+// both a `PreferenceStoring` and a `SoundPlayer`. `setEnabled(_:)` rather than
+// `settings.enabled = _`, because un-muting has to be able to re-warm a cache
+// that a muted launch left empty; a mute/un-mute round trip inside one session
+// costs nothing, because `enabled` is no longer part of the cache key. See
+// `SoundPlayer.rendered`'s own doc comment for the measurement.
 controller.onSoundEnabledChanged = { [weak soundPlayer] enabled in
-    soundPlayer?.settings.enabled = enabled
+    soundPlayer?.setEnabled(enabled)
 }
 
 // Plan 6.4 Task 5: the gear in the drawer's footer is the *only* door to

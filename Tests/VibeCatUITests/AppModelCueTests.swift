@@ -287,3 +287,94 @@ private func modelWithRecorder() -> (AppModel, @MainActor () -> [Cue]) {
     #expect(model.sessionCount == 1, "the event never landed, so this proves nothing yet")
     #expect(cues().isEmpty, "a run starting is not news")
 }
+
+// MARK: - what the cache is keyed on, and what that buys
+
+@Test @MainActor func mutingDoesNotThrowAwayTheRenderedCues() {
+    // `enabled` used to be part of `CacheKey`, so muting *or* un-muting emptied
+    // `rendered` and the next cue of each kind re-paid its render — measured at
+    // 837.8ms for `error` in a debug build, which is what `Scripts/build-app.sh`
+    // produces. `enabled` cannot change what a cue sounds like.
+    //
+    // The assertion has to be made *after* a use while muted, not immediately after
+    // the mute: the invalidation is lazy (`discardCacheIfInputsChanged` runs on the
+    // next `play`/`buffer(for:)`), so a check taken straight after the toggle would
+    // pass against the old keying too.
+    let player = SoundPlayer(settings: SoundSettings(), quietHours: NeverQuiet())
+    let loud = player.buffer(for: .error)
+    #expect(loud?.isEmpty == false, "nothing was cached, so there is nothing to preserve")
+
+    player.setEnabled(false)
+    #expect(player.buffer(for: .error) == nil, "a muted player must still produce nothing")
+
+    player.setEnabled(true)
+    #expect(player.rendered[.error]?.isEmpty == false,
+            "the mute round trip emptied the cache; the next `error` re-pays its own 838ms")
+}
+
+@Test @MainActor func aMutedPlayerCachesNothingRatherThanCachingSilence() async throws {
+    // The invariant that makes dropping `enabled` from the key safe: **the cache only
+    // ever holds real samples.** `CueRenderer.render` returns `[]` for a disabled
+    // `SoundSettings`, so a render that happened while muted would store five empty
+    // buffers under a key that cannot tell muted from un-muted — silence for the rest
+    // of the session, and no test above would see it.
+    //
+    // Shaped as the inverse of `prewarmRendersEveryCueWithoutBlockingTheCaller`: the
+    // poll exists to give the render queue every chance to land something, and the
+    // assertion is that it never does. Removing `prewarm()`'s own `wantsSilence`
+    // guard fills `rendered` with five empty arrays and fails here.
+    let player = SoundPlayer(settings: SoundSettings(enabled: false), quietHours: NeverQuiet())
+    player.prewarm()
+    for _ in 0..<50 where player.rendered.isEmpty {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(player.rendered.isEmpty,
+            "a muted prewarm cached \(player.rendered.count) buffers, and every one of them is silence")
+    #expect(player.buffer(for: .ask) == nil)
+    #expect(player.rendered.isEmpty, "a muted `buffer(for:)` cached silence")
+}
+
+@Test @MainActor func aVolumeChangeStillThrowsTheCacheAway() {
+    // The other side of the same key. Narrowing it to the render-relevant subset must
+    // not narrow it so far that a change which *does* alter the samples is missed —
+    // that failure is worse than the cost the narrowing removes, because it is the
+    // wrong sound rather than a late one. `changingASettingThrowsTheRenderedCues
+    // Away` above proves the samples change; this proves the cache was actually
+    // discarded rather than the buffer coincidentally re-rendered.
+    let player = SoundPlayer(settings: SoundSettings(volume: 0.6), quietHours: NeverQuiet())
+    _ = player.buffer(for: .ask)
+    #expect(player.rendered.count == 1)
+    player.settings.volume = 0.3
+    _ = player.buffer(for: .done)
+    #expect(player.rendered[.ask] == nil, "the 0.6 render survived a volume change")
+    #expect(player.rendered.count == 1, "only the cue rendered at the new volume belongs in the cache")
+}
+
+@Test @MainActor func flippingAGateThatCannotChangeAWaveformKeepsTheCache() {
+    // The assertion that actually pins the cache key's *shape*, and it took a
+    // measurement to find out that the obvious one does not.
+    //
+    // `mutingDoesNotThrowAwayTheRenderedCues` above cannot: restoring the whole
+    // `SoundSettings` to `CacheKey` leaves it green, measured, because
+    // `wantsSilence` now returns early for a muted player and
+    // `discardCacheIfInputsChanged` is never reached while sound is off. The two
+    // changes are redundant *on cost* — measured at 859.0ms before, 0.089ms with the
+    // narrowed key alone, 0.133ms with the `wantsSilence` guard alone.
+    //
+    // `quietDuringDoNotDisturb` is the input that separates them, because a loud
+    // machine reaches the cache with that switch in either position. Flipping it
+    // changes nothing about what a cue sounds like — it is 6.5's Do Not Disturb
+    // control — so nothing rendered should be thrown away. Two cues are warmed and
+    // only one is asked for afterwards, because a single cue would be re-rendered by
+    // the very call meant to observe the discard.
+    let player = SoundPlayer(settings: SoundSettings(quietDuringDoNotDisturb: true),
+                             quietHours: NeverQuiet())
+    _ = player.buffer(for: .ask)
+    _ = player.buffer(for: .meow)
+    #expect(player.rendered.count == 2, "the cache was not warmed, so a discard cannot be seen")
+
+    player.settings.quietDuringDoNotDisturb = false
+    _ = player.buffer(for: .ask)
+    #expect(player.rendered[.meow] != nil,
+            "flipping the Do Not Disturb gate threw away a cue whose samples it cannot affect")
+}

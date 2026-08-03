@@ -61,3 +61,51 @@ private func userCPUSeconds() -> Double {
     guard getrusage(RUSAGE_SELF, &usage) == 0 else { return .nan }
     return Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1_000_000
 }
+
+/// What a mute round trip costs, and what a volume change still costs.
+///
+///     VIBECAT_SOUND_COST=1 swift test --filter soundMuteRoundTripCost
+///
+/// The final review's carried item 3: `enabled` was part of the cache key, so
+/// muting *or* un-muting emptied `rendered` and the next cue of each kind re-paid
+/// its own render. `error` is the one that matters — B♭3 = 233Hz admits 94
+/// harmonics and a sawtooth sums all of them.
+///
+/// Three figures, and the third is the point of the second:
+///
+/// - **cold** is the render, paid once. It is the number the ledger recorded.
+/// - **after a mute round trip** is what un-muting costs now. It should be
+///   arithmetic on a dictionary, because the key does not mention `enabled`.
+/// - **after a volume change** must stay at roughly *cold*, because volume does
+///   change what a cue sounds like. A key narrowed too far would show this at
+///   zero, and that is a worse defect than the one being fixed — the wrong sound
+///   rather than a late one.
+///
+/// `getrusage(RUSAGE_SELF)`, never `ps %cpu`.
+@Test @MainActor func soundMuteRoundTripCost() {
+    guard ProcessInfo.processInfo.environment["VIBECAT_SOUND_COST"] != nil else { return }
+    let cue = Cue.error
+    // Warm the process once: page faults and `pow`/`sin` resolution are not per-cue
+    // cost. Same reason `soundRenderCost` above does it.
+    _ = CueRenderer.render(cue, settings: SoundSettings(), sampleRate: 48_000)
+
+    let player = SoundPlayer(settings: SoundSettings(), quietHours: NeverQuiet())
+    var mark = userCPUSeconds()
+    _ = player.buffer(for: cue)
+    let cold = (userCPUSeconds() - mark) * 1000
+
+    player.settings.enabled = false
+    _ = player.buffer(for: cue)           // a use while muted, which is what used to invalidate
+    player.settings.enabled = true
+    mark = userCPUSeconds()
+    _ = player.buffer(for: cue)
+    let afterMute = (userCPUSeconds() - mark) * 1000
+
+    player.settings.volume = 0.31
+    mark = userCPUSeconds()
+    _ = player.buffer(for: cue)
+    let afterVolume = (userCPUSeconds() - mark) * 1000
+
+    print(String(format: "MUTEROUNDTRIP %@: cold %.2fms | after mute round trip %.3fms | after volume change %.2fms",
+                 cue.rawValue as NSString, cold, afterMute, afterVolume))
+}
