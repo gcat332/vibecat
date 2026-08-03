@@ -43,18 +43,60 @@ In this order. The first is the only one that touches safety.
    stopped the confirmation banner clipping, but SwiftUI's default `.tail`
    truncation eats the *destination*: `rm -rf /Users/dev/projects/vibe…`. A
    person is asked to authorise a destructive command unable to see its target.
-2. **Measure the badge transforms with `getrusage`.** Every badge now animates as
-   a SwiftUI transform on the assumption that a repeating `.scaleEffect` does not
-   re-invoke the `Canvas` renderer. That assumption is load-bearing in shipped
-   code and has never been measured. If it is wrong, the idle island's 0.35% is
-   gone. `Badge.pulse` says so in the source.
-3. **Run `KeyDownProbe`** on an unlocked machine
-   (`VIBECAT_KEYDOWN_PROBE=1`). It settles the plan's one genuine unknown —
+2. ~~**Measure the badge transforms with `getrusage`.**~~ **Done 2026-08-03 —
+   and the idle island's 0.35% is gone.** [The
+   spike](spikes/2026-08-03-badge-transform-cost.md) has the numbers, the
+   decomposition, and the two wrong turns. The `Canvas` half of the assumption
+   held exactly (0.0 draws/s, against 47.9/s once a timeline is involved); the
+   cost half did not. **Dormant now measures 12.26% of a core in release against
+   0.35% before badges animated — 35× — and roughly 3× worse than the
+   cell-swapping badges the transform replaced.** Reproduced in debug (10.63%),
+   so it is not a build artefact. `BadgeCanvas` also never consults
+   `MotionPreference`, so no setting turns it off.
+
+   **This is now the thing to decide, and it is a decision, not a fix:** revert
+   to still badges and lose the fidelity, gate them on `MotionPreference` so the
+   cost is at least a choice, find a mechanism that is genuinely
+   render-server-only, or accept 12% knowingly and write that down. The probe
+   that produced these numbers is `Sources/VibeCatApp/BadgeCPUProbe.swift` — its
+   doc comment says how to run it, and re-running it is how any of those options
+   gets checked.
+3. ~~**Run `KeyDownProbe`** on an unlocked machine.~~ **Done 2026-08-03 —
+   Path A.** [The spike](spikes/2026-08-03-notch-panel-key-input.md): the panel
+   becomes key, takes every keystroke **exclusively** (verified with a TextEdit
+   witness and a control run, not just `isKeyWindow`), and
+   `frontmostApplication` never changes. Plan 6's keyboard items are unblocked —
+   with one constraint the brief never anticipated: **key status may be held only
+   while a question is open**, because exclusive delivery plus an unchanged
+   `frontmost` means a resting key panel silently eats everything typed into a
+   terminal that still looks focused. Also: `NSApp.isActive` is not a usable
+   proxy, it read `true` in every run.
+
+   It settled the plan's one genuine unknown —
    whether a `.nonactivatingPanel` at `.statusBar` can take *key* events without
    stealing terminal focus. Mouse input was measured and does not. The probe
    prints `frontmostApplication` before and after and aborts on `loginwindow`,
    because an earlier attempt at that measurement was void for exactly that
    reason and nearly became a recorded fact.
+
+   **Corrected 2026-08-03.** This said `VIBECAT_KEYDOWN_PROBE=1`, and so did
+   `plans/README.md`. No such environment variable exists anywhere in the
+   source: `main.swift` gates the probe on a **command-line argument**, under
+   `#if DEBUG`. The invocation, from `KeyDownProbe`'s own doc comment, which
+   records why each part of it is necessary — click some other app first, so
+   "did frontmost change" is a real question:
+
+   ```bash
+   Scripts/build-app.sh
+   open -n --stdout /tmp/keydown-probe.log --stderr /tmp/keydown-probe.log \
+        .build/VibeCat.app --args --keydown-probe
+   tail -f /tmp/keydown-probe.log
+   ```
+
+   `-n` matters: without it `open` re-activates the running instance instead of
+   launching a process that takes the probe branch. `open`'s own flags must
+   come *before* `--args`, or they silently become the app's argv instead —
+   both already learned the hard way once.
 4. `@MainActor` on `theConfirmationBannerNamesTheControlThatActuallyConfirms` —
    the branch's one compiler warning.
 5. **Cache `CatPalette`'s five accent-derived tones.** `ground` and `white` are

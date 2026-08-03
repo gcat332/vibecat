@@ -10,7 +10,7 @@ plan files twice; it is cheaper to keep it written down.
 | 2 | Notch geometry, the panel, the collapsed island, hover, the aura | §5, §6.1–6.2, §9.2 | done |
 | 3 | The cat, its moods and coats, badges, motion | §7, §8, §9.1, §9.3's rule | done |
 | 4 | The drawer and answering — single and multi select, the destructive second ask, the reply round-trip | §6.3, §10 | done |
-| **4.5** | **Matching the prototype** — one systematic diff of colour, radius, type scale, spacing and motion curve, and a written record of every deliberate divergence | the prototypes the spec header names | **next** |
+| **4.5** | **Matching the prototype** — one systematic diff of colour, radius, type scale, spacing and motion curve, and a written record of every deliberate divergence | the prototypes the spec header names | **in progress** — [the diff](2026-08-03-prototype-diff.md) |
 | 5 | The session list · plus the hover reveal's content and the sliver that shares its mechanism · plus a multi-sprite CPU measurement | §11, §9.1's reveal | after 4.5 |
 | **6** | Sound, jump, all four Settings sections, the Full/Reduced/Off control · **plus everything gated on keyboard input** | §12, §13, §14, §9.3's UI | not written |
 | **7** | Generic adapter and custom sources | §3 | not written |
@@ -23,22 +23,71 @@ and why, so a later reader does not have to reconstruct the reasoning.
 
 These need no design decision, so wrapping them in a plan would be ceremony.
 
-- **`.truncationMode(.middle)` on the drawer's command body.** Plan 4's
-  `.lineLimit(1)` stopped the confirmation banner clipping, but SwiftUI's
-  default `.tail` truncation eats the *destination* of a long command:
-  `rm -rf /Users/dev/projects/vibe…`. A person is asked to authorise a
-  destructive command unable to see what it targets. **Do this first** — it is
-  the only item anywhere on this list that touches safety.
-- **`@MainActor` on `theConfirmationBannerNamesTheControlThatActuallyConfirms`**
-  (`QuestionFaceTests.swift`) — the only test in its file without it, and the
-  branch's one compiler warning.
-- **Cache `CatPalette`'s five accent-derived tones.** `ground` and `white` are
-  already cached; the other five are rebuilt on every subscript access, 210
-  cells a frame. No decision to make, so it does not need to wait for Plan 8.
-- **Run `KeyDownProbe` on an unlocked machine** (`VIBECAT_KEYDOWN_PROBE=1`).
-  It is a measurement, not code, and it unblocks two Plan 6 items. It prints the
-  frontmost application before and after and aborts on `loginwindow`, so it
-  cannot repeat the void reading that nearly became a recorded fact.
+- ~~**`.truncationMode(.middle)` on the drawer's command body.**~~ **Done
+  2026-08-03.** Plan 4's `.lineLimit(1)` stopped the confirmation banner
+  clipping, but SwiftUI's default `.tail` truncation ate the *destination* of a
+  long command: `rm -rf /Users/dev/projects/vibe…`. Measured before the fix, at
+  production width: `…/build/cache/tmp` and `…/build/cache/src` rendered with
+  **exactly 0 differing pixels** — a person authorising `rm -rf` could not see
+  what it was aimed at. Pinned by
+  `aLongCommandBodyKeepsTheTargetBeingAuthorisedRatherThanItsHead`, which was
+  watched failing at 0 first and now measures 154.
+- ~~**`@MainActor` on `theConfirmationBannerNamesTheControlThatActuallyConfirms`**~~
+  **Done 2026-08-03.** `QuestionFace` conforms to `View`, so even a pure static
+  helper on it is main-actor isolated. The branch now builds with zero warnings.
+- ~~**Cache `CatPalette`'s five accent-derived tones.**~~ **Done 2026-08-03, and
+  it is not a measured win.** Two corrections to how this item was written:
+
+  **It named the cheaper half.** The four *fixed facial* tones were built with
+  `RGBA(hex: "#F08098")!` inside the subscript — parsing a **string** on every
+  access, strictly more work than the three multiply-adds `over` does. Those are
+  now `static let`; the accent-derived ramp is computed once in `init`. `body` is
+  deliberately not stored, because it *is* the accent.
+
+  **The justification does not survive the measurement.** "210 cells a frame"
+  only applies where there are frames, and the [badge transform
+  spike](../spikes/2026-08-03-badge-transform-cost.md) measured the dormant
+  island at **zero** draws per second — the palette is untouched at rest. It is
+  real work only for `running`'s 47.9 draws/s, and re-measuring before and after
+  found **no effect above the probe's noise floor**: the `running` − `dormant`
+  delta read +2.89pp before and +3.42pp after, inside a run whose own spread was
+  ±3.4pp. Kept because removing per-access string parsing is obviously correct and
+  all 375 tests hold, **not** because it was shown to be faster. Anyone citing
+  this as a performance improvement should re-measure on a quiet machine first.
+- ~~**Measure the badge transforms with `getrusage`.**~~ **Done 2026-08-03, and
+  it failed.** [The spike](../spikes/2026-08-03-badge-transform-cost.md) has the
+  numbers and the two wrong turns taken getting to them. Short version: the
+  `Canvas` half of the claim held exactly (0.0 draws/s against 47.9/s with a
+  timeline), and the cost half did not — **the dormant island measures 12.26% of
+  a core in release against the 0.35% it used to cost, a 35× regression, and
+  about 3× worse than the cell-swapping badges the transform replaced.** Not a
+  debug artefact; the debug figure is 10.63%. Also found: `BadgeCanvas` never
+  consults `MotionPreference`, so motion `.off` with system reduce-motion on
+  changes the cost by nothing — §9.3 is bypassed, a second instance of the
+  `IslandBody.phase` bypass already assigned to Plan 6. **What to do about it is
+  a design decision and is deliberately not taken here** — see the spike's own
+  "What this changes".
+- ~~**Run `KeyDownProbe` on an unlocked machine.**~~ **Done 2026-08-03 — Path A.**
+  [The spike](../spikes/2026-08-03-notch-panel-key-input.md) has the readings.
+  The panel becomes key (`isKeyWindow true`, `.statusBar`), receives every
+  keystroke, and `frontmostApplication` never changes. Verified beyond the
+  proxies with a TextEdit witness and a control run: input is delivered
+  **exclusively** to the panel — the other app receives nothing.
+
+  **Two things came out of it that the brief did not ask for.** First, a hazard:
+  because delivery is exclusive and `frontmost` never changes, a panel left key
+  at rest would silently swallow everything the person types into a terminal that
+  still looks focused — so key status must be taken only while a question is open
+  and returned immediately after. **This is a Plan 6 constraint, not a
+  preference.** Second, `NSApp.isActive` read `true` in every run and is not a
+  usable proxy here; the Path B test is whether `frontmost after` names our own
+  bundle id, and it never did.
+
+  **Corrected 2026-08-03:** this line used to say `VIBECAT_KEYDOWN_PROBE=1`.
+  No such environment variable exists in the source — `main.swift` gates the
+  probe on the command-line argument `--keydown-probe`, under `#if DEBUG`. The
+  full invocation, and why each part of it is load-bearing, is in
+  [HANDOFF.md](../HANDOFF.md) and in `KeyDownProbe`'s own doc comment.
 
 ## Plan 4.5 — matching the prototype
 
@@ -84,8 +133,25 @@ value — it is an architectural mismatch:**
   that decision exists to protect — or needs a second set of sprite frames drawn
   at the larger size. Same for `rotate`. So matching `call`, `happy` and `dead`
   is a real design decision (accept interpolation, draw more frames, or diverge
-  on purpose), not a constant to nudge. `trot`'s missing pixel is a one-line fix
-  and should not wait for that decision.
+  on purpose), not a constant to nudge. ~~`trot`'s missing pixel is a one-line fix
+  and should not wait for that decision.~~
+
+  **Withdrawn 2026-08-03 — see [the diff](2026-08-03-prototype-diff.md).** It is
+  not a one-line fix, and `CatMood.offset`'s own comment already said why: "a step
+  stays one cell, because two would carry the ear tips off the top of the canvas."
+  The sprite is 18×14 with the ear tips on row 0 and our motion shifts *cells
+  within the grid*, so a two-cell rise clips them. The prototype does not shift
+  cells — it `translateY(-2px)`s the whole element inside a container with room.
+  Matching it means moving the cat's motion to a **view transform**, which is the
+  same mechanism [the badge spike](../spikes/2026-08-03-badge-transform-cost.md)
+  measured at **+12% of a core**. So `trot` is in the same bucket as `call`,
+  `happy` and `dead`, not ahead of it.
+
+  **The cost is no longer a blocker: the owner accepted ~12% as the island's
+  intended resting figure on 2026-08-03**, recorded in that spike as a deliberate
+  divergence from the old 0.35%. `trot` should still go first of the four, because
+  it is the one whose mechanism change is forced rather than chosen and it answers
+  what the spike could not — whether the cost is per-animation or per-island.
 
 > **The badge half of this is DONE** (`5b7c6f9`, `398082a`, `1cc5f40`). All five
 > badges now animate as transforms on the mockup's own timings, `zzz`'s two z's
@@ -136,16 +202,23 @@ value — it is an architectural mismatch:**
   to distinct frames", but "the prototype's motion is transforms, and transforms
   are free".
 
-- **The island's ground colour.** The prototype's island background is
-  `--void: #07080A`; ours is `#05070B`. That value is the prototype's *sprite
-  outline mix base* (`--sp-out` mixes accent 20% into it), which `CatPalette`
-  uses correctly — we took the sprite's mix base and used it for the background
-  too. Two levels a channel, on the largest area of colour on screen.
-- **The corner radius, and this one is not a defect.** The prototype uses `9px`
-  (`--fillet`, six occurrences). We use `bottomRadius = 15`. The owner asked for
-  the corner to match the *hardware*, and the machine's own notch corner measured
-  ~14–15pt off a screenshot; the prototype's 9 was drawn against a 186px CSS
-  notch, not a measured one. **Keep 15. Record why, so nobody "corrects" it back.**
+- ~~**The island's ground colour.**~~ **Fixed 2026-08-03.** `islandGroundColour`
+  is now the prototype's `--void: #07080A`; it was `#05070B`, the prototype's
+  *sprite outline mix base*, which `CatPalette` uses correctly and still does.
+  Two levels a channel, on the largest area of colour on screen. The more useful
+  half is why four plans of green tests agreed with it — four assertions each
+  hardcoded `Raster.Pixel(r: 5, g: 7, b: 11, a: 255)`, pinning the value we chose
+  rather than checking it. See [the diff](2026-08-03-prototype-diff.md).
+- ~~**The corner radius, and this one is not a defect.** The prototype uses `9px`
+  (`--fillet`, six occurrences). We use `bottomRadius = 15`.~~ **Claim withdrawn
+  2026-08-03: there is no divergence here at all.** The prototype's island is
+  literally `border-radius: 0 0 15px 15px` (line 83) — the same 15 we use.
+  `--fillet: 9px` sizes the two concave radial gradients welding the island to the
+  bezel (`.island::before`/`::after`), and §5.5 removed those on 2026-08-01 as
+  measured-wrong. So nothing needs justifying; the feature 9px belonged to no
+  longer exists. Also noted: the prototype still carries the exact claim §5.5
+  struck out, in a comment above those fillets — **where the prototype and a dated
+  spec correction disagree, the correction wins.**
 - **The motion curves.** The prototype is explicit cubic-beziers over
   `--t-shape: 440ms` — `--spring-w: cubic-bezier(.32,1.5,.5,1)` (that `1.5` is
   real overshoot) and `--spring-h: cubic-bezier(.34,1.22,.5,1)`. We use SwiftUI
@@ -190,14 +263,29 @@ list, not because the list needs them.
 
 ## Plan 6 also owns
 
-Everything here is gated on the same unknown: whether a `.nonactivatingPanel` at
-`.statusBar` can take **key** events without stealing focus from the terminal an
-agent runs in. Mouse input was measured and does not. Run the probe first.
+Everything here used to be gated on one unknown: whether a `.nonactivatingPanel`
+at `.statusBar` can take **key** events without stealing focus from the terminal
+an agent runs in. Mouse input was measured in Plan 2 and does not.
+
+**Resolved 2026-08-03 — Path A.** [The key-input
+spike](../spikes/2026-08-03-notch-panel-key-input.md): the panel becomes key,
+receives every keystroke **exclusively**, and never changes
+`frontmostApplication`. Nothing below is blocked any more. Two findings came with
+it, and the first is now a hard constraint on this plan rather than an
+implementation detail:
+
+- **Key status may be held only while a question is open.** Delivery is exclusive
+  and `frontmost` does not change, so a panel left key at rest silently swallows
+  everything the person types into a terminal that still shows every sign of
+  having focus. Take key on open; give it back on answer, dismiss or lapse.
+- **`NSApp.isActive` is not a usable proxy** — it read `true` in every run while
+  focus demonstrably stayed elsewhere. Test against `frontmostApplication`.
 
 - **Wiring the number keys.** `KeyRouting.pick` exists, is well tested, and is
-  reachable from nothing.
+  reachable from nothing. It takes a `Character`, so it consumes what the probe
+  measured actually arriving (keypad and top-row digits alike) without change.
 - **Restoring `Other…`.** Plan 4 cut the row because it opened a field nobody
-  could type into and could not be backed out of. It returns when typing works.
+  could type into and could not be backed out of. Typing works.
 - **`IslandBody.phase` bypassing `MotionPreference`** — already assigned here and
   restated because it is the one item that must be fixed *inside* Plan 6 rather
   than after: with motion `off`, `needsTimeline` is false, `now` is one arbitrary
