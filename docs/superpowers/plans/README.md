@@ -11,7 +11,7 @@ plan files twice; it is cheaper to keep it written down.
 | 3 | The cat, its moods and coats, badges, motion | §7, §8, §9.1, §9.3's rule | done |
 | 4 | The drawer and answering — single and multi select, the destructive second ask, the reply round-trip | §6.3, §10 | done |
 | 4.5 | Matching the prototype — one systematic diff of colour, radius, type scale, spacing and motion curve, and a written record of every deliberate divergence | the prototypes the spec header names | **done** — [the diff](2026-08-03-prototype-diff.md); two deliberate divergences recorded |
-| 5 | The session list · plus the hover reveal's content and the sliver that shares its mechanism · plus a multi-sprite CPU measurement | §11, §9.1's reveal | **done** — [the plan](2026-08-03-session-list.md), 8 tasks; 414 tests. Carried findings below |
+| 5 | The session list · plus the hover reveal's content and the sliver that shares its mechanism · plus a multi-sprite CPU measurement | §11, §9.1's reveal | **done** — [the plan](2026-08-03-session-list.md), 8 tasks; 419 tests after the raster and lapse fixes. Carried findings below |
 | **6** | Sound, jump, all four Settings sections, the Full/Reduced/Off control · **plus everything gated on keyboard input** | §12, §13, §14, §9.3's UI | not written |
 | **7** | Generic adapter and custom sources | §3 | not written |
 | **8** | Matching motion cost to motion content | §9.1's rates | not written |
@@ -331,8 +331,24 @@ follows is what it deliberately left, with the reason.
 
 **One item has a deadline attached, and it is the only one that does:**
 
-- **`aLapsedQuestionClosesTheDrawer` must be fixed before the next plan starts.**
-  It flakes under full-suite load — measured over 8 full-suite runs each, 2/8 on
+- ~~**`aLapsedQuestionClosesTheDrawer` must be fixed before the next plan starts.**~~
+  **Fixed 2026-08-03 (`94db7c5`), after this entry was written.** The diagnosis below
+  was right about the mechanism and wrong about the remedy: the problem was not that
+  the test failed to poll, but that its ceiling was denominated in **wall-clock
+  seconds** while the thing it waits for needs **main-actor turns**. Full-suite runs
+  hold the main actor synchronously for long stretches (every `rasterise` call), so a
+  2-second ceiling could expire having granted the lapse `Task` almost no turns at
+  all. It now counts turns instead. Mutation-verified: removing `dismissQuestion()`
+  from the lapse `Task` reproduces the reported symptom exactly
+  (`.drawer(height: 288.0)` != `.rest`) and gives up in 4.3s rather than hanging.
+
+  Two honest caveats kept from the original entry, because they still apply: the fix
+  rests on mutation evidence and an identified mechanism, **not** on a measured drop
+  in flake rate — the test did not flake once in 60 runs while being fixed. And the
+  raster fix in the same wave removed a great deal of synchronous main-actor work, so
+  the two changes are not independent and credit cannot be apportioned between them.
+
+  Original diagnosis, retained: it flaked under full-suite load — measured over 8 full-suite runs each, 2/8 on
   the commit before the fix wave and 3/8 with the wave's own tests added, which at
   that sample size says nothing about the difference. **Pre-existing, not Plan
   5's**: nothing in this plan touches the lapse path. The test already polls
