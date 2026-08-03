@@ -78,10 +78,22 @@ struct QuestionFace: View {
             // case — `rm -rf build/`, Task 8's own hardware verification) is
             // completely unaffected; only a command long enough to need a
             // second line loses the tail of it to an ellipsis.
+            // `.truncationMode(.middle)`: `.lineLimit(1)` above decided *how
+            // much* of a long command is shown; this decides *which part*, and
+            // it is the only line in this file that touches safety. SwiftUI's
+            // default is `.tail`, which elides the end — and the end of a
+            // command is its target, the thing that decides whether
+            // authorising it is harmless or catastrophic. Before this,
+            // `…/build/cache/tmp` and `…/build/cache/src` rendered
+            // byte-identically at production width: measured at exactly 0
+            // differing pixels, i.e. a person asked to approve `rm -rf` could
+            // not see what it was aimed at. §10.3's second ask is worth
+            // nothing if the first one is unreadable.
             Text(body)
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(Color.white.opacity(0.65))
                 .lineLimit(1)
+                .truncationMode(.middle)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

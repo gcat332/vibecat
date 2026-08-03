@@ -380,6 +380,48 @@ private func destructiveQuestion(body: String = "rm -rf build/") -> VibeEvent {
             "content reaches \(-margin)pt into the reserved footer with a long command body after picking, at production width \(width)pt")
 }
 
+/// §10.3 asks a person to authorise a destructive command, so the command has
+/// to be legible — and the part that decides whether it is safe to authorise
+/// is its *target*, which is at the end. `.lineLimit(1)` above stopped the
+/// banner clipping but left SwiftUI's default `.tail` truncation in place,
+/// which elides exactly that: `rm -rf /Users/dev/projects/vibe…`.
+///
+/// What would have to break for this to fail, stated before it was written:
+/// the two bodies differ only in their final three characters and nowhere
+/// else, in a monospaced font, so they are the same width and `.tail`
+/// truncation cuts both at the same column and renders them pixel-identical.
+/// Only a truncation mode that keeps the tail can tell them apart — which is
+/// also the whole of the safety claim, since `tmp` and `src` are the
+/// difference between a harmless `rm -rf` and a catastrophic one.
+@MainActor @Test func aLongCommandBodyKeepsTheTargetBeingAuthorisedRatherThanItsHead() throws {
+    let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                            motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+    model.state = .waiting
+    model.sessionCount = 1
+    let width = model.frames.body.width
+
+    let stem = "rm -rf /Users/dev/projects/vibecat-worktrees/feat-drawer-and-answering/build/cache/"
+    #expect(stem.count > 60,
+            "setup: the stem must already overflow \(width)pt on its own, or nothing is truncated and this test proves nothing")
+
+    func render(_ target: String) throws -> Raster {
+        try rasterise(DrawerView(question: QuestionModel(event: destructiveQuestion(body: stem + target)),
+                                 accent: IslandState.waiting.accent, width: width))
+    }
+    let harmless = try render("tmp")
+    let disaster = try render("src")
+
+    // Nothing in this render reads a clock — `DrawerView` has no
+    // `TimelineView` — so identical inputs give byte-identical output and the
+    // jitter allowance the hover tests below need does not apply here. 40 is
+    // measured, in both directions: three monospaced glyphs at 12pt differ by
+    // 154 pixels once the tail survives, and by exactly 0 before it did —
+    // this test was watched failing at 0 before `.truncationMode(.middle)`
+    // existed, so the threshold sits in a gap with nothing in it.
+    #expect(harmless.differingPixelCount(from: disaster) > 40,
+            "the two commands differ only in their target — `…/cache/tmp` against `…/cache/src` — and rendered with \(harmless.differingPixelCount(from: disaster)) differing pixels: the target is being truncated away, so a person is asked to authorise a command they cannot see the end of")
+}
+
 /// The drawer is the island's, so it wears the island's colour (§4.3).
 @MainActor @Test func theDrawerWearsTheStatesAccent() throws {
     for state in [IslandState.waiting, .failed] {
