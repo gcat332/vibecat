@@ -471,6 +471,18 @@ import SwiftUI
         // about (§4.2) — see `SessionStore.mostUrgentSession`'s own doc
         // comment for why this isn't just `aggregate` plus a lookup.
         model.revealed = appModel.store.mostUrgentSession
+        // §11's list, in the same "most urgent" ordering as `revealed` above
+        // — one comparator, not two that could disagree about which session
+        // matters. Plain and unguarded, the same as `state`/`sessionCount`/
+        // `revealed`: `@Observable`'s generated setter already skips
+        // notifying on an equal write to an `Equatable` property (`[Session]`
+        // is), which is exactly what an earlier round of this task added an
+        // explicit guard to duplicate — see
+        // `anEqualWriteToAnObservablePropertyDoesNotNotify` in
+        // NotchControllerTests.swift for the measurement that guard's
+        // premise rested on, and which is why it was reverted rather than
+        // extended here.
+        model.sessions = appModel.store.mostUrgentFirst
 
         // AuraTrigger does its own change detection, so this is called
         // unconditionally and only reports true on an actual change.

@@ -163,16 +163,23 @@ public struct IslandView: View {
         // live window happening to stay too small to reveal it, the same
         // fragile-by-omission shape as the bug this comment already
         // describes fixing once.
+        //
+        // Plan 5: no longer `let question = model.question` alongside the
+        // tier check — `model.tier` reaches `.drawer` with no question at
+        // all now (an open session list), and `DrawerView`'s own `question`
+        // parameter is optional for exactly that case (see its own doc
+        // comment). Requiring a question here would have reintroduced the
+        // bug `IslandModel.tier`'s restructure just fixed, one level up.
         .overlay(alignment: .topLeading) {
-            if case .drawer = model.tier, let question = model.question {
+            if case .drawer = model.tier {
                 // model.drawerWidth, not model.frames.body.width (finding 5
                 // of the final whole-branch review): the latter carries the
                 // collapsed pill's own hover reveal, which nothing in the
                 // drawer's content needs — see `IslandModel.drawerWidth`'s
                 // own doc comment for why the drawer's width holds steady
                 // regardless of where the cursor drifts while it is open.
-                DrawerView(question: question, accent: model.state.accent,
-                           width: model.drawerWidth,
+                DrawerView(question: model.question, sessions: model.sessions,
+                           accent: model.state.accent, width: model.drawerWidth,
                            onAnswer: { model.onAnswer?($0) })
                     .padding(.leading, drawerLeadingOffset)
                     .padding(.top, model.geometry.notch.height)

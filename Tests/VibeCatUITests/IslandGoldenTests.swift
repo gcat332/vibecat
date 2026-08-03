@@ -301,4 +301,63 @@ struct IslandGoldenTests {
             }
         }
     }
+
+    /// Carried finding from Task 2's own review: no committed test exercised
+    /// `RevealContent` with an open drawer *and* a populated `model.revealed`
+    /// together. A reviewer verified by hand that this is safe today — the
+    /// collapsed row drops the hover reveal entirely while a drawer is open
+    /// (`IslandBody.body`'s own comment on why), so the bar and the drawer
+    /// stay one column and nothing widens into the cutout — but that safety
+    /// rests on this file's own `clipShape` sizing, which a future refactor
+    /// could break silently with nothing here to catch it. Plan 5's drawer
+    /// routing is this finding's own best home (Task 7's brief, point 5).
+    ///
+    /// Modelled directly on `nothingIsDrawnInsideTheCutoutWithTheDrawerOpen`
+    /// just above, with the two inputs that test leaves at their defaults —
+    /// `hovering: false`, `revealed: nil` — both turned on instead, which is
+    /// exactly the untested combination the finding names.
+    @MainActor @Test func nothingIsDrawnInsideTheCutoutWithTheDrawerOpenAndTheRevealPopulated() throws {
+        let ground = Raster.Pixel(islandGroundColour)   // derived, never restated — see Raster.Pixel(_:)
+        let event = VibeEvent(id: "q", cli: "claude-code", kind: .permission,
+                              session: "s", cwd: "/tmp/proj", title: "Bash command", body: "pnpm install",
+                              choices: [Choice(id: "allow", label: "Allow once"),
+                                        Choice(id: "deny", label: "Deny")],
+                              wantsReply: true)
+        let m = Self.model(.waiting, count: 3, hovering: true)
+        m.question = QuestionModel(event: event)
+        m.drawerOpen = true
+        m.revealed = Session(event: VibeEvent(id: "e", cli: "claude-code", kind: .running,
+                                              session: "s2", cwd: "/Users/dev/api"),
+                             now: Date(timeIntervalSince1970: 1_000_000))
+        guard case .drawer = m.tier else {
+            Issue.record("the fixture never reached the drawer tier — this test proves nothing")
+            return
+        }
+
+        // .waiting's cat/badge are both continuous — a single render at a
+        // fixed `now:` (rather than routing through `IslandView`'s own
+        // `TimelineView` branch) is what every other test in this file
+        // already does for the identical reason: a static render must not
+        // read the real wall clock.
+        let raster = try rasterise(IslandBody(model: m, now: Date(timeIntervalSince1970: 1_000_030)))
+        let notch = IslandGeometry(screen: Self.mbp14).notch
+        let from = Int(notch.minX - m.frames.panel.minX)
+        let to = Int(notch.maxX - m.frames.panel.minX)
+        for x in from..<to {
+            for y in 0..<raster.height {
+                let p = raster[x, y]
+                guard p.isTransparent == false else { continue }
+                #expect(p == ground,
+                        "hovering + drawer open + revealed populated: \(p) at panel column \(x) is inside the cutout — content has slid under the hole")
+            }
+        }
+
+        // "Actual content present," the same reasoning
+        // `nothingIsDrawnInsideTheCutoutWithTheDrawerOpen` gives for its own
+        // identical check: the loop above is vacuously true against a blank
+        // canvas, so this confirms the reveal really painted something with
+        // hovering on, not merely that nothing painted at all.
+        #expect(raster.pixelCount(near: boneColour) > 0,
+                "no --bone pixel anywhere — the reveal's project name did not draw with the drawer open")
+    }
 }

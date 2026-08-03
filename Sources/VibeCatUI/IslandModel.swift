@@ -38,6 +38,13 @@ import VibeCatCore
     /// notion of "current".
     public var revealed: Session?
 
+    /// The sessions §11's list shows, in §11's order. Assigned by
+    /// `NotchController.render()` from `store.mostUrgentFirst` — one ordering,
+    /// shared with `revealed`'s own "most urgent" (`SessionStore
+    /// .mostUrgentSession`), so the list and the hover reveal never disagree
+    /// about which session matters.
+    public var sessions: [Session] = []
+
     /// Whether a click has actually opened the drawer. Deliberately separate
     /// from `question`: a question arriving must not open the drawer by
     /// itself (design §6.1's "Click" tier is a distinct gesture from a
@@ -77,17 +84,29 @@ import VibeCatCore
                         hovering: hovering)
     }
 
+    /// Which face the drawer shows. A pending question always wins: §4.2's own
+    /// reasoning is that a waiting agent is idling on you *right now*, so a
+    /// question must never be buried under a list.
+    public var face: DrawerFace { question?.face ?? .sessionList }
+
     /// Design §6.1's three tiers, derived rather than stored redundantly:
-    /// `.drawer` only when a click actually opened one *and* there is still a
-    /// question to show (the guard's `let question` covers the question
-    /// clearing out from under an already-open drawer — the lapse path does
-    /// exactly this); otherwise whatever the hover state already was. `.rest`
-    /// and `.hover` compute identically for `frames`/`panelFrames` below
-    /// (`IslandTier.extraHeight` is 0 for both) — the case only matters to
-    /// callers that switch on it, none of which exist yet.
+    /// `.drawer` whenever a click actually opened one, sized to whichever face
+    /// is currently showing; otherwise whatever the hover state already was.
+    /// `.rest` and `.hover` compute identically for `frames`/`panelFrames`
+    /// below (`IslandTier.extraHeight` is 0 for both) — the case only matters
+    /// to callers that switch on it.
+    ///
+    /// Plan 5: this used to read `guard drawerOpen, let question else { ... }`,
+    /// which made `.drawer` unreachable without a question — an open session
+    /// list (no question at all) would silently stay at `.rest`, and the panel
+    /// would never grow to show it. `face` already resolves to `.sessionList`
+    /// with no question (see above), so reading it here instead of `question`
+    /// covers both faces with the same guard, and changes nothing for a
+    /// question still open: `face` is `question.face` in that case, exactly
+    /// what this returned before.
     public var tier: IslandTier {
-        guard drawerOpen, let question else { return hovering ? .hover : .rest }
-        return .drawer(height: question.face.height)
+        guard drawerOpen else { return hovering ? .hover : .rest }
+        return .drawer(height: face.height)
     }
 
     /// The collapsed content's own frame — the cat, the badge, the count.
