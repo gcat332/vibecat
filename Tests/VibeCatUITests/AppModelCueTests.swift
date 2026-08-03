@@ -289,27 +289,42 @@ private func modelWithRecorder() -> (AppModel, @MainActor () -> [Cue]) {
 }
 
 // MARK: - what the cache is keyed on, and what that buys
+//
+// **Every test here uses `meow` (39ms) or `ask` (44ms) and never `error` (858ms),
+// and that is a deliberate constraint rather than an arbitrary choice.** A first
+// draft used `error` for its rhetorical value and let `setEnabled(true)` run a full
+// five-cue prewarm, which added ~2.2s of wall time to a suite that runs in
+// parallel — and pushed `PipelineTests
+// .aPermissionAnsweredInTheIslandReachesTheCLI`, whose polls are bounded at 2s,
+// into failing about one run in three. Measured: 5/5 clean at 4.6s before, 6.9s and
+// one failure in three runs after. The cue's identity is not what any assertion
+// below depends on.
 
 @Test @MainActor func mutingDoesNotThrowAwayTheRenderedCues() {
     // `enabled` used to be part of `CacheKey`, so muting *or* un-muting emptied
     // `rendered` and the next cue of each kind re-paid its render — measured at
-    // 837.8ms for `error` in a debug build, which is what `Scripts/build-app.sh`
+    // 859.0ms for `error` in a debug build, which is what `Scripts/build-app.sh`
     // produces. `enabled` cannot change what a cue sounds like.
     //
     // The assertion has to be made *after* a use while muted, not immediately after
     // the mute: the invalidation is lazy (`discardCacheIfInputsChanged` runs on the
     // next `play`/`buffer(for:)`), so a check taken straight after the toggle would
     // pass against the old keying too.
+    //
+    // `settings.enabled = true` rather than `setEnabled(true)` on the way back,
+    // because `setEnabled` also re-warms and this test is not about the re-warm —
+    // paying a full prewarm here is what made the suite slow enough to break
+    // another test. `unmutingReWarmsWhatAMutedLaunchNeverRendered` below covers it.
     let player = SoundPlayer(settings: SoundSettings(), quietHours: NeverQuiet())
-    let loud = player.buffer(for: .error)
+    let loud = player.buffer(for: .meow)
     #expect(loud?.isEmpty == false, "nothing was cached, so there is nothing to preserve")
 
     player.setEnabled(false)
-    #expect(player.buffer(for: .error) == nil, "a muted player must still produce nothing")
+    #expect(player.buffer(for: .meow) == nil, "a muted player must still produce nothing")
 
-    player.setEnabled(true)
-    #expect(player.rendered[.error]?.isEmpty == false,
-            "the mute round trip emptied the cache; the next `error` re-pays its own 838ms")
+    player.settings.enabled = true
+    #expect(player.rendered[.meow]?.isEmpty == false,
+            "the mute round trip emptied the cache; the next cue of each kind re-pays its render")
 }
 
 @Test @MainActor func aMutedPlayerCachesNothingRatherThanCachingSilence() async throws {
@@ -320,18 +335,48 @@ private func modelWithRecorder() -> (AppModel, @MainActor () -> [Cue]) {
     // of the session, and no test above would see it.
     //
     // Shaped as the inverse of `prewarmRendersEveryCueWithoutBlockingTheCaller`: the
-    // poll exists to give the render queue every chance to land something, and the
+    // poll exists to give the render queue a chance to land something, and the
     // assertion is that it never does. Removing `prewarm()`'s own `wantsSilence`
-    // guard fills `rendered` with five empty arrays and fails here.
+    // guard fills `rendered` with five empty arrays and fails here — the first of
+    // them arrives well inside this window, because a disabled render returns `[]`
+    // without doing any arithmetic at all.
     let player = SoundPlayer(settings: SoundSettings(enabled: false), quietHours: NeverQuiet())
     player.prewarm()
-    for _ in 0..<50 where player.rendered.isEmpty {
+    for _ in 0..<25 where player.rendered.isEmpty {
         try await Task.sleep(for: .milliseconds(20))
     }
     #expect(player.rendered.isEmpty,
             "a muted prewarm cached \(player.rendered.count) buffers, and every one of them is silence")
     #expect(player.buffer(for: .ask) == nil)
     #expect(player.rendered.isEmpty, "a muted `buffer(for:)` cached silence")
+}
+
+@Test @MainActor func unmutingReWarmsWhatAMutedLaunchNeverRendered() async throws {
+    // A mute round trip inside one session is free now, but an app *launched* muted
+    // has an empty cache and `prewarm()` never re-runs on its own — so the first cue
+    // after un-muting would arrive its own render time late, 838ms in the case of
+    // `error`. `setEnabled(_:)` exists to close that, and this is the only thing that
+    // would notice `if enabled { prewarm() }` being deleted.
+    //
+    // Four of the five cues are stood in for by hand rather than rendered, so this
+    // test pays one 39ms render instead of a full ~1.05s prewarm. That prewarm
+    // renders five cues is `prewarmRendersEveryCueWithoutBlockingTheCaller`'s
+    // subject, not this one's; what is being pinned here is that un-muting reaches
+    // it at all. `buffer(for: .ask)` first because the stand-ins would otherwise be
+    // wiped by `discardCacheIfInputsChanged`'s first-use pass, which is what
+    // establishes the key.
+    let player = SoundPlayer(settings: SoundSettings(), quietHours: NeverQuiet())
+    _ = player.buffer(for: .ask)
+    for cue in Cue.allCases where cue != .meow { player.rendered[cue] = [0] }
+    player.setEnabled(false)
+    #expect(player.rendered[.meow] == nil, "the cue this test watches for was already rendered")
+
+    player.setEnabled(true)
+    for _ in 0..<100 where player.rendered[.meow] == nil {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(player.rendered[.meow] != nil,
+            "un-muting did not re-warm; a launch-muted session pays each cue's render on first use")
 }
 
 @Test @MainActor func aVolumeChangeStillThrowsTheCacheAway() {
@@ -342,11 +387,11 @@ private func modelWithRecorder() -> (AppModel, @MainActor () -> [Cue]) {
     // Away` above proves the samples change; this proves the cache was actually
     // discarded rather than the buffer coincidentally re-rendered.
     let player = SoundPlayer(settings: SoundSettings(volume: 0.6), quietHours: NeverQuiet())
-    _ = player.buffer(for: .ask)
+    _ = player.buffer(for: .meow)
     #expect(player.rendered.count == 1)
     player.settings.volume = 0.3
-    _ = player.buffer(for: .done)
-    #expect(player.rendered[.ask] == nil, "the 0.6 render survived a volume change")
+    _ = player.buffer(for: .ask)
+    #expect(player.rendered[.meow] == nil, "the 0.6 render survived a volume change")
     #expect(player.rendered.count == 1, "only the cue rendered at the new volume belongs in the cache")
 }
 
