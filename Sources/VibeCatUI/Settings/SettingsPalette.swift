@@ -71,4 +71,16 @@ public enum SettingsPalette {
     public static let systemBlue = RGBA(hex: "#0A84FF")!
     /// `settings.html:88` — `.sw`'s un-toggled track colour.
     public static let switchOff = RGBA(hex: "#48484E")!
+    /// `settings.html:82` — `.new`'s text and border colour.
+    ///
+    /// Numerically the same green as `IslandState.idle.accent` (`settings.html`'s
+    /// own `--idle` token, shared verbatim because that is the colour this
+    /// design system already had), but this is **not** a state preview the way
+    /// `theStateHuesInSettingsAreTheIslandsExactlyBecauseTheyPreviewIt` guards —
+    /// "this control is new" carries no claim that any session is idle. Naming it
+    /// separately here, rather than adding a second call site into `IslandState`,
+    /// keeps the Global Constraint that nothing in `Sources/VibeCatUI/Settings/`
+    /// reaches for the island's state colour — the coincidence in value is the
+    /// prototype's, not a reason to import the meaning along with the number.
+    public static let newBadge = RGBA(hex: "#3FD99B")!
 }
