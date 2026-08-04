@@ -190,8 +190,14 @@ struct SoundSectionTests {
         // separate `SoundPlayer` fed the spy's recorded settings — exactly
         // what production wiring would hand the real engine.
         let (model, _, spy) = Self.makeModel()
-        let rate = 48_000.0
         let player = SoundPlayer(settings: SoundSettings(), quietHours: NeverQuiet())
+        // **Not a hardcoded 48_000.** `buffer(for:)` renders at the *device's* rate,
+        // so comparing its output against a constant made this assertion depend on
+        // what audio hardware was attached: it passed eight consecutive full runs
+        // and then failed every run with nothing in the repository changed, because
+        // the device had moved to 44.1kHz. Asking the player which rate it used
+        // keeps the assertion about the cache, which is what it is named for.
+        let rate = player.effectiveSampleRateForTesting
         let standard = player.buffer(for: .ask)
         model.setChoiceForNeedsAnswer(.meow)
         player.settings = try! #require(spy.lastSettings)

@@ -265,6 +265,19 @@ import VibeCatCore
         !settings.enabled || (settings.quietDuringDoNotDisturb && quietHours.isQuiet)
     }
 
+    /// The rate `buffer(for:)` actually rendered at, for `SoundSectionTests` only —
+    /// plain module visibility, following `NotchController.panelForTesting` and
+    /// `SettingsWindowController.windowForTesting` rather than `#if DEBUG`.
+    ///
+    /// **It exists because a test that hardcoded `48_000` was passing only on
+    /// machines whose audio device happened to run at 48kHz.** It compared a buffer
+    /// this player rendered — at the device's real rate — against one it rendered
+    /// itself at a constant, so the assertion's outcome depended on what was
+    /// plugged in. It was green across eight consecutive full runs and then failed
+    /// on every run, with nothing in the repository having changed. A test whose
+    /// result turns on the hardware is not testing the code.
+    var effectiveSampleRateForTesting: Double { outputSampleRate }
+
     private var outputSampleRate: Double {
         let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate
         // A zero here means no output device is attached, which happens in CI
