@@ -243,10 +243,21 @@ import VibeCatUI
 
         // 6. Back to dormant, with motion turned all the way off and the system
         //    asking for reduced motion as well — the strongest suppression §9.3
-        //    can express. `BadgeCanvas` never consults `MotionPreference`, so
-        //    the prediction is that this changes nothing; if it does not, the
-        //    badges are animating in a configuration the design says must not
-        //    animate, and row 3's cost cannot be turned off by any setting.
+        //    can express.
+        //
+        //    **This row's meaning changed on 2026-08-04 (Plan 6.1, Task 2).**
+        //    It used to predict *no* change, because `BadgeCanvas` consulted
+        //    `MotionPreference` for nothing — and the spike measured exactly
+        //    that: 11.83% against 12.26%, inside either spread, so nothing a
+        //    person could choose turned the island's 12% off. Both canvases now
+        //    consult the preference (`MotionPreference.allowsMotion`), so this
+        //    row is no longer a bug report: it is **the same-run control the
+        //    spike named as its one open item** — "composited island, no
+        //    animation at all". Row 3 minus this row is the badge and cat
+        //    transforms' own cost, measured within one build instead of across
+        //    two, and this row against row 2 is the panel with nothing moving
+        //    in it.
+        //
         //    Also closes the drawer and clears row 5's sessions: this row
         //    tests motion suppression alone, not motion suppression plus an
         //    open list — leaving either set would fold row 5's cost in here.

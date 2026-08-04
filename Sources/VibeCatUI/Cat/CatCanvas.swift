@@ -12,11 +12,24 @@ public struct CatCanvas: View {
     public let cat: ResolvedCat
     public let palette: CatPalette
     public let cellSize: CGFloat
+    /// §9.3, and not defaulted — same reasoning as `BadgeCanvas.motion`.
+    ///
+    /// The badge-transform spike only named `BadgeCanvas`, but this view has the
+    /// identical bypass and it was introduced by the same change (Plan 4.5 moved
+    /// the cat's own motion onto a `.repeatForever` view transform here). Fixing
+    /// one and not the other would leave the cat drowsing and swaying with
+    /// motion off, which is both a §9.3 violation on its own and enough to keep
+    /// paying what the spike measured as a *per-island* charge for animating at
+    /// all — so a measurement of "off costs less than full" taken with this half
+    /// unfixed would have been measuring nothing.
+    public let motion: MotionPreference
 
-    public init(cat: ResolvedCat, palette: CatPalette, cellSize: CGFloat) {
+    public init(cat: ResolvedCat, palette: CatPalette, cellSize: CGFloat,
+                motion: MotionPreference) {
         self.cat = cat
         self.palette = palette
         self.cellSize = cellSize
+        self.motion = motion
     }
 
     /// Every non-transparent cell's rect, grouped by tone, each tone's colour
@@ -53,12 +66,20 @@ public struct CatCanvas: View {
     }
 
     /// Flipped once on appear so the implicit animations have somewhere to go —
-    /// the same mechanism `BadgeCanvas` uses, for the same reason.
+    /// the same mechanism `BadgeCanvas` uses, for the same reason, including its
+    /// `onChange` companion for a Reduce Motion setting that can now change
+    /// while the app runs.
     @State private var moving = false
 
     public var body: some View {
         let fills = fillsByTone
-        let pulse = cat.mood.pulse
+        // `nil` once §9.3 says nothing moves — see `MotionPreference
+        // .allowsMotion`. The pose that remains is the sprite at rest: offset 0
+        // and, for `happy`, scale 1 rather than `catpop`'s 0.6 starting frame,
+        // which is the mockup's base style with `animation:none` applied and not
+        // a shrunken cat frozen at the beginning of a pop it will never finish.
+        let pulse = motion.allowsMotion ? cat.mood.pulse : nil
+        let popping = motion.allowsMotion && cat.mood == .happy
         Canvas { ctx, _ in
             for (color, path) in fills {
                 ctx.fill(path, with: .color(color))
@@ -88,9 +109,10 @@ public struct CatCanvas: View {
         // transient — so the blur measured in `CatMood.pulse` lasts 540ms and
         // then the grid is exact again, which is why this is the one scale we do
         // match.
-        .scaleEffect(cat.mood == .happy && !moving ? 0.6 : 1)
-        .animation(cat.mood == .happy ? .spring(response: 0.42, dampingFraction: 0.56) : nil,
+        .scaleEffect(popping && !moving ? 0.6 : 1)
+        .animation(popping ? .spring(response: 0.42, dampingFraction: 0.56) : nil,
                    value: moving)
-        .onAppear { moving = true }
+        .onAppear { moving = motion.allowsMotion }
+        .onChange(of: motion.allowsMotion) { _, allowed in moving = allowed }
     }
 }

@@ -432,8 +432,54 @@ struct IslandBody: View {
     /// `Date()` once when it is not — so this never reads the wall clock
     /// itself.
     private var phase: Double {
-        let cycle = model.mood.motion.cycle
-        guard cycle > 0 else { return 0 }
+        Self.phase(at: now, cycle: model.mood.motion.cycle, motion: model.motion)
+    }
+
+    /// 0…1 through `cycle` at `now`, or a **fixed** 0 when §9.3 says nothing
+    /// may move. Shared by `phase` and `badgePhase` so the two cannot disagree
+    /// about what a suppressed cycle looks like.
+    ///
+    /// ## Why `off` returns a constant, and why 0 is the constant
+    ///
+    /// This property used to read `now` and the cycle and consult
+    /// `MotionPreference` for nothing at all. With motion `off`,
+    /// `IslandModel.needsTimeline` is false, so `IslandView` hands the body a
+    /// single arbitrary `Date()` — and this divided it by the cycle and returned
+    /// a fraction. The pose was therefore whatever instant the view happened to
+    /// be built at: **not merely still, but randomly still.** `ResolvedCat
+    /// .applyFace` shuts `trot`'s eyes for `phase > 0.92`, so roughly one launch
+    /// in twelve gave a *running* cat its eyes closed for as long as it ran, and
+    /// `Badge.holes(at:)` put `bang` at one of its two positions by coin toss.
+    ///
+    /// So the fix is a *chosen* pose, not the absence of one, and it is the same
+    /// pose every launch. **0 is the rest frame**, and that is the prototype's
+    /// own answer rather than an invention:
+    ///
+    /// - `island-motion.html:439` is the mockup's whole reduced-motion rule —
+    ///   `@media (prefers-reduced-motion:reduce){*{animation:none!important}}`.
+    ///   A CSS element with no animation renders at its **base** style, which for
+    ///   every badge and the cat is the untransformed one, and every one of the
+    ///   mockup's keyframe sets names that same pose at `0%`
+    ///   (`@keyframes quad{0%,100%{transform:scale(.5)…}}`, `zfloat`, `twinkle`).
+    /// - It cannot be mid-blink: `applyFace` blinks strictly above 0.92.
+    /// - It is `bang`'s lower, resting mark (`holes(at:)` shifts up only past 0.5).
+    ///
+    /// `reduced` is deliberately identical to `full` here. `MotionPreference
+    /// .resolve(_:)` expresses reduced purely as halving `framesPerSecond`,
+    /// leaving `cycle` untouched, so where a cycle *is* at a given instant does
+    /// not change — only how often it is sampled, which
+    /// `IslandView.minimumInterval(for:)` already applies off the resolved
+    /// profile. Freezing or slewing the phase here as well would reduce it twice.
+    ///
+    /// The gate is `MotionPreference.allowsMotion` and not the resolved
+    /// profile's own `cycle`; see that property for the two reasons, of which the
+    /// sharp one is that `resolve(_:)` returns an already-still profile unchanged
+    /// at every level, so `bang`'s 1.1s cycle survives `.off` intact.
+    ///
+    /// `internal static`, so `MotionBypassTests` can pin the rule directly as
+    /// well as through a render.
+    static func phase(at now: Date, cycle: TimeInterval, motion: MotionPreference) -> Double {
+        guard motion.allowsMotion, cycle > 0 else { return 0 }
         return now.timeIntervalSinceReferenceDate
             .truncatingRemainder(dividingBy: cycle) / cycle
     }
@@ -458,15 +504,15 @@ struct IslandBody: View {
     /// coupling outright instead of leaving it to keep working by
     /// coincidence.
     ///
-    /// Deliberately bypasses `MotionPreference` exactly as `phase` does —
-    /// that gap is a separate, already-noted follow-up, and fixing it for
-    /// only one of the two properties would leave them inconsistent with
-    /// each other.
+    /// Goes through `MotionPreference` exactly as `phase` does — the note that
+    /// stood here recorded the bypass as "a separate, already-noted follow-up"
+    /// and said fixing one property without the other would leave them
+    /// inconsistent. Both are fixed, in the one shared `phase(at:cycle:motion:)`
+    /// above, which is where the reasoning for the `off` pose lives. `bang` is
+    /// the badge that actually reads this, and it is the badge that was frozen
+    /// at a random one of its two positions.
     private var badgePhase: Double {
-        let cycle = model.badge.motion.cycle
-        guard cycle > 0 else { return 0 }
-        return now.timeIntervalSinceReferenceDate
-            .truncatingRemainder(dividingBy: cycle) / cycle
+        Self.phase(at: now, cycle: model.badge.motion.cycle, motion: model.motion)
     }
 
     /// The body's width with hover's own contribution subtracted back out —
@@ -706,10 +752,10 @@ struct IslandBody: View {
             HStack(spacing: LeftFlankLayout.gap) {
                 CatCanvas(cat: ResolvedCat(coat: model.coat, mood: model.mood, phase: phase),
                           palette: CatPalette(accent: model.state.accent),
-                          cellSize: cell)
+                          cellSize: cell, motion: model.motion)
                     .frame(width: LeftFlankLayout.catWidth, height: 14)
                 BadgeCanvas(badge: model.badge, phase: badgePhase,
-                            tint: model.state.accent, cellSize: 2)
+                            tint: model.state.accent, cellSize: 2, motion: model.motion)
                     .frame(width: LeftFlankLayout.badgeWidth,
                            height: LeftFlankLayout.badgeWidth)
             }
@@ -745,8 +791,18 @@ struct IslandBody: View {
             // with an uninterpolated pop. Width 0 + `.clipped()` is already
             // measured to paint nothing at all — the drawer-open, not-hovering
             // render counts 0 `--bone` pixels — so "no width" is also "no
-            // content" here, and `.opacity` (which `ImageRenderer` is on record
-            // as ignoring) is not what carries it.
+            // content" here, and `.opacity` is not what carries it.
+            //
+            // **Correction, 2026-08-04 (Plan 6.1 Task 2).** That last clause used
+            // to read "`.opacity` (which `ImageRenderer` is on record as
+            // ignoring)". `ImageRenderer` does *not* ignore it: measured directly,
+            // an `.opacity(0)` inside a rendered tree renders 0 opaque pixels.
+            // What the earlier reading actually saw was `onAppear` firing under
+            // `ImageRenderer` — it does, and its state change reaches the same
+            // render — which flipped `BadgeCanvas.pulsing` to true and took the
+            // opacity to 1 before anything was drawn. The sentence's own
+            // conclusion is unaffected: width 0 plus `.clipped()` is what makes
+            // this paint nothing, and that half was measured.
             RevealContent(session: model.revealed, now: now)
                 .frame(width: revealWidth, alignment: .leading)
                 .clipped()

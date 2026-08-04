@@ -26,7 +26,8 @@ struct ContactSheetTool {
                 ForEach(IslandState.allCases, id: \.self) { state in
                     VStack(spacing: 4) {
                         BadgeCanvas(badge: Badge(state: state), phase: 0,
-                                    tint: state.accent, cellSize: cell)
+                                    tint: state.accent, cellSize: cell,
+                                    motion: .fullMotion)
                         Text(Badge(state: state).rawValue)
                             .font(.system(size: 7)).foregroundStyle(.white)
                     }
@@ -44,7 +45,7 @@ struct ContactSheetTool {
                                                    mood: CatMood(state: state),
                                                    phase: 0.2),
                                   palette: CatPalette(accent: state.accent),
-                                  cellSize: cell)
+                                  cellSize: cell, motion: .fullMotion)
                     }
                 }
             }
@@ -381,7 +382,8 @@ struct ContactSheetTool {
                         .frame(width: 52, alignment: .leading)
                     ForEach(0..<steps, id: \.self) { i in
                         BadgeCanvas(badge: badge, phase: Double(i) / Double(steps),
-                                    tint: state.accent, cellSize: cell)
+                                    tint: state.accent, cellSize: cell,
+                                    motion: .fullMotion)
                     }
                     Text(badge.motion.isContinuous
                          ? "\(Int(badge.motion.framesPerSecond))fps · \(badge.motion.cycle)s"

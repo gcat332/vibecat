@@ -7,15 +7,34 @@ public struct BadgeCanvas: View {
     public let phase: Double
     public let tint: RGBA
     public let cellSize: CGFloat
+    /// §9.3, and **not** defaulted.
+    ///
+    /// The badge-transform spike recorded that this view "never consults
+    /// `MotionPreference` at all, so every badge animates in the configuration
+    /// the design says must not animate, and nothing a person can choose turns
+    /// this 12% off" — measured: motion `.off` *with* system Reduce Motion on
+    /// cost 11.83% of a core against 12.26% with motion full, a difference
+    /// inside either spread. A defaulted parameter would let the next call site
+    /// reintroduce that silently; a required one makes consulting the
+    /// preference structural rather than remembered.
+    public let motion: MotionPreference
 
-    public init(badge: Badge, phase: Double, tint: RGBA, cellSize: CGFloat) {
+    public init(badge: Badge, phase: Double, tint: RGBA, cellSize: CGFloat,
+                motion: MotionPreference) {
         self.badge = badge
         self.phase = phase
         self.tint = tint
         self.cellSize = cellSize
+        self.motion = motion
     }
 
-    /// Flipped once on appear so the implicit animations have somewhere to go.
+    /// Flipped once on appear so the implicit animations have somewhere to go —
+    /// and only if §9.3 allows any. `onChange` keeps it in step afterwards,
+    /// because Reduce Motion is now a live setting (`NotchController
+    /// .refreshMotion()`) and `onAppear` fires only once: without it, motion
+    /// turned back on mid-run would leave `pulsing` false forever, so the
+    /// animation below would have no value change to react to and the badge
+    /// would sit dead at its own resting pose.
     @State private var pulsing = false
 
     #if DEBUG
@@ -40,6 +59,23 @@ public struct BadgeCanvas: View {
     public var body: some View {
         let pulse = badge.pulse
         let side = CGFloat(Badge.size) * cellSize
+        let moves = motion.allowsMotion
+        // The pose every part is drawn at.
+        //
+        // With motion off there is no animation, so the badge has to sit at the
+        // mockup's own **base** style — scale 1, full opacity, no offset — and
+        // never at a keyframe's extreme. `island-motion.html:439` is the
+        // authority: its entire reduced-motion rule is `animation:none`, and a
+        // CSS element with no animation renders at its base style, not at `0%`.
+        // Leaving the `pulsing ? upper : lower` expression to stand with the
+        // animation removed would render every badge at its *lower* keyframe
+        // instead, which for `zzz` is `zfloat`'s `opacity:0` — a permanently
+        // invisible badge in the one configuration §9.3 says must be calm
+        // rather than blank, and `squares`/`check` at 0.28 and 0.55 opacity and
+        // half size in the others.
+        let scale = moves ? (pulsing ? pulse.scale.upperBound : pulse.scale.lowerBound) : 1
+        let opacity = moves ? (pulsing ? pulse.opacity.upperBound : pulse.opacity.lowerBound) : 1
+        let riseY = moves ? (pulsing ? -pulse.rise / 2 : pulse.rise / 2) : 0
         // One sub-canvas per part, each with its own delay — that stagger is
         // what the mockup does and what a single Canvas cannot express. The
         // transforms sit on the views, not inside the renderer, so the render
@@ -54,16 +90,22 @@ public struct BadgeCanvas: View {
                     ctx.fill(Self.path(part.cells, cellSize), with: .color(Color(tint)))
                 }
                     .frame(width: side, height: side)
-                    .scaleEffect(pulsing ? pulse.scale.upperBound : pulse.scale.lowerBound)
-                    .opacity(pulsing ? pulse.opacity.upperBound : pulse.opacity.lowerBound)
-                    .offset(y: pulsing ? -pulse.rise / 2 : pulse.rise / 2)
-                    .animation(.easeInOut(duration: pulse.period / 2)
+                    .scaleEffect(scale)
+                    .opacity(opacity)
+                    .offset(y: riseY)
+                    // `nil`, not a shorter duration, when motion is off: the
+                    // spike's whole finding was that a `.repeatForever`
+                    // transform keeps something ticking every display frame
+                    // whether or not SwiftUI redraws, so the animation has to
+                    // stop existing rather than merely slow down.
+                    .animation(moves ? .easeInOut(duration: pulse.period / 2)
                         .repeatForever(autoreverses: true)
-                        .delay(part.delay), value: pulsing)
+                        .delay(part.delay) : nil, value: pulsing)
             }
         }
         .frame(width: side, height: side)
-        .onAppear { pulsing = true }
+        .onAppear { pulsing = moves }
+        .onChange(of: moves) { _, allowed in pulsing = allowed }
     }
 
     static func path(_ cells: [[Bool]], _ cellSize: CGFloat) -> Path {

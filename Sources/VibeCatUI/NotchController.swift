@@ -42,6 +42,12 @@ import VibeCatCore
     private var hover: HoverMonitor?
     private var bloomEnd: Task<Void, Never>?
     private var observer: NSObjectProtocol?
+    /// The live Reduce Motion observer. Installed by `present()`, removed by
+    /// `dismiss()` (and so by `deinit`), for the reason spelled out on
+    /// `observer` above: a block-based observer outlives the object it captures
+    /// unless something removes it, and this one is registered on
+    /// `NSWorkspace`'s own centre rather than the default one.
+    private var motionObserver: NSObjectProtocol?
     /// Task 9's own hardware question (can a `.nonactivatingPanel` become key
     /// without stealing focus?) is still open — see `KeyDownProbe` — so this
     /// is the only keyboard wiring this round. A *local* monitor, never
@@ -178,6 +184,15 @@ import VibeCatCore
     /// Escape actually installed at all."
     var escapeMonitorForTesting: Any? { escapeMonitor }
 
+    /// The live Reduce Motion observer, for `MotionBypassTests` only — the same
+    /// visibility reasoning as `escapeMonitorForTesting`, and installed for
+    /// exactly the reason that accessor records. Every behavioural test of this
+    /// drives `refreshMotion()`/`apply(motion:)` directly, because a test process
+    /// cannot toggle a system accessibility switch — so without this, deleting
+    /// the whole installation block in `present()` would fail no test at all,
+    /// which is the defect Plan 6.4's review found here once already.
+    var motionObserverForTesting: NSObjectProtocol? { motionObserver }
+
     public func refreshGeometry() {
         geometry = metrics().map(IslandGeometry.init(screen:))
         guard let geometry else { return }
@@ -285,6 +300,64 @@ import VibeCatCore
             object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refreshGeometry() }
             }
+
+        // §9.3's Reduce Motion is a live system switch, and it was read exactly
+        // once — in `init` below — so toggling it did nothing whatsoever until
+        // the app was relaunched. Torn down and re-installed on every
+        // `present()` for the same reason the observer above is.
+        //
+        // `NSWorkspace.shared.notificationCenter`, not `NotificationCenter
+        // .default`: this notification is posted only on the workspace's own
+        // centre, and an observer on the default centre installs happily and
+        // then never fires. `queue: .main` because a workspace notification is
+        // not guaranteed to be posted on the main thread, and everything the
+        // handler touches is `@MainActor`.
+        if let motionObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(motionObserver)
+        }
+        motionObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: MotionPreference.systemMotionSettingDidChange,
+            object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshMotion() }
+            }
+    }
+
+    /// Re-resolves §9.3 against the system's current Reduce Motion setting,
+    /// keeping whatever level the user themselves chose — see
+    /// `MotionPreference.refreshed()` for why that is not `current()`.
+    ///
+    /// The handler `present()` installs, and callable directly, which is how
+    /// this is tested: a test process cannot toggle a system accessibility
+    /// switch, so the seam has to be here rather than in the notification.
+    func refreshMotion() {
+        apply(motion: model.motion.refreshed())
+    }
+
+    /// The write itself, split out so a test can drive a change in both
+    /// directions that it cannot make the system perform.
+    ///
+    /// **Guarded.** `accessibilityDisplayOptionsDidChangeNotification` fires for
+    /// *every* accessibility display option — increased contrast, reduced
+    /// transparency, differentiate-without-colour — so the overwhelmingly common
+    /// case in this handler is a value identical to the one already there, which
+    /// is exactly the shape that cost Plan 4 a live 8fps timeline and 3.3% of a
+    /// core permanently. `@Observable`'s generated setter already skips
+    /// notifying on an equal write to an `Equatable` property on this toolchain
+    /// (`anEqualWriteToAnObservablePropertyDoesNotNotify`), and
+    /// `MotionPreference` is `Equatable` — so this guard is belt over braces
+    /// rather than the only thing standing between the app and that bug, and a
+    /// test of the guard *alone* would be vacuous for that reason. What it buys
+    /// is that the no-op is local and legible, and that it survives
+    /// `MotionPreference` ever losing that conformance.
+    ///
+    /// No `render()`/`reflow()` afterwards, deliberately: motion changes nothing
+    /// about state, geometry or tier. `IslandView` reads `model.motion` through
+    /// `needsTimeline`, `activeProfile` and the two phases, so the observation
+    /// this write triggers is the entire mechanism by which a timeline starts or
+    /// stops.
+    func apply(motion fresh: MotionPreference) {
+        guard fresh != model.motion else { return }
+        model.motion = fresh
     }
 
     public func dismiss() {
@@ -303,6 +376,10 @@ import VibeCatCore
         panel = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
+        if let motionObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(motionObserver)
+        }
+        motionObserver = nil
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
         escapeMonitor = nil
     }

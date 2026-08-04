@@ -9,7 +9,7 @@ import CoreGraphics
         for mood in CatMood.allCases {
             for i in 0...4 {
                 let cat = ResolvedCat(coat: coat, mood: mood, phase: Double(i) / 4.0)
-                _ = CatCanvas(cat: cat, palette: palette, cellSize: 1).body
+                _ = CatCanvas(cat: cat, palette: palette, cellSize: 1, motion: .fullMotion).body
             }
         }
     }
@@ -18,7 +18,8 @@ import CoreGraphics
 @MainActor @Test func theCatCanvasEvaluatesForEveryStatesPalette() {
     for state in IslandState.allCases {
         let cat = ResolvedCat(coat: .tabby, mood: CatMood(state: state), phase: 0.5)
-        _ = CatCanvas(cat: cat, palette: CatPalette(accent: state.accent), cellSize: 1).body
+        _ = CatCanvas(cat: cat, palette: CatPalette(accent: state.accent), cellSize: 1,
+                      motion: .fullMotion).body
     }
 }
 
@@ -26,7 +27,8 @@ import CoreGraphics
     for badge in Badge.allCases {
         for i in 0...4 {
             _ = BadgeCanvas(badge: badge, phase: Double(i) / 4.0,
-                            tint: IslandState.waiting.accent, cellSize: 2).body
+                            tint: IslandState.waiting.accent, cellSize: 2,
+                            motion: .fullMotion).body
         }
     }
 }
@@ -51,13 +53,15 @@ import CoreGraphics
 
     let beforeBody = BadgeCanvas.canvasDrawCount
     for i in 0...4 {
-        _ = BadgeCanvas(badge: .zzz, phase: Double(i) / 4.0, tint: tint, cellSize: 2).body
+        _ = BadgeCanvas(badge: .zzz, phase: Double(i) / 4.0, tint: tint, cellSize: 2,
+                        motion: .fullMotion).body
     }
     #expect(BadgeCanvas.canvasDrawCount == beforeBody,
             "evaluating body five times moved the draw counter by \(BadgeCanvas.canvasDrawCount - beforeBody) — it is counting body builds, not draws, so no probe reading taken with it can distinguish a transform from a redraw")
 
     let beforeRender = BadgeCanvas.canvasDrawCount
-    _ = try rasterise(BadgeCanvas(badge: .zzz, phase: 0, tint: tint, cellSize: 2))
+    _ = try rasterise(BadgeCanvas(badge: .zzz, phase: 0, tint: tint, cellSize: 2,
+                                  motion: .fullMotion))
     #expect(BadgeCanvas.canvasDrawCount > beforeRender,
             "a real render never reached the Canvas renderer, so the counter can never register a redraw either")
 }
@@ -91,7 +95,7 @@ import CoreGraphics
 @MainActor @Test func theCatsGridSurvivesATranslateButNotAScale() throws {
     let cat = ResolvedCat(coat: .tabby, mood: .trot, phase: 0.6)
     let palette = CatPalette(accent: IslandState.running.accent)
-    let sprite = CatCanvas(cat: cat, palette: palette, cellSize: 1)
+    let sprite = CatCanvas(cat: cat, palette: palette, cellSize: 1, motion: .fullMotion)
 
     for scale in [CGFloat(1), 2] {
         let rest = try rasterise(sprite.padding(4), scale: scale).distinctColours.count
@@ -110,6 +114,7 @@ import CoreGraphics
 @MainActor @Test func aDegenerateCellSizeDoesNotTrap() {
     let cat = ResolvedCat(coat: .tabby, mood: .trot, phase: 0)
     let palette = CatPalette(accent: IslandState.idle.accent)
-    _ = CatCanvas(cat: cat, palette: palette, cellSize: 0).body
-    _ = BadgeCanvas(badge: .bang, phase: 0, tint: IslandState.idle.accent, cellSize: 0).body
+    _ = CatCanvas(cat: cat, palette: palette, cellSize: 0, motion: .fullMotion).body
+    _ = BadgeCanvas(badge: .bang, phase: 0, tint: IslandState.idle.accent, cellSize: 0,
+                    motion: .fullMotion).body
 }
