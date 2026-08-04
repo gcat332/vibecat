@@ -1,12 +1,8 @@
 import Foundation
+import VibeCatCore
 #if canImport(AppKit)
 import AppKit
 #endif
-
-/// The three levels Settings offers. Design §9.3.
-public enum MotionLevel: String, Sendable, CaseIterable {
-    case full, reduced, off
-}
 
 /// How much motion is allowed. Design §9.3: Settings offers the three levels
 /// and by default follows the system Reduce Motion setting, which overrides

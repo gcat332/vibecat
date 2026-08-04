@@ -1,8 +1,8 @@
 import Foundation
 
-/// The preferences that exist today. **Ten, and each one has a control that means
-/// something** — Plan 6.4 added the first four, Plan 6.5's Notifications page the
-/// rest.
+/// The preferences that exist today. **Twelve, and each one has a control that
+/// means something** — Plan 6.4 added the first four, Plan 6.5's Notifications
+/// page four more, Plan 6.1's Task 1 the last two (`motion`, `rightFlank`).
 ///
 /// §14 describes roughly 47 controls across four pages. The remaining keys arrive
 /// with the pages that own them (6.6 Display, 6.7 General and Integrations),
@@ -39,6 +39,14 @@ public struct Preferences: Sendable, Equatable {
     /// §14's `Also post a system notification` (`settings.html:368`),
     /// `aria-checked="false"` — off until Task 7 gives it a real destination.
     public var postsSystemNotification: Bool
+    /// §9.3's motion level. Default `full` — read off `MotionPreference`'s own
+    /// default `chosen`, not `settings.html`, since Plan 6.6's Display page owns
+    /// this control and has not shipped yet.
+    public var motion: MotionLevel
+    /// §6.2's choosable right flank. Default `sessionCount`, matching
+    /// `IslandModel.layout`'s hardcoded behaviour today (Plan 6.1's Task 5 makes
+    /// this preference the thing that actually drives it).
+    public var rightFlank: RightFlank
 
     public init(soundEnabled: Bool = true, volume: Double = 0.60,
                 quietDuringDoNotDisturb: Bool = true, selectedPage: String = "general",
@@ -46,7 +54,9 @@ public struct Preferences: Sendable, Equatable {
                 choiceForNeedsAnswer: CueChoice = .standard,
                 choiceForFinish: CueChoice = .standard,
                 choiceForFail: CueChoice = .standard,
-                postsSystemNotification: Bool = false) {
+                postsSystemNotification: Bool = false,
+                motion: MotionLevel = .full,
+                rightFlank: RightFlank = .sessionCount) {
         self.soundEnabled = soundEnabled
         self.volume = volume
         self.quietDuringDoNotDisturb = quietDuringDoNotDisturb
@@ -57,5 +67,7 @@ public struct Preferences: Sendable, Equatable {
         self.choiceForFinish = choiceForFinish
         self.choiceForFail = choiceForFail
         self.postsSystemNotification = postsSystemNotification
+        self.motion = motion
+        self.rightFlank = rightFlank
     }
 }

@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import Testing
 import CoreGraphics
+import VibeCatCore
 @testable import VibeCatUI
 
 private let t0 = Date(timeIntervalSince1970: 1_000_000)

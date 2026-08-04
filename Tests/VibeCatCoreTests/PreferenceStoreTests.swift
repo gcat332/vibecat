@@ -182,7 +182,7 @@ private func withFreshDefaults(_ body: (UserDefaults, String) throws -> Void) re
         for name in ["soundEnabled", "volume", "quietDuringDoNotDisturb", "selectedPage",
                      "alerts.onNeedsAnswer", "alerts.onFinish", "alerts.onFail", "alerts.onStall",
                      "pack", "choiceForNeedsAnswer", "choiceForFinish", "choiceForFail",
-                     "postsSystemNotification"] {
+                     "postsSystemNotification", "motion", "rightFlank"] {
             defaults.removeObject(forKey: prefix + name)
         }
         defaults.synchronize()
@@ -211,6 +211,13 @@ private let sharedTestSuite = "vibecat.tests"
     // differs from its siblings** — which is the half that catches a crossed key.
     // `CueChoice` has exactly three cases and there are exactly three choice
     // fields, so each can take a different one and no swap can hide.
+    //
+    // Plan 6.1's Task 1 adds a second and third `String`-backed enum field
+    // (`motion`, `rightFlank`) beside `pack` and the three `CueChoice` fields.
+    // Neither shares a raw value with the other or with any existing field, so
+    // a save/load that wrote either under the wrong key would read back an
+    // unparseable string and fall back to a *default* — which still differs
+    // from what was written, so the round trip still catches it.
     let written = Preferences(
         soundEnabled: false,
         volume: 0.23,
@@ -221,7 +228,9 @@ private let sharedTestSuite = "vibecat.tests"
         choiceForNeedsAnswer: .standard,
         choiceForFinish: .meow,
         choiceForFail: .none,
-        postsSystemNotification: true)
+        postsSystemNotification: true,
+        motion: .off,
+        rightFlank: .agentIcon)
 
     withFreshDefaults { defaults, prefix in
         let store = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
@@ -235,6 +244,8 @@ private let sharedTestSuite = "vibecat.tests"
         #expect(read.choiceForFail == .none, "fail's key is crossed")
         #expect(read.alerts == written.alerts, "the alert switches did not round trip")
         #expect(read.pack == .silent)
+        #expect(read.motion == .off, "motion's key is crossed")
+        #expect(read.rightFlank == .agentIcon, "rightFlank's key is crossed")
     }
 }
 
@@ -254,7 +265,9 @@ private let sharedTestSuite = "vibecat.tests"
         alerts: AlertPolicy(onNeedsAnswer: false, onFinish: false, onFail: false, onStall: true),
         pack: .silent,
         choiceForNeedsAnswer: .meow, choiceForFinish: .meow, choiceForFail: .meow,
-        postsSystemNotification: true)
+        postsSystemNotification: true,
+        motion: .off,
+        rightFlank: .agentIcon)
 
     withFreshDefaults { defaults, prefix in
         let store = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
@@ -265,7 +278,10 @@ private let sharedTestSuite = "vibecat.tests"
             Mirror(reflecting: Preferences()).children.map { ($0.label ?? "?", String(describing: $0.value)) })
         let readChildren = Mirror(reflecting: read).children.map { ($0.label ?? "?", String(describing: $0.value)) }
 
-        #expect(readChildren.count == 10, "Preferences grew or shrank — update both round-trip tests")
+        // Was 10. Plan 6.1's Task 1 added `motion` and `rightFlank`, so this is
+        // the assertion the plan predicted would fail before any production
+        // code existed — it did, and updating the number is the fix.
+        #expect(readChildren.count == 12, "Preferences grew or shrank — update both round-trip tests")
         for (label, value) in readChildren {
             #expect(value != defaultChildren[label],
                     "`\(label)` came back as its default, so it is not persisted in both directions")

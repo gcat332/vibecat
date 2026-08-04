@@ -1,4 +1,5 @@
 import Testing
+import VibeCatCore
 @testable import VibeCatUI
 
 @Test func withoutASystemPreferenceTheChoiceStands() {

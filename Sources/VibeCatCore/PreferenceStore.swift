@@ -86,6 +86,18 @@ public struct UserDefaultsPreferenceStore: PreferenceStoring {
             prefs.choiceForFail = CueChoice(rawValue: raw) ?? fallback.choiceForFail
         }
         prefs.postsSystemNotification = defaults.bool(forKey: key("postsSystemNotification"))
+        // Same shape as `pack` and the three `CueChoice` fields above: an
+        // unrecognised raw value (a future build's level, a hand-edited plist)
+        // falls back to the default rather than crashing. `MotionLevel(rawValue:
+        // )!` is not an option here — that would turn an untrusted plist value
+        // into a production crash, the exact thing this file's own doc comment
+        // says the clamping boundary exists to prevent.
+        if let raw = defaults.string(forKey: key("motion")) {
+            prefs.motion = MotionLevel(rawValue: raw) ?? fallback.motion
+        }
+        if let raw = defaults.string(forKey: key("rightFlank")) {
+            prefs.rightFlank = RightFlank(rawValue: raw) ?? fallback.rightFlank
+        }
         return prefs
     }
 
@@ -103,6 +115,8 @@ public struct UserDefaultsPreferenceStore: PreferenceStoring {
         defaults.set(preferences.choiceForFinish.rawValue, forKey: key("choiceForFinish"))
         defaults.set(preferences.choiceForFail.rawValue, forKey: key("choiceForFail"))
         defaults.set(preferences.postsSystemNotification, forKey: key("postsSystemNotification"))
+        defaults.set(preferences.motion.rawValue, forKey: key("motion"))
+        defaults.set(preferences.rightFlank.rawValue, forKey: key("rightFlank"))
     }
 
     static func clampedVolume(_ value: Double, fallback: Double) -> Double {
