@@ -82,6 +82,80 @@ import VibeCatCore
         (cpu / Double(iterations)) * 1_000_000, (cpu / elapsed) * 100))
 }
 
+/// The same steady state, with **Task 7's real consumer attached** — which is
+/// the gap `stallTickCost`'s own doc comment names and refuses to guess at.
+///
+///     VIBECAT_STALL_COST=1 swift test --filter stallTickCostWithTheNotifier
+///
+/// `Notifier.postStalls(from:preferences:)` is what `main.swift` installs, so
+/// this measures the shipped closure and not a counter standing in for it: on a
+/// guarded tick it reads `Preferences.postsSystemNotification` from the store and
+/// then does nothing, and that store read is the only cost this task adds to a
+/// quiet machine. Two arms, because the interesting question is whether *having*
+/// a consumer changes the steady-state price at all:
+///
+/// - `switch off` — `postsSystemNotification: false`, the shipping default. The
+///   closure never posts.
+/// - `switch on` — `postsSystemNotification: true`. Still nothing posts in the
+///   steady state, because `StallDetector` excludes what is already reported.
+///
+/// The `Notifier` here is the fixed-state initialiser, so nothing in this loop
+/// touches `UNUserNotificationCenter` (it could not: no bundle) or Apple events.
+@Test @MainActor func stallTickCostWithTheNotifier() {
+    guard ProcessInfo.processInfo.environment["VIBECAT_STALL_COST"] != nil else { return }
+
+    let sessionCount = 50
+    let iterations = 20_000
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    func measure(postsSystemNotification: Bool) -> (cpu: Double, elapsed: Double, posts: Int) {
+        let store = InMemoryPreferenceStore(
+            Preferences(alerts: AlertPolicy(onStall: true),
+                        postsSystemNotification: postsSystemNotification))
+        let m = AppModel(socketPath: "/tmp/vibecat-stallcost-notifier-unused.sock",
+                         preferences: store)
+        let notifier = Notifier(notification: .granted, automation: .granted)
+        notifier.postStalls(from: m, preferences: store)
+
+        for i in 0..<sessionCount {
+            _ = m.ingest(VibeEvent(id: "e\(i)", cli: "claude-code", kind: .running,
+                                   session: "s\(i)", cwd: "/tmp/p\(i)"), now: t0)
+        }
+        // Warm: the one tick where every session is newly stalled and genuinely
+        // posts. Not part of the sample — the same discipline `stallTickCost` uses.
+        let quiet = t0.addingTimeInterval(StallDetector.threshold)
+        m.prune(now: quiet)
+        let warmPosts = notifier.postedForTesting.count
+
+        let before = cpuSeconds()
+        let clockBefore = ContinuousClock.now
+        for _ in 0..<iterations { m.prune(now: quiet) }
+        let elapsed = (ContinuousClock.now - clockBefore).asStallSeconds
+        return (cpuSeconds() - before, elapsed, warmPosts)
+    }
+
+    let off = measure(postsSystemNotification: false)
+    let on = measure(postsSystemNotification: true)
+
+    print(String(format: """
+
+    stall tick cost WITH Notifier.postStalls attached — %d sessions, %d iterations,
+    getrusage(RUSAGE_SELF)
+    switch off: CPU %.4fs | per-tick %.2fµs | at the real 60s cadence %.7f%% of one core | warm-up posts %d
+    switch on:  CPU %.4fs | per-tick %.2fµs | at the real 60s cadence %.7f%% of one core | warm-up posts %d
+    (the loop runs flat out, so a "%% of one core" taken over the loop's own wall clock is
+     ~100%% by construction and means nothing; the cadence figure is the one that does.
+     Warm-up posts are capped at Notifier.postHistoryLimit = %d, so 20 here means all 50
+     stalls fired and the ring buffer kept the last 20. A 0 would mean the consumer is
+     not wired at all, and every per-tick number would be measuring nothing.)
+    """, sessionCount, iterations,
+        off.cpu, (off.cpu / Double(iterations)) * 1_000_000,
+        ((off.cpu / Double(iterations)) / 60) * 100, off.posts,
+        on.cpu, (on.cpu / Double(iterations)) * 1_000_000,
+        ((on.cpu / Double(iterations)) / 60) * 100, on.posts,
+        Notifier.postHistoryLimit))
+}
+
 private func cpuSeconds() -> Double {
     var usage = rusage()
     guard getrusage(RUSAGE_SELF, &usage) == 0 else { return .nan }
