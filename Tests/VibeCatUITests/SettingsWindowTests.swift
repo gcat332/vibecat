@@ -90,6 +90,32 @@ import VibeCatCore
 /// The real `show()` — activation, ordering front and all — plus the one thing a
 /// process with no `NSApplication.run()` owes a window it opens. See
 /// `LiveWindows`.
+/// `performClose`, with the window's chrome kept alive through it.
+///
+/// Retaining the window is not enough for a *close*, which was the last residual
+/// after `LiveWindows` grew to hold controllers: closing frees the window's
+/// **chrome views**, and a strong reference to the window does not retain those.
+/// The animation AppKit starts for a titled window's chrome — and only retires
+/// inside `NSApplication.run()`, which `swift test` never calls — then deallocates
+/// against freed memory at process exit.
+///
+/// `isReleasedWhenClosed = false` is set **here, on this window, in this test
+/// process only.** Production keeps AppKit's default, which is what
+/// `aClosedWindowIsAppKitsToReleaseRatherThanOursToKeepForever` pins and what Plan
+/// 6.4's fix round established by measurement — that line in production leaked one
+/// window per open/close, `NSApp.windows` going 0→10 across ten cycles. So this is
+/// the opposite of reinstating it: the property is a test-process concession, and
+/// the assertion that production must never make it is still there.
+///
+/// The two tests that call this are the only ones that close deliberately. Their
+/// assertions are unaffected: `isOpen` is the controller's own bookkeeping, driven
+/// by its `willCloseNotification` observer, and the reopen check passes because
+/// that observer nils `window` regardless of who releases it.
+@MainActor private func closeSurvivingTheChrome(_ controller: SettingsWindowController) {
+    controller.windowForTesting?.isReleasedWhenClosed = false
+    controller.windowForTesting?.performClose(nil)
+}
+
 @MainActor private func showKeepingTheWindowAlive(_ controller: SettingsWindowController) {
     controller.show()
     LiveWindows.keep(controller)
@@ -140,7 +166,7 @@ import VibeCatCore
     let c = SettingsWindowController(store: InMemoryPreferenceStore())
     showKeepingTheWindowAlive(c)
     #expect(c.isOpen)
-    c.windowForTesting?.performClose(nil)
+    closeSurvivingTheChrome(c)
     #expect(!c.isOpen, "the controller still thinks a closed window is open")
 }
 
@@ -189,7 +215,7 @@ import VibeCatCore
     let c = SettingsWindowController(store: InMemoryPreferenceStore())
     showKeepingTheWindowAlive(c)
     let first = c.windowForTesting
-    c.windowForTesting?.performClose(nil)
+    closeSurvivingTheChrome(c)
     showKeepingTheWindowAlive(c)
     #expect(c.isOpen)
     #expect(c.windowForTesting !== first, "a closed window was reused after release")
