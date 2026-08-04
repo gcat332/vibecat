@@ -5,26 +5,117 @@ import SwiftUI
 import VibeCatCore
 @testable import VibeCatUI
 
+/// Every `NSWindow` the tests in this file build, kept alive for the whole
+/// process — deliberately, and this is the reason.
+///
+/// **`swift test` never calls `NSApplication.run()`, and a titled `NSWindow`
+/// that *deallocates* in such a process takes the process down with it.**
+/// Measured on macOS 26.5.2: any single test in this file is enough, and the run
+/// dies mid-suite with `SIGSEGV`/`EXC_BAD_ACCESS` inside
+/// `-[_NSWindowTransformAnimation dealloc]`, reached from
+/// `CA::Transaction::commit()`'s autorelease-pool pop on the main run loop. It
+/// is an animation AppKit started for the window's chrome, released after the
+/// window it points at is already gone. AppKit retires that animation inside
+/// `NSApplication.run()`, which is why the real app never sees this — and why
+/// nothing here can wait it out: a 0.25s `RunLoop.main` drain between `show()`
+/// and the close does not help (measured), and an `NSAnimation` in this process
+/// never advances at all — `currentProgress` stayed `0.0` through a full second
+/// of spinning.
+///
+/// Three further measurements, so that nobody re-derives them:
+///
+/// - **It is deallocation, not presentation.** Removing `NSApp.activate()`,
+///   `makeKeyAndOrderFront(nil)`, or both from `show()` still crashed 3 runs out
+///   of 3; so did a window stripped of its appearance, titlebar flag,
+///   background colour, min size, `center()` and hosting view, and so did one
+///   with `animationBehavior = .none`. Restoring `isReleasedWhenClosed = false`,
+///   the one change that stops the window deallocating at all, was clean 3/3.
+///   So `show()` is not at fault and needs no seam; the window merely has to
+///   outlive the test that opened it.
+/// - **It only reproduces with the display on.** With the display asleep the app
+///   cannot become active, no such animation is created, and the whole suite is
+///   clean — so a green run measured on a locked or sleeping machine says
+///   nothing whatever about this bug. `pmset -g log | grep "Display is turned"`
+///   is how to check afterwards which kind of run you got.
+/// - **It is the titled chrome.** `rasteriseHosted` in `Raster.swift`
+///   deallocates a **borderless** window on every call and has never crashed.
+///
+/// **Retention is what fixes it, and retention alone is not sufficient — both
+/// halves are measured.** Take the retention back out of this file and the suite
+/// crashes 3 runs out of 3 again, so this is the load-bearing part. But delete
+/// `makeKeyAndOrderFront(nil)` from `show()` while keeping every window retained
+/// and the same crash returns, 3/3 — a titled window that is *never presented* is
+/// apparently not safe to close even while something still holds it, and
+/// `isReleasedWhenClosed = false` is then the only thing that quiets it. **Why
+/// that is, this comment does not know**; it was not worth chasing, because
+/// presenting is what `show()` does in production, and
+/// `showingTheWindowPutsItOnScreenRatherThanMerelyBuildingIt` now fails if that
+/// ever stops being true.
+///
+/// A new test in this file that opens a window must go through
+/// `showKeepingTheWindowAlive(_:)` rather than calling `show()` directly.
+@MainActor private enum LiveWindows {
+    private static var all: [NSWindow] = []
+
+    /// Retains `window` for the rest of the process. Idempotent, because two
+    /// `show()` calls on one controller hand back the same window.
+    static func keep(_ window: NSWindow?) {
+        guard let window, !all.contains(where: { $0 === window }) else { return }
+        all.append(window)
+    }
+}
+
+/// The real `show()` — activation, ordering front and all — plus the one thing a
+/// process with no `NSApplication.run()` owes a window it opens. See
+/// `LiveWindows`.
+@MainActor private func showKeepingTheWindowAlive(_ controller: SettingsWindowController) {
+    controller.show()
+    LiveWindows.keep(controller.windowForTesting)
+}
+
 @Test @MainActor func showingTwiceReusesTheOneWindow() {
     // The gear is the only door. Two windows means two views of one truth, and
     // the second one silently wins whatever it writes last.
     let c = SettingsWindowController(store: InMemoryPreferenceStore())
-    c.show()
+    showKeepingTheWindowAlive(c)
     let first = c.windowForTesting
-    c.show()
+    showKeepingTheWindowAlive(c)
     #expect(c.windowForTesting === first, "show() built a second window")
+}
+
+@Test @MainActor func showingTheWindowPutsItOnScreenRatherThanMerelyBuildingIt() {
+    // `show()` is two things — build the window, and present it — and every
+    // other test in this file passes against a `show()` that only built one.
+    // This is the assertion that notices the presenting half going missing.
+    //
+    // `isVisible` because it is the one signal here that is not a void reading:
+    // measured, a window that has only been constructed reads `false`, and the
+    // same window after `makeKeyAndOrderFront(nil)` reads `true` — with the
+    // display awake, with it asleep, and on a locked screen alike.
+    //
+    // **`NSApp.activate()` has no such signal and is asserted by nothing.**
+    // Deleting that line leaves this entire suite green (measured), and it is
+    // reported here rather than covered by something weaker: this file's own
+    // production comment records `NSApp.isActive` reading `true` while focus
+    // demonstrably stayed elsewhere *and* `false` with a window visibly ordered
+    // front, and `keyWindow`/`frontmostApplication` are void under a lock.
+    // `--settings-focus-probe` is what answers that one, on a real screen.
+    let c = SettingsWindowController(store: InMemoryPreferenceStore())
+    showKeepingTheWindowAlive(c)
+    #expect(c.windowForTesting?.isVisible == true,
+            "show() built the window but never ordered it on screen")
 }
 
 @Test @MainActor func theWindowCarriesTheTitleTheProtoypeGivesIt() {
     let c = SettingsWindowController(store: InMemoryPreferenceStore())
-    c.show()
+    showKeepingTheWindowAlive(c)
     #expect(c.windowForTesting?.title == "VibeCat Settings")
 }
 
 @Test @MainActor func closingTheWindowLetsItGo() {
     // The lifecycle rule this repo learned the hard way twice.
     let c = SettingsWindowController(store: InMemoryPreferenceStore())
-    c.show()
+    showKeepingTheWindowAlive(c)
     #expect(c.isOpen)
     c.windowForTesting?.performClose(nil)
     #expect(!c.isOpen, "the controller still thinks a closed window is open")
@@ -33,7 +124,7 @@ import VibeCatCore
 @Test @MainActor func theWindowOpensOnThePageThatWasStored() {
     let store = InMemoryPreferenceStore(Preferences(selectedPage: "display"))
     let c = SettingsWindowController(store: store)
-    c.show()
+    showKeepingTheWindowAlive(c)
     #expect(c.selectedPageForTesting == "display")
 }
 
@@ -51,7 +142,7 @@ import VibeCatCore
     // running it; see this task's report.
     let store = InMemoryPreferenceStore(Preferences(selectedPage: "kitchen-sink"))
     let c = SettingsWindowController(store: store)
-    c.show()
+    showKeepingTheWindowAlive(c)
     #expect(SettingsPageKey.isKnown(c.selectedPageForTesting))
 }
 
@@ -64,53 +155,54 @@ import VibeCatCore
     // being removed, and it does not — a controller that has already dropped
     // its reference builds a fresh window either way, so this test cannot tell
     // a released window from a leaked one. That gap is now covered by
-    // `closingTheWindowTakesItOutOfTheApplicationsWindowList` below, which asks
-    // whether AppKit still holds it rather than whether we do; the line itself is
-    // gone, because
-    // measuring it showed it leaked one window per close rather than preventing
-    // a double release (see `makeWindow()`'s own comment).
+    // `aClosedWindowIsAppKitsToReleaseRatherThanOursToKeepForever` below, which
+    // asserts the flag AppKit acts on rather than watching the window go; the
+    // line itself is gone, because measuring it showed it leaked one window per
+    // close rather than preventing a double release (see `makeWindow()`'s own
+    // comment).
+    //
+    // The second window this builds is retained too, and has to be: both of them
+    // deallocating is two chances at the crash `LiveWindows` describes, not one.
     let c = SettingsWindowController(store: InMemoryPreferenceStore())
-    c.show()
+    showKeepingTheWindowAlive(c)
     let first = c.windowForTesting
     c.windowForTesting?.performClose(nil)
-    c.show()
+    showKeepingTheWindowAlive(c)
     #expect(c.isOpen)
     #expect(c.windowForTesting !== first, "a closed window was reused after release")
 }
 
-@Test @MainActor func closingTheWindowTakesItOutOfTheApplicationsWindowList() {
+@Test @MainActor func aClosedWindowIsAppKitsToReleaseRatherThanOursToKeepForever() {
     // The invariant `CLAUDE.md` states as "anything with a lifecycle tears
     // itself down", applied to the one object in this file that AppKit — not
     // ARC — owns. An `LSUIElement` app runs for the whole login session and its
     // Settings window sits behind a gear someone can press any number of times,
     // so one `NSWindow` retained per open/close is unbounded growth.
     //
-    // **Identity, not a count, and not a weak reference.** A count would be
-    // wrong because `NSApp.windows` is process-global and this suite runs in
-    // parallel — every other test in this file builds a window titled "VibeCat
-    // Settings". Asking whether *our own* window is still listed is unaffected
-    // by any of them.
+    // **This test used to watch the leak directly — the window leaving
+    // `NSApp.windows` after a close — and that form cannot be used any more.**
+    // `NSApp.windows` drops a window when it *deallocates*, not when it closes
+    // (measured: with `isReleasedWhenClosed = false` a closed window stays in
+    // the list, which is exactly how the old form detected the leak), and a
+    // titled `NSWindow` deallocating in a process that never called
+    // `NSApplication.run()` segfaults the run — see `LiveWindows` above for the
+    // measurements. The observation and the crash were the same event: the only
+    // way this test could watch the window die was to kill the test process
+    // doing it, 5 runs out of 5.
     //
-    // A weak reference was tried first and does not work here, which is worth
-    // recording because it looks like the obvious test. Measured: with
-    // `isReleasedWhenClosed` at its default, ten open/close cycles leave
-    // `NSApp.windows` at 0 — but all ten `NSWindow` objects are still alive with
-    // a retain count of 8 each, after 50 run-loop spins. AppKit finishes tearing
-    // a closed window down inside `NSApplication.run()`, which `swift test`
-    // never calls, so "is it deallocated yet" has no stable answer in this
-    // process. "Is it still in the window list" does, and it is the thing that
-    // grows without bound: with `window.isReleasedWhenClosed = false` restored,
-    // the same ten cycles take `NSApp.windows` from 0 to 10 with all ten still
-    // titled "VibeCat Settings", and this test fails on the first one.
-    let app = NSApplication.shared
+    // So what is asserted now is the production decision itself, where it lives,
+    // and the narrowing is written down rather than hidden. This catches
+    // `window.isReleasedWhenClosed = false` coming back — the exact line Task 5
+    // shipped, that `makeWindow()`'s comment forbids and that measurement showed
+    // leaks one window per close — and it catches nothing else. A weak reference
+    // cannot stand in for it either, for the reason that comment already
+    // records: AppKit finishes tearing a closed window down inside
+    // `NSApplication.run()`, so "is it deallocated yet" has no stable answer in
+    // this process.
     let c = SettingsWindowController(store: InMemoryPreferenceStore())
-    c.show()
-    let opened = c.windowForTesting
-    #expect(opened != nil && app.windows.contains { $0 === opened },
-            "an open window that is not in NSApp.windows means this test cannot detect a leak either")
-    c.windowForTesting?.performClose(nil)
-    #expect(!app.windows.contains { $0 === opened },
-            "the closed window is still in NSApp.windows — one NSWindow accumulates there per open/close, for the process's whole life")
+    showKeepingTheWindowAlive(c)
+    #expect(c.windowForTesting?.isReleasedWhenClosed == true,
+            "the Settings window is set not to release itself on close — one NSWindow then accumulates for the process's whole life, per open/close, in an app that runs for the whole login session")
 }
 
 @Test @MainActor func theWindowHostsSwiftUIRatherThanAnEmptyContentView() {
@@ -121,7 +213,7 @@ import VibeCatCore
     // own once-only guard, so replacing `SettingsRootView` with something else
     // in Task 6 is a deliberate edit here rather than a silent pass.
     let c = SettingsWindowController(store: InMemoryPreferenceStore())
-    c.show()
+    showKeepingTheWindowAlive(c)
     #expect(c.windowForTesting?.contentView is NSHostingView<SettingsRootView>)
 }
 
@@ -134,7 +226,7 @@ import VibeCatCore
     // through the buttons rather than the mask because it is the buttons that
     // are the prototype's three lights.
     let c = SettingsWindowController(store: InMemoryPreferenceStore())
-    c.show()
+    showKeepingTheWindowAlive(c)
     let window = c.windowForTesting
     #expect(window?.standardWindowButton(.closeButton) != nil)
     #expect(window?.standardWindowButton(.miniaturizeButton) != nil)
@@ -149,7 +241,7 @@ import VibeCatCore
     // `frame`, so a future titlebar-height change cannot quietly shrink the
     // panes to keep a total constant.
     let c = SettingsWindowController(store: InMemoryPreferenceStore())
-    c.show()
+    showKeepingTheWindowAlive(c)
     let size = c.windowForTesting?.contentView?.frame.size
     #expect(size?.width == 900)
     #expect(size?.height == 620)
@@ -173,7 +265,7 @@ import VibeCatCore
     // `SettingsShell(selection: .constant(model.selectedPage))` stays green here.
     let store = InMemoryPreferenceStore()
     let c = SettingsWindowController(store: store)
-    c.show()
+    showKeepingTheWindowAlive(c)
     c.modelForTesting.pageBinding.wrappedValue = "display"
     #expect(c.selectedPageForTesting == "display", "the binding did not reach the model")
     #expect(store.load().selectedPage == "display", "the chosen page was never persisted")

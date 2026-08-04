@@ -252,11 +252,25 @@ struct SettingsRootView: View {
         // for the whole login session. At the default the same probe reads
         // 0 -> 10 -> 0 with every weak reference nil and no crash.
         //
-        // `aClosedWindowIsDeallocatedRatherThanLeakedForever` in
-        // `SettingsWindowTests` holds this: it is a weak reference to the
-        // window, checked after the close, which is headless and cheap and is
-        // what should have been written the first time instead of a labelled
-        // guess.
+        // `aClosedWindowIsAppKitsToReleaseRatherThanOursToKeepForever` in
+        // `SettingsWindowTests` holds this — by asserting this flag rather than
+        // by watching the window die, and **that is not timidity, it is the only
+        // form available.** A titled `NSWindow` that actually deallocates in a
+        // process which never called `NSApplication.run()` segfaults that
+        // process: AppKit starts an animation for the window's chrome and only
+        // retires it inside `run()`, so in `swift test` it outlives the window
+        // and its `dealloc` releases freed memory — `SIGSEGV` inside
+        // `-[_NSWindowTransformAnimation dealloc]`, off
+        // `CA::Transaction::commit()`, 5 runs out of 5 with the display awake.
+        // Every measurement behind that sentence is recorded on `LiveWindows` in
+        // `SettingsWindowTests`, including the two things it is *not*
+        // (presentation, and any of this window's own configuration).
+        //
+        // **Nothing here needs changing for it, and nothing here should be.**
+        // The real app calls `NSApplication.run()`, so the animation completes
+        // long before any close and this window is released exactly as intended.
+        // The hazard belongs to the test process alone, which is where it is
+        // handled.
 
         // The prototype is a dark sheet, and this app has no light variant to
         // switch to — pinning the appearance rather than following the system
