@@ -730,12 +730,12 @@ private let externalDisplay = ScreenMetrics(
 /// remove it for the same reason it removes the screen-parameters observer
 /// just above it in `NotchController.swift` — a monitor left behind after
 /// teardown would keep calling into a controller nothing else references.
-@MainActor @Test func presentInstallsTheEscapeMonitorAndDismissRemovesIt() {
+@MainActor @Test func presentInstallsTheKeyMonitorAndDismissRemovesIt() {
     let c = makeController()
-    #expect(c.escapeMonitorForTesting != nil, "present() did not install the local Escape monitor")
+    #expect(c.keyMonitorForTesting != nil, "present() did not install the local keyDown monitor")
 
     c.dismiss()
-    #expect(c.escapeMonitorForTesting == nil, "dismiss() did not remove the local Escape monitor")
+    #expect(c.keyMonitorForTesting == nil, "dismiss() did not remove the local keyDown monitor")
 }
 
 /// Escape while the drawer is open dismisses the question without answering
@@ -765,11 +765,13 @@ private let externalDisplay = ScreenMetrics(
     #expect(consumed == false, "there is nothing to dismiss, so this must not report the keystroke as handled")
 }
 
-/// A non-Escape key must never dismiss — and, per Task 9's own still-open
-/// hardware question, must not do anything else either. Number keys are not
-/// wired at all this round (see `dismissOnEscape`'s own doc comment on why
-/// Escape alone is safe to wire before that question is answered), so a
-/// digit reaching this same entry point must be a complete no-op.
+/// A non-Escape key must never *dismiss*. Since Plan 6.1 Task 4 a digit does
+/// something — it answers, through `answerOnNumberKey`/`handleKeyDown`, tested
+/// in this file's own Task 4 section below — but `dismissOnEscape` itself stays
+/// Escape-only, and that separation is what this pins: a digit routed here
+/// must not abandon a question the hook is still parked on. Escape's dismiss is
+/// a deliberate fail-open; an accidental one on the number key a person meant as
+/// an answer would throw away their decision.
 @MainActor @Test func aNonEscapeKeyNeverDismissesEvenWithTheDrawerOpen() {
     let c = makeController()
     c.setQuestion(aQuestion())
@@ -997,4 +999,376 @@ private let externalDisplay = ScreenMetrics(
     // `_modify` accessor has no equality gate, unlike `set`.
     #expect(fires { model.aura.endBloom() },
             "a no-op mutating call did not notify — _modify is gated after all, contradicting the dumped macro expansion")
+}
+
+// MARK: - Plan 6.1 Task 4: §10.1's number keys, and the key status they need
+
+/// Three real choices — `allow`, `deny`, `always` — so "a digit past the last
+/// row" has somewhere past to be, and the badge/digit mapping has a middle row
+/// that an off-by-one would land on. Same direct-`setQuestion` convention (and
+/// same reason) as `aQuestion` above; `aDestructiveEvent` below is the variant
+/// for the tests that need a real parked `PendingQuestion`.
+@MainActor private func aThreeChoiceQuestion(body: String? = nil, multi: Bool = false,
+                                             deadline: TimeInterval = 5) -> PendingQuestion {
+    PendingQuestion(event: threeChoiceEvent(body: body, multi: multi), deadline: deadline)
+}
+
+@MainActor private func threeChoiceEvent(id: String? = nil, body: String? = nil,
+                                         multi: Bool = false) -> VibeEvent {
+    questionSerial += 1
+    return VibeEvent(id: id ?? "q\(questionSerial)", cli: "claude-code", kind: .permission,
+                     session: "s", cwd: "/tmp/proj", body: body,
+                     choices: [Choice(id: "allow", label: "Allow once"),
+                               Choice(id: "deny", label: "Deny"),
+                               Choice(id: "always", label: "Always allow")],
+                     multi: multi, wantsReply: true, answerDeadline: 5)
+}
+
+/// What the *hook* side of `ingest` was handed — the actual return value of the
+/// blocking call a real `vibecat-hook` makes, captured off the thread it runs
+/// on. Locked rather than `nonisolated(unsafe)`: it is written on a detached
+/// `Thread` and read on the main actor, which is exactly the case a lock is for.
+/// Same shape as `PipelineTests.OutputBox`.
+private final class ReplyBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: Reply?
+    private var _isDone = false
+    func set(_ v: Reply?) { lock.lock(); _value = v; _isDone = true; lock.unlock() }
+    var value: Reply? { lock.lock(); defer { lock.unlock() }; return _value }
+    var isDone: Bool { lock.lock(); defer { lock.unlock() }; return _isDone }
+}
+
+/// A controller with a real `AppModel` and a genuinely parked question, drawer
+/// already open — the setup the number-key tests that care about *the reply the
+/// hook receives* need, as opposed to the ones that only need `model.question`.
+/// Mirrors `theAnswerCallbackReachesAppModelAnswer`'s own pattern: `ingest`
+/// parks its calling thread until answered or expired, so it runs on a real
+/// `Thread`, never `Task.detached`.
+@MainActor private func withAParkedQuestion(body: String? = nil) async throws
+    -> (NotchController, AppModel, ReplyBox) {
+    let (c, appModel) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+
+    let event = threeChoiceEvent(body: body)
+    let box = ReplyBox()
+    Thread.detachNewThread { box.set(appModel.ingest(event)) }
+
+    let arrived = Date().addingTimeInterval(2)
+    while appModel.pending == nil, Date() < arrived {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(appModel.pending?.id == event.id, "setup: the question never reached the model")
+    c.click()
+    #expect(c.model.tier != .rest, "setup: the drawer never opened, so nothing below proves anything")
+    return (c, appModel, box)
+}
+
+/// §10.1: "A number badge marks each row and the matching number key picks it."
+/// Digit `2` names `rows[1]`, whose badge reads `2` (`ChoiceRow.index + 1`), and
+/// the reply that comes back out of the *hook's own blocking call* names that
+/// row's id — not the first row's, and not a fabricated one.
+///
+/// Driven through `handleKeyDown`, the whole of what the local monitor's closure
+/// does, so this covers the dispatch as well as the handler: deleting the digit
+/// branch from that dispatch fails here.
+@MainActor @Test func theNumberKeyAnswersTheRowItsBadgeNamesAndTheHookGetsThatChoice() async throws {
+    let (c, appModel, box) = try await withAParkedQuestion()
+
+    #expect(c.handleKeyDown(charactersIgnoringModifiers: "2"),
+            "a digit naming a visible row must be consumed rather than passed on")
+
+    let answered = Date().addingTimeInterval(2)
+    while !box.isDone, Date() < answered {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(box.value?.choice == "deny",
+            "the hook received \(String(describing: box.value?.choice)) — digit 2 must name rows[1]")
+    #expect(appModel.pending == nil, "the question is still parked after being answered")
+    c.dismiss()
+}
+
+/// The most important assertion in this task. §10.3: a destructive command asks
+/// twice, and the keyboard must not be the way around that.
+///
+/// The first press picks and *nothing reaches the hook* — `appModel.pending`
+/// clears synchronously inside `AppModel.answer`, so its still being non-nil
+/// immediately afterwards is a direct reading of "the hook has not been
+/// answered", not a race. Mutation 1 of this task's own list (build a `Reply`
+/// from `KeyRouting.pick`'s returned id instead of going through
+/// `QuestionModel.pick`/`.reply()`) fails exactly here: a fabricated reply is
+/// not gated by `needsConfirmation`, so `pending` would clear on the first press.
+///
+/// Key status must survive the first press too, or the second one is
+/// unpressable — releasing on "answered" without checking that anything was
+/// actually answered would make a destructive question unanswerable from the
+/// keyboard rather than merely unsafe.
+@MainActor @Test func aDestructiveCommandStillAsksTwiceOnTheNumberKey() async throws {
+    let (c, appModel, box) = try await withAParkedQuestion(body: "rm -rf build/")
+    let question = try #require(c.model.question)
+    #expect(question.needsConfirmation == false, "setup: nothing is picked yet")
+
+    #expect(c.handleKeyDown(charactersIgnoringModifiers: "1"))
+
+    #expect(question.selected == ["allow"], "the first press must still pick the row")
+    #expect(question.needsConfirmation, "§10.3's second ask never appeared for a destructive body")
+    #expect(appModel.pending != nil,
+            "the number key answered a destructive command on the first press — §10.3 was bypassed")
+    #expect(box.isDone == false, "the hook already has an answer after one press")
+    #expect(c.holdsKeyStatus, "key status was released before the confirming press could be typed")
+
+    #expect(c.handleKeyDown(charactersIgnoringModifiers: "1"))
+
+    let answered = Date().addingTimeInterval(2)
+    while !box.isDone, Date() < answered {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(box.value?.choice == "allow", "the second press did not confirm and send the picked row")
+    #expect(appModel.pending == nil)
+    c.dismiss()
+}
+
+/// A digit is the same gesture as a tap on the row that digit names, including
+/// what a *second* press of the same one means (§10.3's banner: "tap the
+/// highlighted choice again to confirm"). `answerOnNumberKey` duplicates
+/// `QuestionFace.tapped(_:)`'s single-select branch rather than sharing it — the
+/// two live in different layers — so this pins them against drifting apart:
+/// the same two presses through each path must leave the same state and produce
+/// the same reply.
+@MainActor @Test func theNumberKeyAndTheTapAgreeOnWhatASecondPressMeans() throws {
+    let c = makeController()
+    c.setQuestion(aThreeChoiceQuestion(body: "rm -rf build/"))
+    c.click()
+    let viaKeys = try #require(c.model.question)
+
+    // The tap path, on its own model, driven through the real view's own entry
+    // point — see QuestionFaceTests for why calling `tapped(_:)` directly is the
+    // only way to exercise a tap in this suite.
+    let tapModel = QuestionModel(event: threeChoiceEvent(body: "rm -rf build/"))
+    nonisolated(unsafe) var tapped: [Reply] = []
+    let face = QuestionFace(question: tapModel, accent: .orange, onAnswer: { tapped.append($0) })
+
+    c.handleKeyDown(charactersIgnoringModifiers: "1")
+    face.tapped("allow")
+    #expect(viaKeys.selected == tapModel.selected, "the first press and the first tap picked differently")
+    #expect(viaKeys.needsConfirmation == tapModel.needsConfirmation,
+            "only one of the two paths raised §10.3's second ask")
+    #expect(tapped.isEmpty, "control: the tap path must not answer a destructive command on the first tap")
+
+    c.handleKeyDown(charactersIgnoringModifiers: "1")
+    face.tapped("allow")
+    #expect(viaKeys.isConfirming == tapModel.isConfirming,
+            "the second press and the second tap disagree about what confirms")
+    #expect(tapped.map(\.choice) == ["allow"], "control: the tap path answers on the second tap")
+    #expect(viaKeys.reply()?.choice == "allow",
+            "the keyboard path's own model would not produce the reply the tap path did")
+}
+
+/// A digit naming no row does nothing at all, and — because there is no row it
+/// could be about — is not consumed either. `rows` has three entries, so `4` is
+/// the first digit past the end; `KeyRouting.pick` returns `nil` and the handler
+/// must stop there rather than clamping to the last row.
+@MainActor @Test func aDigitPastTheLastRowPicksNothing() throws {
+    let c = makeController()
+    c.setQuestion(aThreeChoiceQuestion())
+    c.click()
+    let question = try #require(c.model.question)
+
+    #expect(c.handleKeyDown(charactersIgnoringModifiers: "4") == false,
+            "a digit that names no row must fall through rather than be swallowed")
+    #expect(question.selected.isEmpty, "a digit past the last row picked something anyway")
+    #expect(c.model.question != nil, "the question must still be open")
+    #expect(c.model.tier != .rest, "the drawer must still be open")
+}
+
+/// `0` is not a badge. `ChoiceRow` numbers from `index + 1`, so the lowest
+/// visible numeral is `1` — a `0` that picked `rows[0]` would answer a question
+/// using a key the interface never showed anyone.
+@MainActor @Test func zeroNamesNoRowBecauseBadgesNumberFromOne() throws {
+    let c = makeController()
+    c.setQuestion(aThreeChoiceQuestion())
+    c.click()
+    let question = try #require(c.model.question)
+
+    #expect(c.handleKeyDown(charactersIgnoringModifiers: "0") == false,
+            "`0` was consumed, so some row is reachable by a key with no badge")
+    #expect(question.selected.isEmpty, "`0` picked a row")
+}
+
+/// §10.2: multi select is distinguished *by the control* — a checkbox, not a
+/// number badge — and "a number badge means the click is the answer; a checkbox
+/// means it is not." So there is no digit on screen to press, and pressing one
+/// must fall through rather than be swallowed by a panel holding key
+/// exclusively. (`QuestionModel.pick` would refuse anyway; this is about the
+/// keystroke not being eaten.)
+@MainActor @Test func aMultiSelectQuestionHasNoBadgesSoADigitIsNotConsumed() throws {
+    let c = makeController()
+    c.setQuestion(aThreeChoiceQuestion(multi: true))
+    c.click()
+    let question = try #require(c.model.question)
+
+    #expect(c.handleKeyDown(charactersIgnoringModifiers: "1") == false,
+            "a digit was consumed on a multi-select question, which shows checkboxes and no numerals")
+    #expect(question.selected.isEmpty, "a digit toggled a checkbox §10.2 says it must not")
+}
+
+/// `Other…`'s field is for typing, and `2` in "port 8082" is a character, not a
+/// choice. Plan 6.1 Task 5 restores the row; this guard has to be here before it
+/// does, or the field it opens is silently undigitable.
+@MainActor @Test func aDigitWhileTheReplyFieldIsUpIsTextRatherThanAChoice() throws {
+    let c = makeController()
+    c.setQuestion(aThreeChoiceQuestion())
+    c.click()
+    let question = try #require(c.model.question)
+    question.beginOther()
+
+    #expect(c.handleKeyDown(charactersIgnoringModifiers: "1") == false,
+            "a digit meant for the reply field was consumed as a choice")
+    #expect(question.selected.isEmpty, "a digit typed into the reply field picked a row")
+    #expect(question.isWritingOther, "the reply field was closed by a keystroke meant for it")
+}
+
+/// A digit with the drawer shut names nothing visible — there are no badges on a
+/// collapsed island — so it must not answer. This is the guard that keeps a `1`
+/// typed into a terminal from authorising a command whose choices are not on
+/// screen, and it mirrors `dismissOnEscape`'s own `.drawer` gate.
+@MainActor @Test func aDigitWithTheDrawerShutAnswersNothing() throws {
+    let c = makeController()
+    c.setQuestion(aThreeChoiceQuestion())
+    #expect(c.model.tier == .rest, "setup: a question alone must not open the drawer")
+    let question = try #require(c.model.question)
+
+    #expect(c.handleKeyDown(charactersIgnoringModifiers: "1") == false,
+            "a digit answered a question whose badges were not on screen")
+    #expect(question.selected.isEmpty, "a digit picked a row nobody could see")
+}
+
+/// The spike's hazard, and the narrowest window that still honours §10.1: key
+/// status is taken only once an open drawer is actually showing a question.
+///
+/// The middle assertion is the narrowing itself, and it is deliberate — the
+/// plan says "take key on open", and a question that has arrived but whose
+/// drawer nobody opened is exactly the state the spike warns about: delivery is
+/// exclusive, `frontmostApplication` never changes, so the terminal looks
+/// focused while its keystrokes vanish — with no badge on screen to press in
+/// exchange. See `takeKeyStatusIfShowingAQuestion`'s own doc comment.
+@MainActor @Test func keyStatusIsTakenOnlyWhileAnOpenDrawerShowsAQuestion() {
+    let c = makeController()
+    #expect(c.holdsKeyStatus == false, "an island at rest must never hold key status")
+
+    c.setQuestion(aThreeChoiceQuestion())
+    #expect(c.holdsKeyStatus == false,
+            "key status was taken while the question's badges were still off screen")
+
+    c.click()
+    #expect(c.holdsKeyStatus, "an open drawer showing a question cannot receive a keystroke without key status")
+}
+
+/// A drawer opened on §11's session list — no question at all — must not take
+/// key status: there is nothing to answer and nothing to type, and holding it
+/// would swallow the person's typing for the whole time the list is up.
+@MainActor @Test func theSessionListTakesNoKeyStatus() {
+    let (c, appModel) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+    _ = appModel.ingest(VibeEvent(id: "e1", cli: "claude-code", kind: .running,
+                                  session: "s", cwd: "/tmp/proj"))
+    c.click()
+    #expect(c.model.face == .sessionList, "setup: this must be the session list, not a question")
+    #expect(c.model.tier != .rest, "setup: the drawer never opened")
+
+    #expect(c.holdsKeyStatus == false, "the session list took key status it has no use for")
+    c.dismiss()
+}
+
+/// Ending one of three: answered. Released by `answer(_:)`, which both the
+/// number key and `model.onAnswer` (a tap on a row or on Send) go through.
+@MainActor @Test func answeringWithTheNumberKeyGivesKeyStatusBack() {
+    let c = makeController()
+    c.setQuestion(aThreeChoiceQuestion())
+    c.click()
+    #expect(c.holdsKeyStatus, "setup: nothing to release, so this proves nothing")
+
+    #expect(c.handleKeyDown(charactersIgnoringModifiers: "2"))
+
+    #expect(c.holdsKeyStatus == false,
+            "the panel is still key after answering — everything the person types next is swallowed")
+}
+
+/// The same ending reached by a mouse tap instead: `model.onAnswer` is what
+/// `QuestionFace.tapped(_:)` calls, and it must release for the same reason.
+/// Separate from the number-key case above because they are separate call sites
+/// and only one of them is the keyboard.
+@MainActor @Test func answeringWithATapGivesKeyStatusBackToo() {
+    let c = makeController()
+    let pending = aThreeChoiceQuestion()
+    c.setQuestion(pending)
+    c.click()
+    #expect(c.holdsKeyStatus, "setup: nothing to release, so this proves nothing")
+
+    c.model.onAnswer?(Reply(id: pending.id, choice: "deny"))
+
+    #expect(c.holdsKeyStatus == false, "a tap-answered question left the panel holding key status")
+}
+
+/// Ending two of three: dismissed. Driven through `handleKeyDown` rather than
+/// `dismissOnEscape` so the dispatch's Escape branch is covered here as well.
+@MainActor @Test func escapeGivesKeyStatusBack() {
+    let c = makeController()
+    c.setQuestion(aThreeChoiceQuestion())
+    c.click()
+    #expect(c.holdsKeyStatus, "setup: nothing to release, so this proves nothing")
+
+    #expect(c.handleKeyDown(charactersIgnoringModifiers: "\u{1b}"))
+
+    #expect(c.model.tier == .rest, "setup: Escape did not dismiss, so the release below is not the one under test")
+    #expect(c.holdsKeyStatus == false, "a dismissed question left the panel holding key status")
+}
+
+/// Ending three of three: lapsed. The one nobody chooses — the hook gave up and
+/// the drawer closed itself — and the one where a leaked key status would be
+/// hardest to notice, because the person never touched the island at all.
+@MainActor @Test func aLapsedQuestionGivesKeyStatusBack() async throws {
+    let c = makeController()
+    c.setQuestion(aThreeChoiceQuestion(deadline: 0.05))
+    c.click()
+    #expect(c.holdsKeyStatus, "setup: nothing to release, so this proves nothing")
+
+    await waitForMainActorTurns(until: { c.model.tier == .rest })
+
+    #expect(c.model.tier == .rest, "setup: the question never lapsed")
+    #expect(c.holdsKeyStatus == false, "a lapsed question left the panel holding key status")
+}
+
+/// Not one of the three endings — the question stays parked (see `click()`) —
+/// but the badges are off screen, so holding key past it is the spike's hazard
+/// with nothing gained. And it must come back on the next click, or a person who
+/// closes and reopens the drawer can no longer answer with the keyboard.
+@MainActor @Test func closingTheDrawerByClickingGivesKeyStatusBackAndReopeningTakesItAgain() {
+    let c = makeController()
+    c.setQuestion(aThreeChoiceQuestion())
+    c.click()
+    #expect(c.holdsKeyStatus, "setup: nothing to release, so this proves nothing")
+
+    c.click()
+    #expect(c.model.question != nil, "setup: the click abandoned the question instead of closing the drawer")
+    #expect(c.holdsKeyStatus == false, "a closed drawer left the panel holding key status")
+
+    c.click()
+    #expect(c.holdsKeyStatus, "reopening the drawer left the number keys undeliverable")
+}
+
+/// Teardown ends the window as finally as any answer does. `dismiss()` orders
+/// the panel out, so AppKit has already resigned key by then — this is about
+/// this object not going on believing otherwise, which a later `present()` would
+/// read as "already held" and never re-take.
+@MainActor @Test func dismissGivesKeyStatusBack() {
+    let c = makeController()
+    c.setQuestion(aThreeChoiceQuestion())
+    c.click()
+    #expect(c.holdsKeyStatus, "setup: nothing to release, so this proves nothing")
+
+    c.dismiss()
+
+    #expect(c.holdsKeyStatus == false, "a torn-down controller still believes it holds key status")
 }

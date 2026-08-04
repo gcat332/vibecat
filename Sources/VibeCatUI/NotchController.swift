@@ -47,19 +47,40 @@ import VibeCatCore
     /// unless something removes it, and this one is registered on
     /// `NSWorkspace`'s own centre rather than the default one.
     private var motionObserver: NSObjectProtocol?
-    /// Task 9's own hardware question (can a `.nonactivatingPanel` become key
-    /// without stealing focus?) is still open — see `KeyDownProbe` — so this
-    /// is the only keyboard wiring this round. A *local* monitor, never
-    /// `NSEvent.addGlobalMonitorForEvents`: a global monitor needs
-    /// Accessibility, which this app does not otherwise require, and trading
-    /// a whole-input-stream grant for one keystroke is a bad deal the plan
-    /// already rejected. This never calls `makeKey`/activates anything
-    /// itself, so it changes nothing about the unmeasured question either
-    /// way — it only reacts to a `keyDown` AppKit was already going to hand
-    /// this app. See `dismissOnEscape`'s own doc comment for why Escape,
-    /// specifically, is safe to wire before that question is answered, when
-    /// number keys are not.
-    private var escapeMonitor: Any?
+    /// The one local `keyDown` monitor: Escape (`dismissOnEscape`) and §10.1's
+    /// number keys (`answerOnNumberKey`), dispatched by `handleKeyDown`.
+    ///
+    /// A *local* monitor, never `NSEvent.addGlobalMonitorForEvents`: a global
+    /// monitor needs Accessibility, which this app does not otherwise require,
+    /// and trading a whole-input-stream grant for a handful of keystrokes is a
+    /// bad deal the plan already rejected. A local monitor only ever sees a
+    /// `keyDown` AppKit was already going to hand this app — which, for a
+    /// `.nonactivatingPanel`, means only while the panel holds key status; see
+    /// `takeKeyStatusIfShowingAQuestion()` for the one window in which it does.
+    ///
+    /// **Named `escapeMonitor` until Plan 6.1 Task 4**, when the key-input spike
+    /// (`docs/superpowers/spikes/2026-08-03-notch-panel-key-input.md`) settled
+    /// the hardware question the old name's own comment was waiting on — Path A,
+    /// key without focus — and the number keys were wired through this same
+    /// monitor. The rename is not cosmetic: a reader who trusted the old name
+    /// would conclude a digit cannot reach this app at all.
+    private var keyMonitor: Any?
+    /// Whether the panel is currently holding key status, tracked here rather
+    /// than read back off `panel.isKeyWindow` — there is no window server in
+    /// `swift test`, so `isKeyWindow` is permanently `false` under test and an
+    /// assertion on it could not tell a working implementation from one that
+    /// never called `makeKeyAndOrderFront` at all. This is the state the tests
+    /// assert on; the AppKit calls it guards are what step 5's hardware check
+    /// exists to confirm.
+    ///
+    /// The spike's own hazard is why this exists at all: delivery to a key
+    /// `.nonactivatingPanel` is **exclusive** and `frontmostApplication` does
+    /// not change, so a panel left key at rest silently swallows everything the
+    /// person types into a terminal that still shows every sign of having
+    /// focus. Key status is therefore held for the narrowest window that can
+    /// still honour §10.1 — see `takeKeyStatusIfShowingAQuestion()` — and given
+    /// back at each of the three ways a question ends.
+    private(set) var holdsKeyStatus = false
     private let sampler = BackdropSampler()
     private var backdropSample: Task<Void, Never>?
     /// Cancel-and-reschedule, the same shape as `bloomEnd` and for the same
@@ -170,21 +191,26 @@ import VibeCatCore
     /// rect at all.
     var hoverForTesting: HoverMonitor? { hover }
 
-    /// The live local Escape monitor, for `NotchControllerTests` only — same
+    /// The live local `keyDown` monitor, for `NotchControllerTests` only — same
     /// visibility reasoning as `panelForTesting`. Final whole-branch review,
     /// finding 4: Escape is the only user-initiated dismiss this app has, and
-    /// nothing before this test read `escapeMonitor` at all — deleting the
-    /// whole installation block in `present()` failed no test, because every
+    /// nothing before this test read the monitor at all — deleting the whole
+    /// installation block in `present()` failed no test, because every
     /// behavioural Escape test in this file drives `dismissOnEscape(_:)`
     /// directly rather than through a real, delivered `NSEvent` (there is no
     /// window server in `swift test` to deliver one). This closes the gap one
     /// level down from that: not "does Escape dismiss," which those tests
     /// already cover, but "is the monitor that would ever receive a real
     /// Escape actually installed at all."
-    var escapeMonitorForTesting: Any? { escapeMonitor }
+    ///
+    /// Plan 6.1 Task 4 inherits exactly the same gap for the number keys, and
+    /// the same accessor closes it — plus `handleKeyDown(_:)`, which is what the
+    /// monitor's closure now consists of, so that a *digit* branch deleted from
+    /// the dispatch fails a test rather than only the whole block failing one.
+    var keyMonitorForTesting: Any? { keyMonitor }
 
     /// The live Reduce Motion observer, for `MotionBypassTests` only — the same
-    /// visibility reasoning as `escapeMonitorForTesting`, and installed for
+    /// visibility reasoning as `keyMonitorForTesting`, and installed for
     /// exactly the reason that accessor records. Every behavioural test of this
     /// drives `refreshMotion()`/`apply(motion:)` directly, because a test process
     /// cannot toggle a system accessibility switch — so without this, deleting
@@ -267,25 +293,38 @@ import VibeCatCore
         // onQuestion above, so a second present() without an intervening
         // dismiss() re-wires them rather than leaving stale closures.
         model.onIslandClick = { [weak self] in self?.click() }
-        model.onAnswer = { [weak self] reply in self?.appModel.answer(reply) }
+        // `answer(_:)`, not `appModel.answer(reply)` directly: answering is one
+        // of the three ways a question ends, and every one of them has to give
+        // key status back (see `holdsKeyStatus`). A mouse tap on a row and a
+        // number key are the same ending, so they go through the same method
+        // rather than each remembering to release on its own.
+        model.onAnswer = { [weak self] reply in self?.answer(reply) }
         // The footer's mute button — see `toggleMute()` and
         // `onSoundEnabledChanged`'s own doc comments.
         model.onToggleMute = { [weak self] in self?.toggleMute() }
 
-        // Escape while the drawer is open dismisses without answering — see
-        // dismissOnEscape's own doc comment. Torn down and rebuilt the same
-        // way the screen-parameters observer below is, so a second present()
-        // without an intervening dismiss() re-installs rather than leaking a
-        // second monitor.
-        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
-        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        // Escape dismisses without answering; a digit picks the row its badge
+        // names (§10.1) — see `handleKeyDown(charactersIgnoringModifiers:)`,
+        // which is the whole of this closure's decision so that both branches
+        // are reachable from a test. Torn down and rebuilt the same way the
+        // screen-parameters observer below is, so a second present() without an
+        // intervening dismiss() re-installs rather than leaking a second
+        // monitor.
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            return self.dismissOnEscape(charactersIgnoringModifiers: event.charactersIgnoringModifiers)
+            return self.handleKeyDown(charactersIgnoringModifiers: event.charactersIgnoringModifiers)
                 ? nil : event
         }
 
         render()
-        // Never makeKeyAndOrderFront — the app must not steal focus.
+        // Never makeKeyAndOrderFront *here* — presenting the island must not
+        // take key status, because at this point there is nothing to answer and
+        // a key panel swallows every keystroke the person aims at their terminal
+        // (the spike's own hazard; see `holdsKeyStatus`). Key is taken only while
+        // an open drawer is showing a question — `takeKeyStatusIfShowingAQuestion`
+        // — and that call does use `makeKeyAndOrderFront`, which the spike
+        // measured as *not* activating this app.
         panel.orderFrontRegardless()
 
         // present() may run again without an intervening dismiss() (there is
@@ -379,8 +418,16 @@ import VibeCatCore
             NSWorkspace.shared.notificationCenter.removeObserver(motionObserver)
         }
         motionObserver = nil
-        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
-        escapeMonitor = nil
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+        // Teardown is not one of the three question endings, but it ends the
+        // window in which key status is legitimate just as finally: the panel is
+        // ordered out immediately above, so AppKit has already resigned key —
+        // this only stops this object from believing otherwise. Ordering
+        // matters: `releaseKeyStatus()` reads `panel`, so it runs before the
+        // `panel = nil` above would make it a no-op — which is why the release
+        // is expressed as a plain flag reset here rather than a call.
+        holdsKeyStatus = false
     }
 
     /// `NotificationCenter` holds the `didChangeScreenParametersNotification`
@@ -477,6 +524,82 @@ import VibeCatCore
                 panel.apply(needed)
             }
         }
+
+        // Last, after the panel is at the size the open drawer needs: a panel
+        // that becomes key and *then* resizes is the same end state, but this
+        // way the window the person's keystrokes are being routed to is never
+        // momentarily the collapsed one. Idempotent — see its own guard.
+        takeKeyStatusIfShowingAQuestion()
+    }
+
+    /// Takes key status when — and only when — the drawer is actually showing a
+    /// question, which is the narrowest window in which §10.1's number keys can
+    /// mean anything: the digit a person presses is the one printed on a badge
+    /// they can see, and a badge only exists inside an open drawer.
+    ///
+    /// **This is narrower than the plan's own wording** ("take key on open"),
+    /// deliberately, and the narrowing follows the plan's own reason rather than
+    /// bending it. The spike's hazard is that a key panel swallows keystrokes
+    /// while the terminal still looks focused; a question that has *arrived* but
+    /// whose drawer nobody has opened is exactly that state — nothing on screen
+    /// says this app is receiving anything, and there is no badge to press.
+    /// Taking key on arrival would also make a digit typed into a terminal
+    /// answer a question whose choices are not on screen, which is the worst
+    /// available outcome for a `rm -rf` prompt.
+    ///
+    /// Called from `reflow()`, which every path that can open a drawer already
+    /// funnels through (`click()`, `setQuestion(_:)`, `setHovering(_:)`), so
+    /// there is one condition rather than one call per opener. It only ever
+    /// *takes*; the releases are explicit at each ending below, because each
+    /// ending must be separately breakable — a single shared release would let a
+    /// missing one hide behind another.
+    ///
+    /// `makeKeyAndOrderFront(nil)`, not `makeKey()`: it is the exact call the
+    /// spike measured as taking key without changing `frontmostApplication`, and
+    /// the panel is already ordered front, so the `orderFront` half is a no-op.
+    /// Reaching for a call the measurement did not cover would be trading a
+    /// verified behaviour for an assumed one. Note this contradicts `present()`'s
+    /// own "never makeKeyAndOrderFront" comment as it stood before Plan 6.1: that
+    /// comment was written while the hardware question was open, and the answer
+    /// is that becoming key does *not* activate this app (Path A).
+    private func takeKeyStatusIfShowingAQuestion() {
+        guard !holdsKeyStatus, model.question != nil, model.drawerOpen, let panel else { return }
+        holdsKeyStatus = true
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    /// Gives key status back, so whatever the person types next reaches the app
+    /// that has looked focused the whole time.
+    ///
+    /// `orderOut` then `orderFrontRegardless()`, rather than `resignKey()`:
+    /// `resignKey()` is AppKit's *notification* that key status was lost, not a
+    /// way to give it up (Apple's own documentation says it is invoked by the
+    /// window system), while a window that is not on screen cannot be key at
+    /// all — so ordering out is the one relinquishment that does not depend on
+    /// some other window being available to take over, which for a
+    /// single-panel, non-activating app there may not be. Both calls are in the
+    /// same main-actor turn, so nothing is presented in between; the panel is
+    /// borderless and transparent regardless. Verified on hardware in Task 4
+    /// step 5 — see this task's own report — because "did key status actually go
+    /// back" is not observable in a test process with no window server.
+    private func releaseKeyStatus() {
+        guard holdsKeyStatus else { return }
+        holdsKeyStatus = false
+        guard let panel else { return }
+        panel.orderOut(nil)
+        panel.orderFrontRegardless()
+    }
+
+    /// The first of the three ways a question ends. Wired to `model.onAnswer` in
+    /// `present()` (a tap on a row or on Send) and called by
+    /// `answerOnNumberKey` (§10.1's digit), so both finish the same way rather
+    /// than each half-remembering what finishing involves.
+    ///
+    /// `internal`, not `private`: this file's own tests drive wiring entry points
+    /// directly, the same as `click()`/`setHovering(_:)`/`toggleMute()`.
+    func answer(_ reply: Reply) {
+        appModel.answer(reply)
+        releaseKeyStatus()
     }
 
     /// The hover monitor's own edge callback routes here, and so does every
@@ -542,6 +665,17 @@ import VibeCatCore
                 // own — and clears appModel.pending, which reaches back here
                 // via onQuestion(nil) above.
                 self.appModel.dismissQuestion()
+                // The third of the three endings. Deliberately here rather than
+                // folded into `setQuestion(nil)` — which `dismissQuestion()`
+                // above does reach — because a lapse, an answer and an Escape
+                // must each be separately breakable: one shared release in
+                // `setQuestion(nil)` would keep every test green with two of the
+                // three paths deleted, which is the exact defect shape this
+                // repo keeps finding. The audit that makes that safe is that
+                // `AppModel.clearQuestion` has exactly two callers — `answer`
+                // and `dismissQuestion` — and `dismissQuestion` has exactly two
+                // of its own, this line and `dismissOnEscape`.
+                self.releaseKeyStatus()
             }
         }
         reflow()
@@ -577,8 +711,14 @@ import VibeCatCore
     /// drawer must not silently abandon a question the hook is still
     /// waiting on. The question stays parked, still running its own
     /// deadline, and a third click reopens the same one.
+    /// A fourth release site, and deliberately not one of the three endings:
+    /// clicking the drawer shut leaves the question parked (see the paragraph
+    /// above), so the *question* has not ended — but the badges are off screen,
+    /// and holding key past that is precisely the spike's hazard with nothing
+    /// gained. `reflow()` will take it again if the drawer is clicked back open.
     func click() {
         model.drawerOpen.toggle()
+        if !model.drawerOpen { releaseKeyStatus() }
         reflow()
     }
 
@@ -623,16 +763,21 @@ import VibeCatCore
     /// through the same `onQuestion` wiring `setQuestion(_:)` already is —
     /// one path, not a second copy of "close the drawer" logic.
     ///
-    /// Escape only, deliberately — not number keys. Both would need the same
-    /// delivery (a `keyDown` this app actually receives), which is Task 9's
-    /// own still-unmeasured hardware question — but the two have opposite
-    /// risk if that measurement ever turns out to allow delivery at all:
-    /// dismissing is always safe (worst case, a drawer closes a beat early,
-    /// recoverable with one more click), while answering — even a
-    /// non-destructive one — is not something this file does from a
-    /// keystroke yet, and a destructive one is exactly what §10.3's second
-    /// ask exists to gate. So this never calls `QuestionModel.pick`/`reply()`
-    /// at all, regardless of what the keystroke was, unless it is Escape.
+    /// Escape only, still — a digit is `answerOnNumberKey` below, not this. The
+    /// two are separate functions rather than one switch because they carry
+    /// different risk and are gated on different things: dismissing is safe
+    /// under any outcome (worst case a drawer closes a beat early, recoverable
+    /// with one more click), while answering has to route through
+    /// `QuestionModel.pick`/`.reply()` so §10.3's second ask still binds. This
+    /// one never calls either, regardless of what the keystroke was.
+    ///
+    /// **Correction, Plan 6.1 Task 4 (2026-08-04):** this comment used to say
+    /// number keys could not be wired because delivery was "Task 9's own
+    /// still-unmeasured hardware question." That question is answered — Path A,
+    /// key without focus, measured three times with a witness document (see
+    /// `docs/superpowers/spikes/2026-08-03-notch-panel-key-input.md`) — and the
+    /// number keys are wired now. What the spike added instead is the *key
+    /// status* constraint, which is why the dismiss below releases it.
     @discardableResult
     func dismissOnEscape(charactersIgnoringModifiers: String?) -> Bool {
         // Pattern match, not `== .drawer`: `IslandTier.drawer(height:)` carries
@@ -640,7 +785,83 @@ import VibeCatCore
         // uses `if case .drawer = model.tier` rather than `==`.
         guard case .drawer = model.tier, KeyRouting.isEscape(charactersIgnoringModifiers) else { return false }
         appModel.dismissQuestion()
+        // The second of the three endings — see the lapse `Task`'s own comment
+        // on why this is not folded into `setQuestion(nil)`.
+        releaseKeyStatus()
         return true
+    }
+
+    /// §10.1: "A number badge marks each row and the matching number key picks
+    /// it." The whole of the keyboard's answering path, and every line of it is
+    /// a guard for a reason:
+    ///
+    /// - **The drawer has to be open.** The digit a person presses is the one
+    ///   printed on a badge, and a badge only exists inside an open drawer.
+    ///   Without this, `1` typed anywhere would answer a question whose choices
+    ///   are not on screen. Same pattern match, and for the same reason, as
+    ///   `dismissOnEscape` above.
+    /// - **Single select only.** §10.2 draws the distinction in the control: a
+    ///   number badge means the click is the answer, a checkbox means it is not,
+    ///   and a multi-select row shows a checkbox. So there is no digit on screen
+    ///   to press, and this reports the keystroke unhandled rather than eating
+    ///   it. `QuestionModel.pick` would already refuse (it guards `!isMulti`),
+    ///   so this is legibility over a silent no-op, not the only thing standing
+    ///   between a digit and a multi-select answer.
+    /// - **Not while `Other…`'s field is up.** `isWritingOther` means the person
+    ///   is typing free text (Plan 6.1 Task 5 restores the row), and `2` in
+    ///   "port 8082" is a character, not a choice. Consuming it here would make
+    ///   the field silently undigitable.
+    /// - **`KeyRouting.pick`, then `QuestionModel.pick`, then `reply()`.** The
+    ///   order is the point. `KeyRouting.pick` only *reads* which row a digit
+    ///   names — its own doc comment is explicit that this must then go through
+    ///   the model, "never fabricate a `Reply` directly from a raw id," because a
+    ///   fabricated `Reply` would walk straight around §10.3's second ask for a
+    ///   destructive command. `reply()` returning `nil` while confirmation is
+    ///   outstanding is what makes the second press, not the first, the answer.
+    ///
+    /// The body below is `QuestionFace.tapped(_:)`'s single-select branch,
+    /// deliberately: a digit is the same gesture as a tap on the row that digit
+    /// names, including "pressing the same one again is the confirmation" —
+    /// §10.3's banner says *tap the highlighted choice again*, and the number key
+    /// is how that choice is reachable from the keyboard. It is duplicated rather
+    /// than shared because `QuestionFace` is a SwiftUI `View` in the drawer and
+    /// this is the controller; the coupling is pinned by
+    /// `theNumberKeyAndTheTapAgreeOnWhatASecondPressMeans`.
+    @discardableResult
+    func answerOnNumberKey(charactersIgnoringModifiers: String?) -> Bool {
+        guard case .drawer = model.tier, let question = model.question else { return false }
+        guard !question.isMulti, !question.isWritingOther else { return false }
+        guard let characters = charactersIgnoringModifiers, characters.count == 1,
+              let digit = characters.first,
+              let id = KeyRouting.pick(character: digit, in: question) else { return false }
+
+        if question.selected.contains(id) && question.needsConfirmation {
+            question.confirm()
+        } else {
+            question.pick(id)
+        }
+        if let reply = question.reply() { answer(reply) }
+        return true
+    }
+
+    /// The whole of the local `keyDown` monitor's decision, factored out for the
+    /// same reason `dismissOnEscape` itself was: there is no window server in
+    /// `swift test`, so the only way a test can exercise what the monitor *does*
+    /// is to call what the monitor calls. Escape first — dismissing must stay
+    /// reachable even if a question's own state somehow made the digit path
+    /// throw a guard — then §10.1's digits. Returns whether the keystroke was
+    /// consumed, which the monitor turns into `nil` (swallow) or the event
+    /// itself (fall through).
+    ///
+    /// This exists as its own function rather than as two calls inside the
+    /// closure because a closure body is unreachable from a test: with the
+    /// dispatch inline, deleting the digit branch would fail nothing, which is
+    /// exactly the gap `keyMonitorForTesting`'s own comment records for the
+    /// installation block one level up.
+    @discardableResult
+    func handleKeyDown(charactersIgnoringModifiers: String?) -> Bool {
+        if dismissOnEscape(charactersIgnoringModifiers: charactersIgnoringModifiers) { return true }
+        return answerOnNumberKey(charactersIgnoringModifiers: charactersIgnoringModifiers)
     }
 
     /// `internal`, not `private`: `anIdenticalEventDoesNotRewriteTheModel` drives

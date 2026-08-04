@@ -114,7 +114,7 @@ import VibeCatUI
 ///   concurrency (`Any` is not `Sendable`, and the timer closure is not
 ///   actor-isolated even though it only ever fires on the main run loop). A
 ///   stored property read through `self` — the same shape
-///   `NotchController.escapeMonitor` already uses for the identical problem
+///   `NotchController.keyMonitor` already uses for the identical problem
 ///   — sidesteps it: capturing a class reference across that boundary is
 ///   fine, only capturing the bare token directly was not.
 /// - The panel itself, and this instance, both need a *strong* owner for
