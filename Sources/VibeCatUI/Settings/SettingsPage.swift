@@ -87,10 +87,11 @@ public struct SettingsPage: Sendable, Equatable, Identifiable {
             "This page's controls are Plan 6.7's — the per-CLI hook list, the reply "
                 + "channel and the IDE extensions. Plan 6.4 built the window, the sidebar "
                 + "and this heading."
-        case "notifications":
-            "This page's controls are Plan 6.5's — the per-cue pickers, the volume "
-                + "slider and the sound pack that Plan 6.2 built and left without a sheet. "
-                + "Mute already works, from the panel's own footer."
+        // `"notifications"` deliberately absent: Plan 6.5 shipped its controls,
+        // so this returns `nil` for it and `SettingsPaneView` draws
+        // `NotificationsPane` in the note's place. This is the disappearance the
+        // `String?` return type was chosen for — see this method's own doc
+        // comment, which predicted exactly this case.
         case "display":
             "This page's controls are Plan 6.6's — the notch preview, the flanks, the "
                 + "cat's coat, the panel sizes, the session card and the motion control. "

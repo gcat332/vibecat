@@ -61,19 +61,21 @@ struct SettingsSidebarTests {
         }
     }
 
-    @Test func everyPaneAnnouncesWhichPlanOwnsItsControls() {
-        // This plan ships chrome. A pane that looks finished and does nothing is
+    @Test func everyPaneWithoutControlsAnnouncesWhichPlanOwnsThem() {
+        // 6.4 shipped chrome. A pane that looks finished and does nothing is
         // worse than one that says so, and this is what stops the next reader
         // filing it as a bug.
-        for page in SettingsPage.all where page.key != "notifications" {
+        //
+        // **Plan 6.5 Task 7 shipped the Notifications controls, so that page's
+        // note is now gone** — which is the disappearance `ownerNote(for:)`'s
+        // `String?` return type was chosen for. Asserted as a `nil` rather than
+        // dropped from the loop: a note left behind would draw *above* the real
+        // controls in `SettingsPaneView`, and nothing else here would notice.
+        for page in SettingsPage.all where page.key != SettingsPageKey.notifications {
             #expect(SettingsPage.ownerNote(for: page.key) != nil, "\(page.key) has no owner note")
         }
-        // The plan's own loop skips `notifications` — presumably because mute, the
-        // one control 6.4 does ship, is that page's. It still has no controls *in
-        // this window*, so it still carries a note, and asserting it here is what
-        // stops "every pane" from being a name for "three panes". Reported rather
-        // than silently rewriting the plan's loop.
-        #expect(SettingsPage.ownerNote(for: "notifications") != nil)
+        #expect(SettingsPage.ownerNote(for: SettingsPageKey.notifications) == nil,
+                "the Notifications page has controls now — its owner note must be gone")
         // The other half: an unknown key has no note, so a `switch` with a
         // `default` returning a placeholder string cannot pass.
         #expect(SettingsPage.ownerNote(for: "kitchen-sink") == nil)
@@ -82,7 +84,6 @@ struct SettingsSidebarTests {
         // assertion above.
         #expect(SettingsPage.ownerNote(for: "general")?.contains("6.7") == true)
         #expect(SettingsPage.ownerNote(for: "integrations")?.contains("6.7") == true)
-        #expect(SettingsPage.ownerNote(for: "notifications")?.contains("6.5") == true)
         #expect(SettingsPage.ownerNote(for: "display")?.contains("6.6") == true)
     }
 
@@ -197,7 +198,7 @@ struct SettingsSidebarTests {
         // rather than predicting what is being measured.) At `glyphSide: 20` the
         // same arithmetic gives 12.67pt, well outside the ±1.5 allowed here.
         let bell = SettingsPage.all[2]
-        let pane = try rasterise(SettingsPaneView(page: bell).frame(width: 704, height: 620))
+        let pane = try rasterise(SettingsPaneView(page: bell, notifications: makeNotificationsPaneModel().model).frame(width: 704, height: 620))
         let chip = (x: 24, y: 20, side: 24)
         var minX = Int.max, maxX = Int.min
         for y in chip.y..<(chip.y + chip.side) {
@@ -272,7 +273,7 @@ struct SettingsSidebarTests {
         // ~349 that can only be flat chip colour.
         let chipBox = (x: 24, y: 20, side: 24)
         for page in SettingsPage.all {
-            let pane = try rasterise(SettingsPaneView(page: page).frame(width: 704, height: 620))
+            let pane = try rasterise(SettingsPaneView(page: page, notifications: makeNotificationsPaneModel().model).frame(width: 704, height: 620))
             #expect(count(in: pane, box: chipBox, near: page.chip) > 300,
                     "\(page.key)'s pane heading does not draw its own chip at (24,20)")
             for other in SettingsPage.all where other.key != page.key {
@@ -293,7 +294,8 @@ struct SettingsSidebarTests {
         // `--haze` text. So below the heading band, a pixel that is none of the
         // card, the rule or the window's own ground can only be text — which makes
         // "the words were drawn" answerable without reading them.
-        let pane = try rasterise(SettingsPaneView(page: SettingsPage.all[3])
+        let pane = try rasterise(SettingsPaneView(page: SettingsPage.all[3],
+                                                 notifications: makeNotificationsPaneModel().model)
             .frame(width: 704, height: 620))
         // `.content{padding-top:20px}` + `.chip{height:24px}` +
         // `.ptitle{padding-bottom:18px}` = the group starts at y=62. Everything
@@ -344,7 +346,8 @@ struct SettingsSidebarTests {
         let size = SettingsWindowController.contentSize
         let headingChip = (x: Int(SettingsSidebar.width) + 24, y: 20, side: 24)
         for selected in SettingsPage.all {
-            let shell = try rasterise(SettingsShell(selection: .constant(selected.key))
+            let shell = try rasterise(SettingsShell(selection: .constant(selected.key),
+                                          notifications: makeNotificationsPaneModel().model)
                 .frame(width: size.width, height: size.height))
             #expect(count(in: shell, box: headingChip, near: selected.chip) > 300,
                     "selecting \(selected.key) did not put its chip in the pane heading")
@@ -366,7 +369,8 @@ struct SettingsSidebarTests {
         // reaches `model.selectedPage`, for the same reason
         // `PanelBarTests.tappingEachButtonCallsItsOwnClosureAndNotTheOther` records:
         // no ViewInspector-style dependency, and this project takes none.
-        let model = SettingsWindowModel(selectedPage: "notifications")
+        let model = SettingsWindowModel(selectedPage: "notifications",
+                                        notifications: makeNotificationsPaneModel().model)
         let root = try rasterise(SettingsRootView(model: model)
             .frame(width: SettingsWindowController.contentSize.width, height: 400))
         let headingChip = (x: Int(SettingsSidebar.width) + 24, y: 20, side: 24)
@@ -378,7 +382,8 @@ struct SettingsSidebarTests {
         // `SettingsWindowController` clamps, but the shell must not depend on that
         // to avoid an empty content area — the same two-layer reasoning
         // `anUnknownStoredPageStillOpensSomething` records one file over.
-        let shell = try rasterise(SettingsShell(selection: .constant("kitchen-sink"))
+        let shell = try rasterise(SettingsShell(selection: .constant("kitchen-sink"),
+                                      notifications: makeNotificationsPaneModel().model)
             .frame(width: SettingsWindowController.contentSize.width, height: 400))
         let headingChip = (x: Int(SettingsSidebar.width) + 24, y: 20, side: 24)
         #expect(count(in: shell, box: headingChip, near: SettingsPage.all[0].chip) > 300,
@@ -421,7 +426,8 @@ struct SettingsSidebarTests {
     guard let prefix = ProcessInfo.processInfo.environment["VIBECAT_SETTINGS_SHEET"] else { return }
     let size = SettingsWindowController.contentSize
     for page in SettingsPage.all {
-        let shell = try rasterise(SettingsShell(selection: .constant(page.key))
+        let shell = try rasterise(SettingsShell(selection: .constant(page.key),
+                                      notifications: makeNotificationsPaneModel().model)
             .frame(width: size.width, height: size.height), scale: 2)
         shell.writePNG(to: "\(prefix)-\(page.key).png")
     }

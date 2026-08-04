@@ -115,7 +115,12 @@ public struct UserDefaultsPreferenceStore: PreferenceStoring {
 /// a key that no longer names a pane and `VibeCatCore` cannot see the views.
 /// Kept in step with `SettingsPage.all` by `theCoreAndTheUIAgreeOnThePageKeys`.
 public enum SettingsPageKey {
-    public static let all = ["general", "integrations", "notifications", "display"]
+    /// Named because two places branch on this one key: `SettingsPaneView` draws
+    /// real controls for it rather than an owner note, and `SettingsPage
+    /// .ownerNote(for:)` no longer answers for it. A string literal in both is
+    /// how one of them silently stops matching.
+    public static let notifications = "notifications"
+    public static let all = ["general", "integrations", notifications, "display"]
     public static func isKnown(_ key: String) -> Bool { all.contains(key) }
 }
 

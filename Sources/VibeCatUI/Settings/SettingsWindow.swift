@@ -22,13 +22,23 @@ import VibeCatCore
     /// `selectPage(_:)`, so that every change is also persisted.
     var selectedPage: String
 
+    /// The Notifications page's own model, carried through to `SettingsShell`.
+    ///
+    /// Held here rather than built inside `SettingsRootView.body` for the reason
+    /// this whole type exists: a `body` that constructs an `@Observable` builds a
+    /// fresh one on every invalidation, so every switch on that page would
+    /// forget what it was mid-edit and every `Play` would re-seed the engine.
+    let notifications: NotificationsPaneModel
+
     /// What to do with a page the user has just moved to. A closure rather than a
     /// `PreferenceStoring`, because this type has no other business with the store
     /// and a closure is what lets a test see the write without a second store.
     private let persist: (String) -> Void
 
-    init(selectedPage: String, persist: @escaping (String) -> Void = { _ in }) {
+    init(selectedPage: String, notifications: NotificationsPaneModel,
+         persist: @escaping (String) -> Void = { _ in }) {
         self.selectedPage = selectedPage
+        self.notifications = notifications
         self.persist = persist
     }
 
@@ -80,7 +90,7 @@ struct SettingsRootView: View {
         // `model.pageBinding`, not `@Bindable`'s `$model.selectedPage` — see that
         // property's own doc comment. The read direction is identical; the write
         // direction is what changed, and it is the direction that was missing.
-        SettingsShell(selection: model.pageBinding)
+        SettingsShell(selection: model.pageBinding, notifications: model.notifications)
     }
 }
 
@@ -141,7 +151,22 @@ struct SettingsRootView: View {
     /// unless something removes it.
     private var closeObserver: NSObjectProtocol?
 
-    public init(store: PreferenceStoring) {
+    /// `syncSoundSettings` and `playCue` are the sound engine, as two closures —
+    /// `SoundSectionModel`'s own doc comment records why it takes those rather
+    /// than a `SoundPlayer` (a real one renders `.error` on a background queue
+    /// that outlives the call, and measurably worsened `PipelineTests`' known
+    /// flake when a test provoked it). They default to doing nothing so the
+    /// fifteen existing test call sites of this initialiser keep compiling
+    /// against a window whose Sound rows write the store and reach no engine —
+    /// which is all those tests were ever about.
+    ///
+    /// **`main.swift` must pass both, and no test can prove it does.** Same
+    /// hazard as `AppModel`'s `preferences` parameter: a default that is right
+    /// for tests is silently wrong for the app. The compiler cannot ask, so this
+    /// comment does.
+    public init(store: PreferenceStoring,
+                syncSoundSettings: @escaping (SoundSettings) -> Void = { _ in },
+                playCue: @escaping (Cue) -> Void = { _ in }) {
         self.store = store
         let stored = store.load().selectedPage
         // Two layers of clamping on purpose, and this is the outer one.
@@ -170,6 +195,12 @@ struct SettingsRootView: View {
         // controller through its own model.
         self.model = SettingsWindowModel(
             selectedPage: SettingsPageKey.isKnown(stored) ? stored : Preferences().selectedPage,
+            // The same `store` every other writer on this window uses, so a
+            // switch on the Notifications page and a page change land in one
+            // plist rather than two truths.
+            notifications: NotificationsPaneModel(store: store,
+                                                  syncSoundSettings: syncSoundSettings,
+                                                  playCue: playCue),
             persist: { key in
                 var prefs = store.load()
                 prefs.selectedPage = key

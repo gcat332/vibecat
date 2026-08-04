@@ -1,17 +1,332 @@
+import AppKit
 import SwiftUI
 import VibeCatCore
+
+/// §14's Notifications page, assembled — `settings.html:323-378`, all three
+/// groups in the prototype's own order: `Alert me when an agent`, `Sound`
+/// (marked `new`), `Elsewhere`.
+///
+/// **This is what retired 6.4's owner note for `"notifications"`.** The note
+/// existed so a pane with no controls would read as a schedule rather than a
+/// bug; the controls are here, so `SettingsPage.ownerNote(for:)` now returns
+/// `nil` for this key and `SettingsPaneView` draws this instead. The other three
+/// panes keep theirs, and `everyPaneWithoutControlsAnnouncesWhichPlanOwnsThem`
+/// in `SettingsSidebarTests` holds that line.
+///
+/// # The browser diff, 2026-08-04
+///
+/// `settings.html` was opened in Chrome (macOS 26.5.2) with this pane forced
+/// active, and every element of it measured with `getBoundingClientRect` and
+/// `getComputedStyle` against this implementation's own rasters. What agrees is
+/// not listed here; what differs is, because a divergence nobody wrote down gets
+/// re-introduced by the next person who notices it.
+///
+/// **Confirmed exact** (worth naming, because each was a guess before): `.row`
+/// `padding:11px 14px` and `gap:14px` — a plain switch row is `44px` in the
+/// browser and `44pt` here, and the track's right edge sits at `width − 14` in
+/// both, now pinned by `theRowsPaddingIsThePrototypesElevenAndFourteen`; `.sw`
+/// `38×22`; `.pill` `61.98×13.5` with a `13px` dot and a `9px` glyph in `#111`;
+/// `.new` `9.5px/0.57px/1px @45%/radius 4/1-5 padding/margin-left 7`; the
+/// detail line's `line-height:16.675px`; `.ctlarea{width:180px}` on the volume
+/// row and its `value="60"`; every colour token (`--card` `rgb(42,42,45)`,
+/// `--card2` `rgb(50,50,54)`, `--haze` `rgb(154,154,162)`, `--blue`
+/// `rgb(10,132,255)`, `.sw` off `rgb(72,72,78)`, `.pill.ok` `rgb(63,217,155)`).
+/// And `.group > .row:first-child{box-shadow:none}` reads `none` on all three
+/// groups' first rows, which is what Task 7 implemented and Task 2 had recorded
+/// as missing.
+///
+/// **Six differences, all recorded, three fixed:**
+///
+/// 1. **The prototype never has to scroll, and we do — fixed by the
+///    `ScrollView` in `SettingsPaneView`.** `.body{min-height:620px}` is a
+///    *min*: with this pane active the browser's `.win` grows to `914.2px` and
+///    the pane itself is `802.2px` tall. A real `NSWindow` cannot grow to fit,
+///    and 6.4 pinned the content area at `900×620`, so 771pt of page has to
+///    scroll inside 552pt. The prototype is simply silent on this, not
+///    permissive: nothing in it is ever clipped.
+/// 2. **A detail row is `1.67pt` shorter here** (`55` against `56.67`), and a
+///    heading `1pt` taller (`23` against `22`) — so the assembled page comes out
+///    ~7pt shorter than the browser's. Both are the half-leading trade
+///    `SettingsPaneView.ownerNote` already recorded and chose: CSS pads half a
+///    line above the first line and below the last, `lineSpacing` cannot, and
+///    matching the block height would visibly widen the line pitch. Pitch wins;
+///    the residue is this.
+/// 3. **`.sel` had no disclosure arrow — fixed.** The prototype's is a real
+///    `<select>`, so the browser draws the arrow and no CSS rule mentions it:
+///    `148.5px` wide against `129pt` of text and padding here. A hand-drawn
+///    select with no arrow reads as static text, which is a lost affordance
+///    rather than a lost pixel. See `SettingsSelect.body`.
+/// 4. **The volume control is not the prototype's.** `input[type=range]` is a
+///    `180×4` track with an overflowing thumb; SwiftUI's `Slider` is `180×16`
+///    with a larger knob, which makes that row `38pt` against `37px`. Task 6
+///    left this open explicitly ("may yet turn this into a fourth hand-drawn
+///    control"); it stays open, because the row height agrees to a point and the
+///    control is the platform's own.
+/// 5. **`.btn` is `27pt` here against `26.5px`, `.sel` `26pt` against `27px`.**
+///    Sub-point font-metric differences between Chrome's line boxes and
+///    AppKit's, in opposite directions; both rows they sit in agree to within a
+///    point. Not chased.
+/// 6. **The content column is `656pt` wide against the prototype's `654px`.**
+///    Already recorded by 6.4: `.win`'s `1px` border is the browser standing in
+///    for window chrome AppKit draws outside the content rect.
+struct NotificationsPane: View {
+    let model: NotificationsPaneModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            AlertsSection(model: model)
+            SoundSection(model: model.sound)
+            ElsewhereSection(model: model)
+        }
+        // A fresh read whenever the page comes up: a permission granted in
+        // System Settings — quite possibly *from this page's own button*, which
+        // is the whole point of that button — changes nothing here until
+        // something asks the system again.
+        .onAppear { model.notifier.refresh() }
+    }
+}
+
+/// `settings.html:326-337`'s `Alert me when an agent` — four switches, and the
+/// only page in this app whose controls change what the event pipeline does
+/// rather than how it looks.
+///
+/// **Written decision 4, restated where the switches are:** these gate the
+/// *cue* and the *notification*, never the island's own report. Turning
+/// `Needs an answer` off does not stop a blocked agent turning the island
+/// amber or opening the drawer — §4.2's worst-state-wins is not a preference.
+struct AlertsSection: View {
+    let model: NotificationsPaneModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeading("Alert me when an agent")
+            SettingsGroup {
+                SettingsRow("Needs an answer") {
+                    SettingsSwitch(isOn: model.onNeedsAnswerBinding)
+                }
+                SettingsRow("Finishes") {
+                    SettingsSwitch(isOn: model.onFinishBinding)
+                }
+                SettingsRow("Fails") {
+                    SettingsSwitch(isOn: model.onFailBinding)
+                }
+                // The one switch the prototype ships off (`aria-checked="false"`,
+                // `:334`) and the one marked `new`. Its sub-label is
+                // `StallDetector`'s own specification, quoted verbatim from
+                // `settings.html:335`.
+                SettingsRow("Stalls for 5 minutes",
+                    detail: "Nothing has happened in the session and no question is pending.",
+                    isNew: true) {
+                    SettingsSwitch(isOn: model.onStallBinding)
+                }
+            }
+        }
+    }
+}
+
+/// `settings.html:364-377`'s `Elsewhere`: the system-notification switch, and
+/// the two permission rows §15 names.
+///
+/// **Both permission rows are reports, not requests** — each is a `.pill` plus
+/// a `System Settings…` `.btn`, exactly as the prototype draws them
+/// (`:369-376`). Neither button prompts: notification authorization is asked
+/// for once at launch (`main.swift`), and Automation is never asked for at all
+/// until jump ships (written decision 2). A button that opens the pane where
+/// the user can change their mind is the honest control for a permission this
+/// app cannot re-ask for.
+///
+/// `Automation permission`'s detail line — *"macOS requires this to focus a
+/// terminal window on your behalf."* — is the prototype's (`:374`), and it is
+/// **not** in the plan's own summary of this page's contents. The prototype is
+/// the authority on appearance; the summary was lossy.
+///
+/// **What `Also post a system notification` gates, written down because the
+/// answer has a consequence.** §14 calls this the *system notification
+/// fallback*, so it is the channel's own switch: nothing posts while it is off.
+/// The one producer today is a stall (`Notifier.postStalls`), which means a user
+/// who turns `Stalls for 5 minutes` on and leaves this off gets **no alert at
+/// all** — a stall has no `Cue` (§12 defines five, none of them "stalled") and
+/// no island state of its own, so this channel is the only thing it could ever
+/// reach. Recorded rather than quietly resolved either way: the alternative,
+/// letting a stall post regardless, would make a switch that says it controls
+/// notifications not control one, which is worse. Wiring the other three
+/// triggers to this channel is not this task's — a *fallback* implies knowing
+/// the island cannot be seen, and nothing in the app measures that yet.
+struct ElsewhereSection: View {
+    let model: NotificationsPaneModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeading("Elsewhere")
+            SettingsGroup {
+                SettingsRow("Also post a system notification",
+                    detail: "Reaches you when the island is on another Space or a "
+                        + "fullscreen app is in front.") {
+                    SettingsSwitch(isOn: model.postsSystemNotificationBinding)
+                }
+                SettingsRow("Notification permission") {
+                    SettingsPill(model.notifier.notificationPermission)
+                    SettingsButton("System Settings…") {
+                        model.openSystemSettings(.notifications)
+                    }
+                }
+                SettingsRow("Automation permission",
+                    detail: "macOS requires this to focus a terminal window on your behalf.") {
+                    SettingsPill(model.notifier.automationPermission)
+                    SettingsButton("System Settings…") {
+                        model.openSystemSettings(.automation)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Everything the Notifications page reads and writes, in one observable place.
+///
+/// The same shape as `SoundSectionModel` (which it owns) and
+/// `SettingsWindowModel`, and for the same three reasons: every write is a named
+/// method doing `load()` / mutate / `save(_:)` against the store **as it is
+/// right now** rather than against a held snapshot (this page alone adds ten
+/// writers, and `save(_:)` writes the whole struct); every binding goes through
+/// one of those methods rather than `@Bindable`'s straight-to-storage form, which
+/// is how `selectedPage` shipped persisted-by-nothing; and the one side effect
+/// that touches the OS — opening System Settings — is a closure, so a test can
+/// see which pane a button asked for without a window server or a real
+/// `NSWorkspace`.
+@MainActor @Observable final class NotificationsPaneModel {
+    /// Task 6's section, owned rather than rebuilt: the pack, the three per-cue
+    /// choices, the volume and the Do Not Disturb switch all live there.
+    let sound: SoundSectionModel
+    /// Task 7's, read by both permission rows. `@Observable` itself, so a
+    /// permission read that lands after the page is drawn redraws the pills.
+    let notifier: Notifier
+
+    private(set) var alerts: AlertPolicy
+    private(set) var postsSystemNotification: Bool
+
+    private let store: PreferenceStoring
+    private let openPane: (SystemSettingsPane) -> Void
+
+    init(store: PreferenceStoring, sound: SoundSectionModel, notifier: Notifier = Notifier(),
+         openPane: @escaping (SystemSettingsPane) -> Void = { pane in
+            NSWorkspace.shared.open(pane.url)
+         }) {
+        let prefs = store.load()
+        self.alerts = prefs.alerts
+        self.postsSystemNotification = prefs.postsSystemNotification
+        self.store = store
+        self.sound = sound
+        self.notifier = notifier
+        self.openPane = openPane
+    }
+
+    /// The shape production reaches for: one store, one live sound engine.
+    convenience init(store: PreferenceStoring,
+                     syncSoundSettings: @escaping (SoundSettings) -> Void,
+                     playCue: @escaping (Cue) -> Void) {
+        self.init(store: store,
+                  sound: SoundSectionModel(store: store, syncSettings: syncSoundSettings,
+                                           playCue: playCue))
+    }
+
+    // MARK: - Bindings
+
+    var onNeedsAnswerBinding: Binding<Bool> {
+        Binding(get: { self.alerts.onNeedsAnswer }, set: { self.setOnNeedsAnswer($0) })
+    }
+    var onFinishBinding: Binding<Bool> {
+        Binding(get: { self.alerts.onFinish }, set: { self.setOnFinish($0) })
+    }
+    var onFailBinding: Binding<Bool> {
+        Binding(get: { self.alerts.onFail }, set: { self.setOnFail($0) })
+    }
+    var onStallBinding: Binding<Bool> {
+        Binding(get: { self.alerts.onStall }, set: { self.setOnStall($0) })
+    }
+    var postsSystemNotificationBinding: Binding<Bool> {
+        Binding(get: { self.postsSystemNotification },
+                set: { self.setPostsSystemNotification($0) })
+    }
+
+    // MARK: - Writers
+    //
+    // **Four near-identical bodies over one nested struct is a sharper version
+    // of the defect class `SoundSectionModel`'s writers already name**: here a
+    // copy-paste slip does not even change the type it assigns to, because all
+    // four fields of `AlertPolicy` are `Bool`. So each is mutation-verified by
+    // hand, one at a time — point a setter at a neighbour's field, confirm the
+    // matching `NotificationsPaneTests` case goes red, revert. The table is in
+    // this task's report.
+    //
+    // No `syncSettings` call in any of them, unlike Task 6's writers: nothing
+    // caches an `AlertPolicy`. `AppModel.applyAndNotify` reads
+    // `preferences.load().alerts` fresh on every event and `Notifier
+    // .postStalls` reads `postsSystemNotification` fresh on every stall, so a
+    // saved switch is live on the next event with nothing else to wire. That is
+    // the property that makes this page not decorative, and it is asserted end
+    // to end by `aFlippedSwitchSilencesTheVeryNextEvent`.
+
+    func setOnNeedsAnswer(_ value: Bool) {
+        guard value != alerts.onNeedsAnswer else { return }
+        alerts.onNeedsAnswer = value
+        var prefs = store.load()
+        prefs.alerts.onNeedsAnswer = value
+        store.save(prefs)
+    }
+
+    func setOnFinish(_ value: Bool) {
+        guard value != alerts.onFinish else { return }
+        alerts.onFinish = value
+        var prefs = store.load()
+        prefs.alerts.onFinish = value
+        store.save(prefs)
+    }
+
+    func setOnFail(_ value: Bool) {
+        guard value != alerts.onFail else { return }
+        alerts.onFail = value
+        var prefs = store.load()
+        prefs.alerts.onFail = value
+        store.save(prefs)
+    }
+
+    func setOnStall(_ value: Bool) {
+        guard value != alerts.onStall else { return }
+        alerts.onStall = value
+        var prefs = store.load()
+        prefs.alerts.onStall = value
+        store.save(prefs)
+    }
+
+    func setPostsSystemNotification(_ value: Bool) {
+        guard value != postsSystemNotification else { return }
+        postsSystemNotification = value
+        var prefs = store.load()
+        prefs.postsSystemNotification = value
+        store.save(prefs)
+    }
+
+    // MARK: - The two buttons
+
+    /// Recorded before the closure fires, for the same reason
+    /// `SoundSectionModel.lastPlayedCueForTesting` exists: the thing a
+    /// copy-paste error would get wrong here is *which pane* a row's button
+    /// asked for, and a real `NSWorkspace.open` proves nothing headlessly.
+    private(set) var lastOpenedPaneForTesting: SystemSettingsPane?
+
+    func openSystemSettings(_ pane: SystemSettingsPane) {
+        lastOpenedPaneForTesting = pane
+        openPane(pane)
+    }
+}
 
 /// §14's Sound group — Plan 6.5 Task 6, `settings.html:339-361`. Six rows: the
 /// pack picker, three per-cue pickers each with a `Play` button, the volume
 /// slider, and the Do Not Disturb switch.
 ///
-/// **Not yet reachable from the running app.** `SettingsPage.ownerNote(for:)`
-/// still shows 6.4's placeholder for `"notifications"`, and `SettingsShell`
-/// does not construct this type — Task 7 assembles the whole page (this
-/// group plus `Alert me when an agent` and `Elsewhere`) and retires the
-/// owner note. Building and testing this section in isolation first is the
-/// same order Tasks 2 and 3 built their primitives in, before anything used
-/// them.
+/// Assembled into the real page by `NotificationsPane` (below, Task 7), which
+/// is also where 6.4's `"notifications"` owner note was retired.
 ///
 /// **Everything this section writes goes through `SoundSectionModel`, never
 /// a stored property directly** — see that type's own doc comment for why a

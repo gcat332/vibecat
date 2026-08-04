@@ -104,6 +104,22 @@ controller.onSoundEnabledChanged = { [weak soundPlayer] enabled in
     soundPlayer?.setEnabled(enabled)
 }
 
+// Plan 6.5 Task 7: §14's `Elsewhere`. The authorization request sits next to
+// `quietHours.requestAuthorizationIfNeeded()` above for the same reason — both
+// are launch-time permissions — and, unlike Focus, this one is asked for even
+// though `postsSystemNotification` ships off: the alert is the *channel*, and a
+// user who later flips that switch should not have to relaunch to be asked. The
+// call is a no-op in a bare binary; see `Notifier`'s own doc comment for the
+// measured abort that guard prevents.
+let notifier = Notifier()
+notifier.requestAuthorizationIfNeeded()
+// Task 5 shipped `AppModel.onStall` with nothing listening. This is the
+// consumer: a stall has no `Cue` (§12 defines five and none is "stalled", and
+// Plan 6.2's written decision 3 forbids inventing one), so a system
+// notification is the whole alert. The wiring lives in `Notifier.postStalls`
+// rather than as a closure here, because no test runs this file.
+notifier.postStalls(from: model, preferences: preferences)
+
 // Plan 6.4 Task 5: the gear in the drawer's footer is the *only* door to
 // Settings — this app has no Dock icon and no menu bar, so there is no App menu
 // to hang a `Settings…` item on and nothing in AppKit that would reopen the
@@ -111,7 +127,16 @@ controller.onSoundEnabledChanged = { [weak soundPlayer] enabled in
 // raises the one that already exists, so this stays a plain forward with no
 // state of its own. It shares the `preferences` store read above rather than
 // building a second one, because a second store would be a second truth.
-let settings = SettingsWindowController(store: preferences)
+// `syncSoundSettings` and `playCue` are Plan 6.5 Task 7's other half of that
+// same sharing rule: the Sound section previews through the *live* engine built
+// above, so a pack chosen in Settings is audible on the very next `Play` and on
+// the next real cue, rather than only after a relaunch. Both default to no-ops
+// on this initialiser (fifteen test call sites rely on that) — which is exactly
+// why omitting them here would be silent, and why they are named.
+let settings = SettingsWindowController(
+    store: preferences,
+    syncSoundSettings: { [weak soundPlayer] in soundPlayer?.settings = $0 },
+    playCue: { [weak soundPlayer] in soundPlayer?.play($0) })
 controller.model.onOpenSettings = { settings.show() }
 
 do {
