@@ -56,12 +56,34 @@ import VibeCatCore
 /// `showKeepingTheWindowAlive(_:)` rather than calling `show()` directly.
 @MainActor private enum LiveWindows {
     private static var all: [NSWindow] = []
+    private static var controllers: [SettingsWindowController] = []
 
     /// Retains `window` for the rest of the process. Idempotent, because two
     /// `show()` calls on one controller hand back the same window.
     static func keep(_ window: NSWindow?) {
         guard let window, !all.contains(where: { $0 === window }) else { return }
         all.append(window)
+    }
+
+    /// Retains the *controller* too, which is the half the first version of this
+    /// file missed — and it is what closed the remaining crash.
+    ///
+    /// Keeping only the window still let `SettingsWindowController.deinit` run the
+    /// moment a test's local `let c` went out of scope, and that deinit does
+    /// `window?.contentView = nil` and `window?.close()`. So the window object
+    /// survived while its `NSHostingView` was freed and its chrome was closed
+    /// underneath an animation AppKit only retires inside `NSApplication.run()`.
+    /// That is exactly the "not safe to close even while something still holds it"
+    /// the comment above could not explain: the unsafe act is the **close**, not
+    /// the release of the window.
+    ///
+    /// Measured: window-only retention crashed 1 run in 6 (signal 11); retaining
+    /// the controller as well ran clean. The tests that *deliberately* exercise
+    /// closing still call it explicitly, which is the difference between a close
+    /// under test and a close that happens because a local went out of scope.
+    static func keep(_ controller: SettingsWindowController) {
+        guard !controllers.contains(where: { $0 === controller }) else { return }
+        controllers.append(controller)
     }
 }
 
@@ -70,6 +92,7 @@ import VibeCatCore
 /// `LiveWindows`.
 @MainActor private func showKeepingTheWindowAlive(_ controller: SettingsWindowController) {
     controller.show()
+    LiveWindows.keep(controller)
     LiveWindows.keep(controller.windowForTesting)
 }
 
