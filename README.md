@@ -60,7 +60,7 @@ Both prototypes are single self-contained HTML files — no build, no network.
 
 ```bash
 swift build          # builds VibeCatCore, VibeCatTransport, VibeCatUI, vibecat-hook and vibecat
-swift test           # the whole pipeline, headless
+Scripts/test.sh      # the whole pipeline, headless (647 cases, ~21s)
 ```
 
 Run the app itself:

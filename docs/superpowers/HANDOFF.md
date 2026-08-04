@@ -18,7 +18,7 @@ That push, on 2026-08-03, was the first in the project's life — 214 commits. T
 licence was the one thing gating it.
 
 ```bash
-swift test                                   # 419, ~3s
+Scripts/test.sh                              # 647, ~21s (serial — see CLAUDE.md)
 Scripts/build-app.sh && open .build/VibeCat.app
 ```
 

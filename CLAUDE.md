@@ -20,11 +20,27 @@ from the spec twice and that file exists so it never happens again.
 
 ```bash
 swift build                                  # all five products
-swift test                                   # 371 cases, headless, no window server needed
-swift test --filter theWorstStateWins        # one case, by function name
-swift test --filter VibeCatCoreTests          # one target
+Scripts/test.sh                              # 647 cases, headless, ~21s — USE THIS
+Scripts/test.sh --filter theWorstStateWins   # one case, by function name
+Scripts/test.sh --filter VibeCatCoreTests    # one target
 swift run vibecat                            # the app, bare binary
 ```
+
+**`Scripts/test.sh`, not bare `swift test`.** It is `swift test --no-parallel`, and
+the wrapper exists so the reason travels with the command. Run in parallel the
+suite fails on nearly every run — always in the same place, always the tests that
+poll the main actor inside a bounded window. Serially it is 647/647 green, and
+those same tests pass alone in 0.11s, so **nothing in the product is broken**: what
+fails is scheduling latency. Plans 6.4 and 6.5 took `@MainActor` in `Tests/` from
+264 to 375 occurrences (+42%) against 13% more tests, because a SwiftUI view can
+only be rasterised on the main actor.
+
+This does not retire the rule below that a full-suite-only failure is a real bug —
+it is a finding under it. The discipline at fault is the **test suite's**, and
+reworking those tests to not depend on main-actor latency is the better fix,
+recorded in `plans/README.md`. Twenty-one seconds buys a result you can trust
+until then. When you revisit it, **measure ten full runs, not four**: a four-run
+sample of this flake read 2 failures where ten runs of the same tree read 10.
 
 Bare-binary runs cannot hold macOS permissions — no bundle identifier means TCC
 attributes every request to the launching terminal, and the grant dies the moment

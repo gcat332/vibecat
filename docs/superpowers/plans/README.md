@@ -14,7 +14,7 @@ plan files twice; it is cheaper to keep it written down.
 | 5 | The session list · plus the hover reveal's content and the sliver that shares its mechanism · plus a multi-sprite CPU measurement | §11, §9.1's reveal | **done** — [the plan](2026-08-03-session-list.md), 8 tasks; 419 tests after the raster and lapse fixes. Carried findings below |
 | 6.2 | Sound — five synthesised cues, the trigger rule, Do Not Disturb | §12 | **done** — [the plan](2026-08-03-sound.md), 7 tasks plus a whole-branch review and one fix round; 509 tests. Five written decisions, and four things still needing an ear (see the plan's own closing section) |
 | 6.4 | The Settings **shell** — persisted preferences, the drawer footer's mute and gear, the window the gear opens, its sidebar and the four panes' chrome · **mute wired end to end** | §14's layout, §6.4's footer | **done** — [the plan](2026-08-03-settings-shell.md), 6 tasks plus a whole-branch review and one fix round; 574 tests. **The first plan in this project's history to actually diff `settings.html`** |
-| **6.5** | The Notifications page — where 6.2's `SoundSettings` gets its sheet, its per-cue pickers, its volume slider and a trigger for `meow` | §14's Notifications | not written |
+| 6.5 | The Notifications page — the four alert switches, the Sound section that gives Plan 6.2's engine its sheet, stall detection, and the system-notification fallback | §14's Notifications | **done** — [the plan](2026-08-04-notifications-page.md), 7 tasks; 647 tests. The browser diff found the page did not fit its own window |
 | **6.6** | The Display page — 21 controls, and the one that re-threads `SessionRow.Options`, picks the list's overflow cue, settles §6.3's per-face width and ships the motion control | §14's Display, §9.3's UI | not written |
 | **6.7** | The General and Integrations pages | §14 | not written |
 | **6** | Jump, and everything else gated on keyboard input — sound is 6.2, the Settings shell is 6.4 | §13, §9.3's UI | not written |
@@ -684,6 +684,51 @@ skipped.
   SVG stroke width remain uncaught by any mutation. **`PanelBar` moved the drawer's
   footer, so a `prototype-fidelity` dispatch over the whole drawer is worth doing
   before 6.5.**
+
+## Plan 6.5's carried findings — the Notifications page, and a suite that only passes serially
+
+647 tests. Full account: [the plan](2026-08-04-notifications-page.md) and
+`.superpowers/sdd/2026-08-04-notifications-page/progress.md`.
+
+- **The suite is run with `Scripts/test.sh`, which is `swift test --no-parallel`.**
+  Decided 2026-08-04. In parallel it fails on nearly every run; serially it is
+  647/647 in ~21s, and the failing tests pass alone in 0.11s — so **nothing in the
+  product is broken**, what fails is scheduling latency. Across Plans 6.4 and 6.5
+  the `@MainActor` count in `Tests/` went 264 → 375 (+42%) against 13% more tests,
+  because a SwiftUI view can only be rasterised on the main actor, so a test that
+  waits a bounded time for the main actor now contends with half again as many
+  main-actor-bound tests as when its bound was chosen. **The better fix is to rework
+  those polling tests so they do not depend on main-actor latency**; the flag buys a
+  trustworthy result until someone does. Measured 0 failures in 8 serial runs.
+  **And measure ten runs, not four, if you revisit it** — a four-run sample read 2
+  failures where ten runs of the same tree read 10, and acting on the four would
+  have meant reporting a regression that was not there.
+- **The browser diff found the page did not fit its own window.** 771pt of content
+  in 552pt: the `VStack` overflowed centred and the pane title **vanished entirely**,
+  chip at zero pixels, taking three existing chip tests red with it. Fixed with a
+  `ScrollView`. Also `.sel` had no dropdown arrow at all, because the browser draws
+  one and the CSS does not. Two more bugs that only looking could find, after the
+  two Plan 6.4 found the same way.
+- **`onAppear` is invisible to this suite, and every remaining page will use it.**
+  Deleting `.onAppear { notifier.refresh() }` is caught by nothing — `onAppear` does
+  not fire under `ImageRenderer`, and no headless test can see which closure a
+  `Button` was bound to. Plans 6.6 and 6.7 will each have the same hole. Worth
+  solving once rather than three times.
+- **Rows below the fold are unverifiable.** `ImageRenderer` cannot render a
+  `ScrollView`, and the page now has one. `rasteriseHosted` is the path, and Plan
+  6.4 measured it untrustworthy for flat background colours — so a golden over
+  scrolled content needs care, not a copied helper.
+- **`Notifier.automationTarget` is hardcoded to `com.apple.Terminal`.** Harmless
+  today because §14's row only reports status and never prompts, and nothing uses
+  Automation until jump ships — but the row's meaning changes the moment it does,
+  and jump is Plan 6's.
+- **The stall alert has no sound, deliberately.** §12 defines five cues and none is
+  "stalled"; Plan 6.2's written decision 3 forbids inventing one. A stall posts a
+  system notification and nothing else. Cost with the real consumer attached:
+  58.36µs per tick, 0.000096% of a core at the 60s cadence, measured with
+  `getrusage`.
+- **`Soft`, `System`, `Blip` and `Buzz` still do not exist** and the pickers
+  deliberately do not offer them. Plan 6.2's written decision 3, unchanged.
 
 ## Plan 6 also owns
 
