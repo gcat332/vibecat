@@ -75,6 +75,12 @@ private func tempPath(_ n: String) -> String { "/tmp/vibecat-e2e-\(n)-\(getpid()
     #expect(snapshot.counts[.waiting] == 1)
 }
 
+/// The one deadline the answered-pipeline test hands its client, named once so the
+/// assertion window inside it cannot drift shorter than it. A window shorter than
+/// the deadline the code under test may legitimately use is a stopwatch on this
+/// machine, not a test of the behaviour.
+private let clientAnswerDeadline: TimeInterval = 5.0
+
 /// The whole point of the plan, over a real socket: a permission event goes in
 /// as JSON, the island answers it, and claude-code's own decision shape comes
 /// back out.
@@ -97,7 +103,7 @@ private func tempPath(_ n: String) -> String { "/tmp/vibecat-e2e-\(n)-\(getpid()
 
     let runner = HookRunner(
         registry: SourceRegistry(adapters: [ClaudeCodeAdapter()]),
-        client: SocketClient(path: path, deadline: 1.0, answerDeadline: 5.0),
+        client: SocketClient(path: path, deadline: 1.0, answerDeadline: clientAnswerDeadline),
         env: ["__CFBundleIdentifier": "com.googlecode.iterm2",
               "TERM_SESSION_ID": "w0t1p0:ABC"])
 
@@ -127,7 +133,24 @@ private func tempPath(_ n: String) -> String { "/tmp/vibecat-e2e-\(n)-\(getpid()
     // already stand in for a real hook process.
     appModel.answer(Reply(id: pending.id, choice: "allow"))
 
-    let answered = Date().addingTimeInterval(2)
+    // Bounded by the client's **own** `answerDeadline` above, plus slack — not by
+    // an arbitrary two seconds, which is what this line used to say.
+    //
+    // The hook is *permitted* to take up to `answerDeadline` before it gives up
+    // and fails open. Waiting less than that does not test the behaviour, it
+    // tests how fast this machine happens to be: the round trip has to cross a
+    // real socket, a real detached thread, and `ingest`'s own hop to the main
+    // actor. Measured, that bound was the whole flake — it failed 2 runs in 4 at
+    // 647 tests, having failed about 1 in 20 when the suite was 40% smaller, and
+    // every failure read `output.value == nil` rather than a wrong decision. The
+    // assertion window was simply shorter than the deadline the code under test
+    // is allowed to use.
+    //
+    // Still bounded, and still fails rather than hanging: if the reply never
+    // arrives the hook fails open and writes its own default, so `output.value`
+    // becomes non-nil without `"allow"` in it and the expectation below fails on
+    // content instead of on time.
+    let answered = Date().addingTimeInterval(clientAnswerDeadline + 2)
     while output.value == nil, Date() < answered {
         try await Task.sleep(for: .milliseconds(10))
     }
