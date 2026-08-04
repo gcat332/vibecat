@@ -69,6 +69,34 @@ struct SettingsControlsTests {
                 "no --bone text drawn")
     }
 
+    @Test @MainActor func aSelectStillDrawsItsOwnBoxRatherThanAPickersChrome() throws {
+        // Task 7 gave `SettingsSelect` a `.accessibilityRepresentation { Picker }`
+        // so assistive technology gets a real combo box — the gap Task 3 recorded
+        // and could not close. **Nothing headless can read an accessibility tree**
+        // (no ViewInspector, and this project takes none), so what is pinned here
+        // is the hazard that modifier introduces: if it ever stopped being purely
+        // representational — or if someone "simplified" the drawing into the
+        // native control it stands in for — the drawn box would become
+        // `NSPopUpButton`'s, which Task 3 measured as a different size entirely
+        // and a track of `#2E2E30` instead of `--card2`.
+        //
+        // The expected size is not a recorded number: it is a replica built from
+        // `.sel`'s own CSS (`settings.html:106` — 13px text, padding 5/9), so this
+        // compares the control against the rule it transcribes rather than against
+        // whatever it happened to measure the day it was written.
+        let replica = HStack(spacing: SettingsSelectMetrics.chevronGap) {
+            Text("Meow").font(.system(size: 13))
+            Image(systemName: "chevron.down")
+                .font(.system(size: SettingsSelectMetrics.chevronSize, weight: .semibold))
+        }
+            .padding(.vertical, 5)
+            .padding(.horizontal, 9)
+        let expected = try rasterise(replica)
+        let actual = try rasterise(SettingsSelect(.constant(CueChoice.meow)) { "\($0)" })
+        #expect(actual.width == expected.width && actual.height == expected.height,
+                "the select draws \(actual.width)×\(actual.height), `.sel`'s own padding predicts \(expected.width)×\(expected.height)")
+    }
+
     // MARK: - .btn
 
     @Test @MainActor func aButtonCallsItsActionExactlyOnce() {

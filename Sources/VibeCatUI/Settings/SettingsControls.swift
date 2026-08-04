@@ -44,13 +44,23 @@ import SwiftUI
 /// file does, rather than needing `rasteriseHosted`.
 ///
 /// Still a working control, not a static label: tapping opens a plain list of
-/// `Value.allCases`, and tapping a row writes the binding and closes it. Real
-/// keyboard/VoiceOver semantics for a genuine "select" role are a real gap this
-/// leaves — `Button` carries none of `Picker`'s combo-box accessibility traits
-/// — and are not tested here for the same reason `SettingsButton`'s action
-/// closure is not: this project has no ViewInspector and will not add one, so
-/// there is nothing headless that could tell an accessible select apart from
-/// an inaccessible one either. Recorded as a gap, not silently assumed away.
+/// `Value.allCases`, and tapping a row writes the binding and closes it.
+///
+/// **The accessibility gap Task 3 recorded is closed by
+/// `.accessibilityRepresentation`, which exists for exactly this shape of
+/// control**: assistive technology is handed a real `Picker` — combo-box role,
+/// the current value, the list of options, keyboard semantics — while every
+/// pixel on screen stays the drawing below. The representation is never
+/// rendered, so none of the three measurements that ruled `Picker` out as a
+/// *visual* control apply to it.
+///
+/// **Untestable here, and that is a property of this project rather than of
+/// this control.** There is no ViewInspector and none will be added, so nothing
+/// headless can read an accessibility tree; what *can* be pinned is that adding
+/// the representation did not quietly hand the drawing over to the native
+/// control, and `aSelectStillDrawsItsOwnBoxRatherThanAPickersChrome` does that
+/// by comparing the rendered size against a hand-built replica of the intended
+/// box.
 public struct SettingsSelect<Value: Hashable & CaseIterable>: View {
     @Binding var selection: Value
     let label: (Value) -> String
@@ -65,17 +75,42 @@ public struct SettingsSelect<Value: Hashable & CaseIterable>: View {
         Button {
             isOpen.toggle()
         } label: {
-            // `font-size:13px` — `.sel` carries no letter-spacing rule of its
-            // own, unlike `.lab b`'s `-.01em`, so none is applied here.
-            Text(label(selection))
-                .font(.system(size: 13))
-                .foregroundStyle(Color(SettingsPalette.bone))
-                .padding(.vertical, 5)
-                .padding(.horizontal, 9)
-                .background(Color(SettingsPalette.card2))
-                .clipShape(RoundedRectangle(cornerRadius: 7))
+            HStack(spacing: SettingsSelectMetrics.chevronGap) {
+                // `font-size:13px` — `.sel` carries no letter-spacing rule of its
+                // own, unlike `.lab b`'s `-.01em`, so none is applied here.
+                Text(label(selection))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color(SettingsPalette.bone))
+                // **A fidelity fix from Task 7's browser diff, and the one place
+                // the CSS is not the whole story.** `.sel` is a real `<select>`
+                // in `settings.html`, so the disclosure arrow is drawn by the
+                // browser and appears in no rule: measured in Chrome, the
+                // prototype's pack select is `148.5×27` where this control's text
+                // and padding alone come to `129×26`, and that ~19.5pt of
+                // difference is entirely the arrow. Without it a hand-drawn
+                // select reads as static text — a lost affordance, not a lost
+                // pixel. `8pt` semibold in `--haze` plus a `6pt` gap lands the
+                // box at 143pt, the closest this gets without inventing a glyph
+                // size the prototype never states.
+                Image(systemName: "chevron.down")
+                    .font(.system(size: SettingsSelectMetrics.chevronSize, weight: .semibold))
+                    .foregroundStyle(Color(SettingsPalette.haze))
+            }
+            .padding(.vertical, 5)
+            .padding(.horizontal, 9)
+            .background(Color(SettingsPalette.card2))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
+        // A native control for assistive tech, the drawn one for everyone else.
+        // See this type's own doc comment.
+        .accessibilityRepresentation {
+            Picker("", selection: $selection) {
+                ForEach(Array(Value.allCases), id: \.self) { value in
+                    Text(label(value)).tag(value)
+                }
+            }
+        }
         .overlay(alignment: .topLeading) {
             if isOpen {
                 optionsList
@@ -109,6 +144,13 @@ public struct SettingsSelect<Value: Hashable & CaseIterable>: View {
         .background(Color(SettingsPalette.card2))
         .clipShape(RoundedRectangle(cornerRadius: 7))
     }
+}
+
+/// `.sel`'s disclosure arrow, which the prototype gets from the platform rather
+/// than from a rule — see `SettingsSelect.body`.
+enum SettingsSelectMetrics {
+    static let chevronSize: CGFloat = 8
+    static let chevronGap: CGFloat = 6
 }
 
 // MARK: - .btn
