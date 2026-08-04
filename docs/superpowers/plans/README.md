@@ -710,11 +710,16 @@ skipped.
   `ScrollView`. Also `.sel` had no dropdown arrow at all, because the browser draws
   one and the CSS does not. Two more bugs that only looking could find, after the
   two Plan 6.4 found the same way.
-- **`onAppear` is invisible to this suite, and every remaining page will use it.**
-  Deleting `.onAppear { notifier.refresh() }` is caught by nothing — `onAppear` does
-  not fire under `ImageRenderer`, and no headless test can see which closure a
-  `Button` was bound to. Plans 6.6 and 6.7 will each have the same hole. Worth
-  solving once rather than three times.
+- **Deleting `.onAppear { notifier.refresh() }` is caught by nothing — but not for
+  the reason first recorded.** Plan 6.5's Task 7 reported the cause as `onAppear`
+  not firing under `ImageRenderer`. **Plan 6.1's Task 2 measured that and it is
+  false: `onAppear` does fire.** The mutation survives for a duller reason — no test
+  renders that view at all — which is a fixable gap rather than a platform limit,
+  and the fix is a test, not a workaround. Corrected here because the wrong version
+  would have told Plans 6.6 and 6.7 to stop trying.
+
+  Still true and unchanged: no headless test can see which closure a `Button` was
+  bound to. That one is a real limit, hit independently by three separate tasks.
 - **Rows below the fold are unverifiable.** `ImageRenderer` cannot render a
   `ScrollView`, and the page now has one. `rasteriseHosted` is the path, and Plan
   6.4 measured it untrustworthy for flat background colours — so a golden over
@@ -730,6 +735,34 @@ skipped.
   `getrusage`.
 - **`Soft`, `System`, `Blip` and `Buzz` still do not exist** and the pickers
   deliberately do not offer them. Plan 6.2's written decision 3, unchanged.
+
+## Plan 6.1 — keyboard and the switches (in progress)
+
+[The plan](2026-08-04-keyboard-and-switches.md), 6 tasks. Two findings already
+worth reading out of order:
+
+- **Motion `off` takes the dormant island from ~12% of a core to 0.38%.** Measured
+  with `getrusage` from a real bundle across two runs: dormant `full` read 10.23%
+  and 12.60%; dormant `off` read 0.38% on a quiet machine (0.37–0.39), landing
+  exactly on the standalone hover monitor's own 0.35%. **That materially changes the
+  open decision about the accepted ~12% resting cost** — there is now a real escape
+  hatch, and it is a user's choice rather than a rewrite. The badge-transform spike
+  named "~0.3%" as the figure that would close its attribution by measurement; this
+  is it.
+- **The motion bypass was in three places, not two.** The spike recorded
+  `IslandBody.phase` and `BadgeCanvas`. `CatCanvas` had the identical bypass and
+  nobody had written it down. All three now take a **required, undefaulted**
+  `motion:`, so a fourth cannot be added silently.
+- **`reduced` currently costs what `full` costs**, and that is honest rather than
+  broken: `resolve(_:)` expresses reduced purely as halving `framesPerSecond`, which
+  `minimumInterval(for:)` already applies, and a view transform is run by the render
+  server regardless. Documented, not invented around. **Whether `reduced` should do
+  more is the owner's call.**
+- **`off` renders at phase 0**, which is the prototype's own answer rather than a
+  convenience: `island-motion.html:439`'s entire reduced-motion rule is
+  `animation:none`, and a CSS element with no animation renders at its base style —
+  the pose every keyframe set names at `0%`. Verified not mid-blink (the blink lives
+  above 0.92) and not on `bang`'s raised mark (which shifts only past 0.5).
 
 ## Plan 6 also owns
 
