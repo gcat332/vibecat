@@ -3,22 +3,38 @@ import SwiftUI
 /// `settings.html:73`'s `.group`: the `--card` ground every row in this window
 /// sits on, `10pt` corners, `18pt` clear below before whatever comes next.
 ///
-/// **A recorded divergence, not a silent one.** `settings.html:75` adds
-/// `.group > .row:first-child{box-shadow:none}` — the first row in a real
-/// group does not draw the top hairline `.row` otherwise always carries,
-/// because there is nothing above it to divide from. This type does not
-/// implement that exemption: `SettingsGroup`'s `content` is opaque
-/// (`some View`, built by an arbitrary `@ViewBuilder`), so there is no clean
-/// way for the group to know which child came first without a
-/// `_VariadicView` reflection this task did not reach for. Concretely, the
-/// first row of a real multi-row group will show a redundant line right at
-/// the card's own rounded top edge, which is not what `settings.html` draws.
-/// `aRowsTopHairlineIsTheBlendOfThePrototypesEightPercent` in
-/// `SettingsRowTests.swift` in fact depends on the *unconditional* draw — a
-/// lone row wrapped in a group is that row's own first-child case, and the
-/// test expects to see the hairline anyway. Task 7's browser diff is the
-/// right place to decide whether this is worth a `_VariadicView` fix or an
-/// acceptable one-pixel discrepancy against the card's own edge.
+/// **`settings.html:75`'s first-row exemption is implemented here, and Task 2
+/// recorded its absence as a divergence rather than shipping it silently.**
+/// `.group > .row:first-child{box-shadow:none}` — the first row in a card draws
+/// no top hairline, because there is nothing above it to divide from. Task 2
+/// could not reach it because `content` is opaque (`some View` from an arbitrary
+/// `@ViewBuilder`), so the group cannot see which child came first, and Task 7's
+/// browser diff confirmed the consequence was real: every multi-row card drew a
+/// `1px` line hugging its own rounded top edge, which the prototype does not.
+///
+/// **Two ways of doing it properly were tried, measured, and both failed** —
+/// which is why this is a one-point cover strip rather than a per-row flag.
+/// `_VariadicView.Tree` does hand a container its content as an enumerable
+/// collection (verified: `children.count == 2`, indices `0` and `1`), but
+/// **modifiers applied to a `_VariadicView.Children.Element` do not behave**:
+///
+/// - `child.environment(\.settingsRowDrawsTopHairline, index > 0)` never reached
+///   the child at all — both rows kept drawing their line, while the same
+///   environment write applied directly to a `SettingsRow` did suppress it, so
+///   the key itself worked and the injection did not.
+/// - `child.overlay(alignment: .top) { hairline }` for `index > 0` drew the line
+///   at the **stack's** origin instead of that child's, so the divider landed on
+///   top of row one and row two got nothing.
+///
+/// Interleaving a real `1pt` sibling between rows would work, but a CSS inset
+/// `box-shadow` adds no height and a sibling does: a six-row group would come
+/// out `5pt` taller than the prototype's.
+///
+/// So the first row's own line is covered with one point of `--card`, which is
+/// exactly the colour the prototype has there. Pixel-identical, no height
+/// change, no underscored API. `SettingsRow` keeps drawing its hairline
+/// unconditionally, exactly as `.row` does in the CSS; only the group's top
+/// edge is special, exactly as `:first-child` is.
 public struct SettingsGroup<Content: View>: View {
     let content: () -> Content
 
@@ -32,6 +48,16 @@ public struct SettingsGroup<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(SettingsPalette.card))
+        // `settings.html:75`'s `.group > .row:first-child{box-shadow:none}`, as
+        // one point of card drawn back over the first row's own inset line. See
+        // this type's doc comment for the two approaches that were tried and
+        // measured first. Applied *before* `clipShape`, so the corners cut it
+        // exactly as they cut the card.
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color(SettingsPalette.card))
+                .frame(height: 1)
+        }
         // `border-radius:10px` is CSS's circular radius, not Apple's squircle —
         // see `SettingsChip`'s own note on the same choice.
         .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -135,9 +161,11 @@ public struct SettingsRow<Control: View>: View {
         .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .top) {
-            // `box-shadow:inset 0 1px 0 var(--line)` — see this type's own doc
-            // comment on the first-row exemption this does not implement, and
-            // `SettingsGroup`'s doc comment on the same trade.
+            // `box-shadow:inset 0 1px 0 var(--line)`, unconditionally, exactly as
+            // `.row` carries it in the CSS. A group's *first* row has this covered
+            // over by `SettingsGroup` rather than skipped here — see that type's
+            // doc comment for the two per-row approaches that were measured and
+            // rejected.
             Rectangle()
                 .fill(Color(SettingsPalette.hairline).opacity(SettingsPalette.hairlineOpacity))
                 .frame(height: 1)
