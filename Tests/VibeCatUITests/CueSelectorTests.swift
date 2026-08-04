@@ -22,7 +22,7 @@ private func store(_ events: [VibeEvent]) -> SessionStore {
 @Test func aFirstQuestionAsks() {
     let before = store([session("a", .running)])
     let after  = store([session("a", .permission)])
-    #expect(CueSelector.cue(for: session("a", .permission), before: before, after: after) == .ask)
+    #expect(CueSelector.cue(for: session("a", .permission), before: before, after: after, policy: AlertPolicy()) == .ask)
 }
 
 @Test func aSecondQuestionFromAnotherSessionAsksAgainWithTheDoubledFigure() {
@@ -31,7 +31,7 @@ private func store(_ events: [VibeEvent]) -> SessionStore {
     // agent waits unannounced.
     let before = store([session("a", .permission)])
     let after  = store([session("a", .permission), session("b", .question)])
-    #expect(CueSelector.cue(for: session("b", .question), before: before, after: after) == .askMulti)
+    #expect(CueSelector.cue(for: session("b", .question), before: before, after: after, policy: AlertPolicy()) == .askMulti)
 }
 
 @Test func answeringOneOfTwoQuestionsIsSilent() {
@@ -40,7 +40,7 @@ private func store(_ events: [VibeEvent]) -> SessionStore {
     // Demand fell; that is not news.
     let before = store([session("a", .permission), session("b", .question)])
     let after  = store([session("a", .running), session("b", .question)])
-    #expect(CueSelector.cue(for: session("a", .running), before: before, after: after) == nil)
+    #expect(CueSelector.cue(for: session("a", .running), before: before, after: after, policy: AlertPolicy()) == nil)
 }
 
 @Test func aThirdQuestionDoesNotAskAThirdTime() {
@@ -50,7 +50,7 @@ private func store(_ events: [VibeEvent]) -> SessionStore {
     let before = store([session("a", .permission), session("b", .question)])
     let after  = store([session("a", .permission), session("b", .question),
                         session("c", .permission)])
-    #expect(CueSelector.cue(for: session("c", .permission), before: before, after: after) == nil)
+    #expect(CueSelector.cue(for: session("c", .permission), before: before, after: after, policy: AlertPolicy()) == nil)
 }
 
 @Test func aFinishedRunComesFromTheEventBecauseTheStateThrowsItAway() {
@@ -60,7 +60,7 @@ private func store(_ events: [VibeEvent]) -> SessionStore {
     let before = store([session("a", .running)])
     let after  = store([session("a", .done)])
     #expect(SessionState(kind: .done) == .idle, "the premise of this test")
-    #expect(CueSelector.cue(for: session("a", .done), before: before, after: after) == .done)
+    #expect(CueSelector.cue(for: session("a", .done), before: before, after: after, policy: AlertPolicy()) == .done)
 }
 
 @Test func aFinishWhileAnotherAgentWaitsStillAnnouncesItself() {
@@ -70,19 +70,19 @@ private func store(_ events: [VibeEvent]) -> SessionStore {
     let before = store([session("a", .running),  session("b", .permission)])
     let after  = store([session("a", .done),     session("b", .permission)])
     #expect(IslandState(store: before) == IslandState(store: after), "the premise")
-    #expect(CueSelector.cue(for: session("a", .done), before: before, after: after) == .done)
+    #expect(CueSelector.cue(for: session("a", .done), before: before, after: after, policy: AlertPolicy()) == .done)
 }
 
 @Test func aFailureErrors() {
     let before = store([session("a", .running)])
     let after  = store([session("a", .failed)])
-    #expect(CueSelector.cue(for: session("a", .failed), before: before, after: after) == .error)
+    #expect(CueSelector.cue(for: session("a", .failed), before: before, after: after, policy: AlertPolicy()) == .error)
 }
 
 @Test func aFailureIsNotAnnouncedTwice() {
     let before = store([session("a", .failed)])
     let after  = store([session("a", .failed), session("b", .failed)])
-    #expect(CueSelector.cue(for: session("b", .failed), before: before, after: after) == nil)
+    #expect(CueSelector.cue(for: session("b", .failed), before: before, after: after, policy: AlertPolicy()) == nil)
 }
 
 @Test func aFailureWhileSomeoneIsAlreadyWaitingIsSilentBecauseTheIslandNeverShowedIt() {
@@ -91,22 +91,55 @@ private func store(_ events: [VibeEvent]) -> SessionStore {
     // ordering rather than as a gap.
     let before = store([session("a", .permission)])
     let after  = store([session("a", .permission), session("b", .failed)])
-    #expect(CueSelector.cue(for: session("b", .failed), before: before, after: after) == nil)
+    #expect(CueSelector.cue(for: session("b", .failed), before: before, after: after, policy: AlertPolicy()) == nil)
 }
 
 @Test func startingAndFinishingWorkQuietly() {
     // A run beginning is not an interruption. Neither is going idle.
     let idle = store([session("a", .idle)])
     let running = store([session("a", .running)])
-    #expect(CueSelector.cue(for: session("a", .running), before: idle, after: running) == nil)
-    #expect(CueSelector.cue(for: session("a", .idle), before: running, after: idle) == nil)
+    #expect(CueSelector.cue(for: session("a", .running), before: idle, after: running, policy: AlertPolicy()) == nil)
+    #expect(CueSelector.cue(for: session("a", .idle), before: running, after: idle, policy: AlertPolicy()) == nil)
     #expect(CueSelector.cue(for: session("a", .running),
-                            before: SessionStore(), after: running) == nil)
+                            before: SessionStore(), after: running, policy: AlertPolicy()) == nil)
 }
 
 @Test func aRepeatedEventOfTheSameKindIsSilent() {
     // Heartbeats. A CLI re-reporting `running` must not cue, and a second
     // `permission` from the *same* session leaves the count at one.
     let s = store([session("a", .permission)])
-    #expect(CueSelector.cue(for: session("a", .permission), before: s, after: s) == nil)
+    #expect(CueSelector.cue(for: session("a", .permission), before: s, after: s, policy: AlertPolicy()) == nil)
+}
+
+// MARK: - Task 4: per-event gating
+
+@Test func turningOffAnAlertSilencesOnlyThatCue() {
+    var policy = AlertPolicy(); policy.onFinish = false
+    let before = store([session("a", .running)])
+    let after  = store([session("a", .done)])
+    #expect(CueSelector.cue(for: session("a", .done), before: before, after: after, policy: policy) == nil)
+    // …and the others still sound.
+    let asking = store([session("a", .permission)])
+    #expect(CueSelector.cue(for: session("a", .permission), before: before, after: asking, policy: policy) == .ask)
+}
+
+@Test func silencingAnAlertDoesNotChangeWhatTheIslandReports() {
+    // Written decision 4, and the invariant it protects. A switch on a settings
+    // page cannot hide a blocked agent — §4.2 is about what the island reports.
+    var policy = AlertPolicy(); policy.onNeedsAnswer = false
+    let after = store([session("a", .permission)])
+    #expect(CueSelector.cue(for: session("a", .permission),
+                            before: SessionStore(), after: after, policy: policy) == nil)
+    #expect(IslandState(store: after) == .waiting, "the island must still say waiting")
+    #expect(after.counts[.waiting] == 1)
+}
+
+@Test func theDefaultPolicyChangesNothingAboutPlan62sBehaviour() {
+    // Every one of 6.2's eleven CueSelector tests must still hold with a default
+    // policy. This is the regression guard for adding a parameter to a pure
+    // function eleven tests already pin.
+    let before = store([session("a", .permission)])
+    let after  = store([session("a", .permission), session("b", .question)])
+    #expect(CueSelector.cue(for: session("b", .question), before: before, after: after,
+                            policy: AlertPolicy()) == .askMulti)
 }

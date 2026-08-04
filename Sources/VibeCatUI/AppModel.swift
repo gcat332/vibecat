@@ -46,8 +46,34 @@ import VibeCatTransport
     private var server: SocketServer?
     private var pruneTimer: Timer?
 
-    public init(socketPath: String) {
+    /// The single source of truth for `Preferences.alerts` — Plan 6.5 Task 4's
+    /// own seam. Read fresh in `applyAndNotify` rather than snapshotted once
+    /// here, so a switch flipped on the Notifications page (a plain
+    /// load-mutate-save through this same store, elsewhere) takes effect on
+    /// the very next event with nothing else to wire — no callback to remember
+    /// to add later, the way `NotchController.onSoundEnabledChanged` had to be
+    /// for `soundEnabled`. Defaulted to `InMemoryPreferenceStore()` — matching
+    /// `NotchController`'s own precedent for this exact protocol — so every
+    /// existing call site that predates this parameter keeps compiling against
+    /// an isolated, throwaway store rather than a shared one.
+    ///
+    /// That default is *not* what stands between this and Plan 6.4's
+    /// three-times-repeated "persisted but never read" defect — a default
+    /// parameter cannot protect against `main.swift` itself forgetting to
+    /// thread its real, shared `UserDefaultsPreferenceStore` through here, and
+    /// no test runs `main.swift` to catch that (§2.3's own precedent: Plan 6.2
+    /// shipped an `abort()` on launch invisible to 509 green tests for the same
+    /// reason). What actually closes the loop is `CueSelector.cue`'s `policy:`
+    /// having no default of its own, so the two call sites below in
+    /// `applyAndNotify` cannot compile without naming a real value, and
+    /// `AppModelCueTests`'s "the important mutation" section exercises this
+    /// store end to end rather than only proving `CueSelector` honours
+    /// whatever `AlertPolicy` it is handed.
+    private let preferences: PreferenceStoring
+
+    public init(socketPath: String, preferences: PreferenceStoring = InMemoryPreferenceStore()) {
         self.socketPath = socketPath
+        self.preferences = preferences
     }
 
     public var islandState: IslandState { IslandState(store: store) }
@@ -142,7 +168,8 @@ import VibeCatTransport
                 let before = store          // SessionStore is a value type
                 store.apply(event, now: now)
                 onChange?()
-                if let cue = CueSelector.cue(for: event, before: before, after: store) {
+                if let cue = CueSelector.cue(for: event, before: before, after: store,
+                                             policy: preferences.load().alerts) {
                     onCue?(cue)
                 }
             }
@@ -152,7 +179,8 @@ import VibeCatTransport
                 let before = store
                 store.apply(event, now: now)
                 onChange?()
-                if let cue = CueSelector.cue(for: event, before: before, after: store) {
+                if let cue = CueSelector.cue(for: event, before: before, after: store,
+                                             policy: preferences.load().alerts) {
                     onCue?(cue)
                 }
             }

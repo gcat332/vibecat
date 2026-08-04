@@ -17,8 +17,8 @@ private func event(_ kind: Kind, session: String) -> VibeEvent {
 /// main-actor state, and a bare `() -> [Cue]` would drop that isolation on the
 /// way out of this function.
 @MainActor
-private func modelWithRecorder() -> (AppModel, @MainActor () -> [Cue]) {
-    let model = AppModel(socketPath: "/tmp/vibecat-cue-\(UUID().uuidString).sock")
+private func modelWithRecorder(preferences: PreferenceStoring = InMemoryPreferenceStore()) -> (AppModel, @MainActor () -> [Cue]) {
+    let model = AppModel(socketPath: "/tmp/vibecat-cue-\(UUID().uuidString).sock", preferences: preferences)
     let box = Recorder()
     model.onCue = { box.cues.append($0) }
     return (model, { box.cues })
@@ -79,6 +79,62 @@ private func modelWithRecorder() -> (AppModel, @MainActor () -> [Cue]) {
     model.prune(now: t0.addingTimeInterval(AppModel.idleTTL + 60))
     #expect(removed == 1 && model.sessionCount == 0, "the prune must have removed something")
     #expect(cues() == [.done], "and still added nothing of its own")
+}
+
+// MARK: - the important mutation: does AppModel pass the user's real policy?
+
+// Plan 6.5's own self-review flags this exact shape as the one it does not see
+// a test for: "AppModel passing a default AlertPolicy() instead of the user's
+// stored one" is "the failure that would leave this entire page decorative."
+// It happened three times already in Plan 6.4 — `volume`,
+// `quietDuringDoNotDisturb` and `selectedPage` each persisted and were never
+// read, through six task reviews — because every test proved the *consumer*
+// (here, `CueSelector`) honours whatever `AlertPolicy` it is handed, which is
+// the easy half. Nothing proved the value reaching it was the one actually
+// on disk rather than a fresh default built alongside it. These two tests
+// construct `AppModel` the way `main.swift` now does — with a real
+// `PreferenceStoring` whose `alerts` disagree with `AlertPolicy()` — and
+// would fail if `applyAndNotify` ever hard-codes `AlertPolicy()` at either of
+// its two call sites instead of reading `preferences.load().alerts`.
+
+@Test @MainActor func aStoredAlertPolicyThatDiffersFromTheDefaultIsWhatAppModelActuallyUses() {
+    var prefs = Preferences()
+    prefs.alerts.onFinish = false   // the default is `true` — this is the disagreement
+    let store = InMemoryPreferenceStore(prefs)
+    let (model, cues) = modelWithRecorder(preferences: store)
+
+    model.ingest(event(.running, session: "a"))
+    model.ingest(event(.done, session: "a"))
+    #expect(cues().isEmpty,
+            "a finish cue fired even though the stored policy — not AlertPolicy()'s default — turns it off")
+
+    // The switch this test does not touch still sounds, proving the silence
+    // above is the stored `onFinish`, not every cue going silent by accident.
+    model.ingest(event(.permission, session: "b"))
+    #expect(cues() == [.ask])
+}
+
+@Test @MainActor func aPolicyChangeWrittenThroughTheSameStoreTakesEffectOnTheNextEventWithNoRestart() {
+    // The scenario Task 4's own risk is really about: a person opens Settings,
+    // flips "Finishes" off, closes it, and the very next event must honour
+    // that — not the next app launch. `applyAndNotify` reading fresh each
+    // time (rather than snapshotting `preferences.load()` once in `init`) is
+    // what this pins; a cached copy would pass every other test here and
+    // still fail exactly this one.
+    let store = InMemoryPreferenceStore()
+    let (model, cues) = modelWithRecorder(preferences: store)
+
+    model.ingest(event(.running, session: "a"))
+    model.ingest(event(.done, session: "a"))
+    #expect(cues() == [.done], "the default policy allows this one")
+
+    var prefs = store.load()
+    prefs.alerts.onFinish = false
+    store.save(prefs)   // the same load-mutate-save path the Settings page will use
+
+    model.ingest(event(.running, session: "b"))
+    model.ingest(event(.done, session: "b"))
+    #expect(cues() == [.done], "still just the one from before — the second finish must have been silenced")
 }
 
 // MARK: - the quiet-hours gate

@@ -40,20 +40,39 @@ public enum CueKey: Equatable, Sendable {
 
 /// Which cue an event earns, if any.
 public struct CueSelector: Sendable {
-    public static func cue(for event: VibeEvent,
-                           before: SessionStore, after: SessionStore) -> Cue? {
+    /// `policy` has no default. Plan 6.5 Task 4's own written risk is a caller
+    /// quietly reaching for `AlertPolicy()` instead of the user's stored one —
+    /// exactly Plan 6.4's `volume`/`quietDuringDoNotDisturb`/`selectedPage`
+    /// shape, which shipped through six task reviews three times. A default
+    /// here would let that happen without the compiler ever objecting; the
+    /// eleven tests below that predate this parameter are amended to pass
+    /// `AlertPolicy()` explicitly instead of getting it for free, so that the
+    /// one real call site — `AppModel.applyAndNotify` — has no way to omit it
+    /// either.
+    public static func cue(for event: VibeEvent, before: SessionStore, after: SessionStore,
+                           policy: AlertPolicy) -> Cue? {
         // A finished run is the one thing that cannot be read off the state.
         // `SessionState.init(kind:)` maps `.done` to `.idle`, so once `after`
         // exists there is no trace of anything having completed — and §4.2's
         // worst-state-wins governs what the island *displays*, not what
         // happened, so a finish while another agent waits is still news.
-        if event.kind == .done { return .done }
+        //
+        // The gate is applied to *this branch's own return*, not ahead of the
+        // `if`: gating earlier — a `guard policy.allows(.finished) else return
+        // nil` before this check — would make a silenced "Finishes" switch
+        // swallow every other cue too, because nothing downstream would ever
+        // run. Written decision 4 is that a switch here gates the cue alone;
+        // it must not reach past its own trigger.
+        if event.kind == .done {
+            return policy.allows(.finished) ? .done : nil
+        }
 
         let old = CueKey(store: before), new = CueKey(store: after)
         guard old != new else { return nil }
 
         switch new {
-        case .failed: return .error
+        case .failed:
+            return policy.allows(.failed) ? .error : nil
         case .ask, .askMulti:
             // Only a rise in demand is news. The prototype cues on any change,
             // so answering one of two questions takes it `askmulti → ask` and
@@ -61,6 +80,12 @@ public struct CueSelector: Sendable {
             // did. Clicking buttons in a browser hides that; a person being
             // interrupted would not miss it.
             guard new.waitingRank > old.waitingRank else { return nil }
+            // Written decision 4: this gates the *cue* only. `old`/`new` above
+            // were computed from the real `SessionStore`s and are returned to
+            // nobody — `IslandState(store:)` reads the store directly and
+            // never sees this policy, so a silenced "Needs an answer" switch
+            // cannot touch what the island reports or the drawer shows.
+            guard policy.allows(.needsAnswer) else { return nil }
             return new == .askMulti ? .askMulti : .ask
         case .quiet:
             return nil

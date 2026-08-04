@@ -43,8 +43,6 @@ if CommandLine.arguments.contains("--badge-cpu-probe") {
 // Settings should be where this becomes a choice rather than an env var.
 BackdropSampler.requestAccessIfAskedTo()
 
-let model = AppModel(socketPath: SocketPath.default)
-
 // Plan 6.4 Task 4: the single persisted source of `Preferences.soundEnabled`
 // — read once here so both the panel's own mute glyph (via `controller`) and
 // the sound engine (via `soundPlayer` below) start in step with whatever was
@@ -52,7 +50,19 @@ let model = AppModel(socketPath: SocketPath.default)
 // and disagreeing until the first toggle. §2.3 fail-open concern: `load()`
 // is a synchronous `UserDefaults` read with no I/O that can block, so this
 // cannot be the thing that hangs a terminal.
+//
+// Built *before* `model` now — Plan 6.5 Task 4 gives `AppModel` this same
+// store so `CueSelector` gates on the user's real `Preferences.alerts`
+// instead of `AppModel.init`'s own throwaway `InMemoryPreferenceStore()`
+// default. That default exists for the ~20 test call sites across this
+// module that predate the parameter and have no opinion on alert policy —
+// this is the one call site that does, and skipping the argument here is
+// exactly Plan 6.4's "persisted but never read" defect (`volume`,
+// `quietDuringDoNotDisturb`, `selectedPage`, three times, six task reviews)
+// recurring a fourth time, invisible to every test because none of them run
+// this file.
 let preferences = UserDefaultsPreferenceStore()
+let model = AppModel(socketPath: SocketPath.default, preferences: preferences)
 let controller = NotchController(model: model, preferences: preferences)
 
 // §12's cues. The player is owned here rather than by AppModel or
