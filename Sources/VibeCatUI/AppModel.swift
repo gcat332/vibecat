@@ -46,6 +46,31 @@ import VibeCatTransport
     private var server: SocketServer?
     private var pruneTimer: Timer?
 
+    /// Written decision 3: one alert per quiet period. A session's key lives
+    /// here from the tick that finds it stalled until any event lands for
+    /// that session again — `applyAndNotify` clears the entry the moment a
+    /// session does anything, which is what "re-armed by any event" means.
+    /// Plain, unannotated storage: it is private bookkeeping nothing outside
+    /// this file ever reads, the same as `server`/`pruneTimer` above.
+    private var stalledReported: Set<SessionKey> = []
+
+    /// Fires once per quiet period for a session `StallDetector` finds —
+    /// never for `.waiting` (the island is already amber for that) or a
+    /// session already reported. Checked against `AlertPolicy.allows(.stalled)`
+    /// here, in `prune`, for the same reason `CueSelector` is where `onCue`'s
+    /// own policy gating happens: one place decides whether a trigger is
+    /// allowed to sound, not each wiring site.
+    ///
+    /// **What a fired stall does today: nothing consumes this yet.** §14 has
+    /// no `Cue` for "stalled" — Plan 6.2's written decision 3 forbids
+    /// inventing one — so this deliberately does not call `onCue`. Task 7
+    /// builds `Notifier`, and posting a system notification from there is the
+    /// intended consumer; wiring that is left to Task 7, not guessed at here.
+    /// `@ObservationIgnored` for the reason `onChange`/`onCue`/`onQuestion`
+    /// all are: this is wiring, not model state a view should re-render for.
+    @ObservationIgnored
+    public var onStall: (@MainActor (SessionKey) -> Void)?
+
     /// The single source of truth for `Preferences.alerts` — Plan 6.5 Task 4's
     /// own seam. Read fresh in `applyAndNotify` rather than snapshotted once
     /// here, so a switch flipped on the Notifications page (a plain
@@ -163,10 +188,16 @@ import VibeCatTransport
     /// is a before/after comparison and a `before` read afterwards would make
     /// every pair identical.
     nonisolated private func applyAndNotify(_ event: VibeEvent, now: Date) {
+        // Written decision 3's re-arming: whatever this event does to `store`,
+        // the session it names just did *something*, so a quiet period that
+        // was building toward a stall (or already reported one) starts over.
+        let key = SessionKey(cli: event.cli, session: event.session)
+
         if Thread.isMainThread {
             MainActor.assumeIsolated {
                 let before = store          // SessionStore is a value type
                 store.apply(event, now: now)
+                stalledReported.remove(key)
                 onChange?()
                 if let cue = CueSelector.cue(for: event, before: before, after: store,
                                              policy: preferences.load().alerts) {
@@ -178,6 +209,7 @@ import VibeCatTransport
                 guard let self else { return }
                 let before = store
                 store.apply(event, now: now)
+                stalledReported.remove(key)
                 onChange?()
                 if let cue = CueSelector.cue(for: event, before: before, after: store,
                                              policy: preferences.load().alerts) {
@@ -215,11 +247,38 @@ import VibeCatTransport
     /// below fires every 60 seconds regardless of whether anything is stale,
     /// and a no-op tick should not cost a re-render — the island must stay
     /// idle when the machine is idle.
+    ///
+    /// Also where `StallDetector` runs, riding this same 60s tick rather than
+    /// a second timer — Task 5's own reasoning. This must stay as
+    /// conditional as the `onChange` guard above it: `StallDetector.stalled`
+    /// already excludes anything in `stalledReported`, so a quiet machine
+    /// with nothing newly stalled costs one array scan and calls nothing.
+    /// The mutation that matters here is making that call unconditional —
+    /// see `StallCostProbe.swift` for the measured cost of doing that.
     public func prune(now: Date = Date()) {
         let before = store
         store.prune(idleFor: Self.idleTTL, now: now)
         if store != before {
             onChange?()
+        }
+
+        // Drop keys for sessions this same prune just aged out, so the set
+        // doesn't grow for the life of a long-running process. **Unmeasured
+        // as a defect and untestable through this class's public surface**:
+        // `applyAndNotify`'s own `stalledReported.remove(key)` already clears
+        // an entry the moment any event reuses that key, so no assertion
+        // reachable from outside this file can tell this line apart from its
+        // absence — tried, and removing it left every test in
+        // `StallWiringTests.swift` green. Kept anyway for a long-running
+        // process's memory, not for correctness a test could pin.
+        stalledReported.formIntersection(Set(store.sessions.map(\.id)))
+
+        guard preferences.load().alerts.allows(.stalled) else { return }
+        let newlyStalled = StallDetector.stalled(in: store, now: now, alreadyReported: stalledReported)
+        guard !newlyStalled.isEmpty else { return }
+        stalledReported.formUnion(newlyStalled)
+        for key in newlyStalled {
+            onStall?(key)
         }
     }
 
