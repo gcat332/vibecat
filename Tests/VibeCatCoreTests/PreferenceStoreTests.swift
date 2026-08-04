@@ -193,3 +193,82 @@ private func withFreshDefaults(_ body: (UserDefaults, String) throws -> Void) re
 /// The one suite file every test in this file shares. Named rather than inlined so
 /// `theFixtureLeavesNothingBehind` below can look at the same domain.
 private let sharedTestSuite = "vibecat.tests"
+
+// MARK: - every field, and no two keys crossed
+//
+// Plan 6.5's Task 1 reported a mutation that stayed green: swapping
+// `choiceForFinish`'s value into `choiceForNeedsAnswer`'s save key left the whole
+// suite passing, because no test round-tripped either field. That is the
+// copy-paste defect class — and Plan 6.5's Task 6 builds six near-identical rows
+// of exactly that shape, so the gap had to close before it got there.
+//
+// The two tests below are deliberately different in kind. The first names every
+// field, so it says which one broke. The second names none of them, so it still
+// fails when a field nobody thought about is added.
+
+@Test func everyFieldRoundTripsAndNoTwoSiblingKeysAreCrossed() {
+    // Every value differs from its default, **and every same-typed sibling
+    // differs from its siblings** — which is the half that catches a crossed key.
+    // `CueChoice` has exactly three cases and there are exactly three choice
+    // fields, so each can take a different one and no swap can hide.
+    let written = Preferences(
+        soundEnabled: false,
+        volume: 0.23,
+        quietDuringDoNotDisturb: false,
+        selectedPage: "integrations",
+        alerts: AlertPolicy(onNeedsAnswer: false, onFinish: true, onFail: false, onStall: true),
+        pack: .silent,
+        choiceForNeedsAnswer: .standard,
+        choiceForFinish: .meow,
+        choiceForFail: .none,
+        postsSystemNotification: true)
+
+    withFreshDefaults { defaults, prefix in
+        let store = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
+        store.save(written)
+        let read = store.load()
+        #expect(read == written)
+        // Named individually as well, so a failure says which key is wrong rather
+        // than only that the struct differs.
+        #expect(read.choiceForNeedsAnswer == .standard, "needsAnswer's key is crossed")
+        #expect(read.choiceForFinish == .meow, "finish's key is crossed")
+        #expect(read.choiceForFail == .none, "fail's key is crossed")
+        #expect(read.alerts == written.alerts, "the alert switches did not round trip")
+        #expect(read.pack == .silent)
+    }
+}
+
+@Test func aFieldAddedWithoutPersistenceFailsWithoutAnyoneRememberingToTestIt() {
+    // The test above has to be edited whenever `Preferences` grows, and the
+    // history of this repo says that edit gets forgotten — three fields shipped
+    // persisted-but-never-read in Plan 6.4, through six task reviews.
+    //
+    // So this one enumerates with `Mirror` instead of naming anything. Every field
+    // of `written` differs from the default, so after a round trip every child
+    // must differ from the corresponding default child. A new field that `save`
+    // or `load` does not know about comes back as its default and fails here,
+    // naming itself.
+    let written = Preferences(
+        soundEnabled: false, volume: 0.23, quietDuringDoNotDisturb: false,
+        selectedPage: "integrations",
+        alerts: AlertPolicy(onNeedsAnswer: false, onFinish: false, onFail: false, onStall: true),
+        pack: .silent,
+        choiceForNeedsAnswer: .meow, choiceForFinish: .meow, choiceForFail: .meow,
+        postsSystemNotification: true)
+
+    withFreshDefaults { defaults, prefix in
+        let store = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
+        store.save(written)
+        let read = store.load()
+
+        let defaultChildren = Dictionary(uniqueKeysWithValues:
+            Mirror(reflecting: Preferences()).children.map { ($0.label ?? "?", String(describing: $0.value)) })
+        let readChildren = Mirror(reflecting: read).children.map { ($0.label ?? "?", String(describing: $0.value)) }
+
+        #expect(readChildren.count == 10, "Preferences grew or shrank — update both round-trip tests")
+        for (label, value) in readChildren {
+            #expect(value != defaultChildren[label],
+                    "`\(label)` came back as its default, so it is not persisted in both directions")
+        }
+    }
+}

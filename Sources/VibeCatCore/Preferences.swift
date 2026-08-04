@@ -1,11 +1,19 @@
 import Foundation
 
-/// The preferences that exist today. **Four, deliberately.**
+/// The preferences that exist today. **Ten, and each one has a control that means
+/// something** — Plan 6.4 added the first four, Plan 6.5's Notifications page the
+/// rest.
 ///
-/// §14 describes roughly 47 controls across four pages, and Plan 6.4 owns none of
-/// them but mute. Adding the other 43 keys now would mean inventing defaults for
-/// behaviour that does not exist and shipping 43 pieces of untested surface;
-/// Plans 6.5–6.7 add theirs as they add the controls that mean something.
+/// §14 describes roughly 47 controls across four pages. The remaining keys arrive
+/// with the pages that own them (6.6 Display, 6.7 General and Integrations),
+/// because adding them now would mean inventing defaults for behaviour that does
+/// not exist and shipping untested surface.
+///
+/// **Adding a field here means adding it to `save` *and* `load`.** Three fields
+/// shipped in Plan 6.4 persisted but never read, through six task reviews, so
+/// `aFieldAddedWithoutPersistenceFailsWithoutAnyoneRememberingToTestIt` enumerates
+/// this struct with `Mirror` rather than naming fields — a new one that either half
+/// forgets comes back as its default and fails, naming itself.
 ///
 /// Every default below is read off `settings.html`, not chosen: the volume
 /// slider's `value="60"` (line 358), the Do Not Disturb switch's
