@@ -17,6 +17,15 @@ public struct SoundSettings: Sendable, Equatable {
     }
     public var quietDuringDoNotDisturb: Bool
     public var pack: SoundPack
+    /// §14's three per-cue overrides (`settings.html:344-357`), Plan 6.5 Task
+    /// 6's own addition. Each governs more than the one `Cue` its name
+    /// suggests: `.ask` and `.askMulti` both read `choiceForNeedsAnswer`,
+    /// because the prototype gives multi-question demand no picker of its
+    /// own — see `SoundSettings.notes(for:)` in `SoundPack.swift`, the one
+    /// place these are actually consulted.
+    public var choiceForNeedsAnswer: CueChoice
+    public var choiceForFinish: CueChoice
+    public var choiceForFail: CueChoice
 
     /// The one clamp, applied at every boundary a volume can enter through, in the
     /// same shape as `SocketClient.clamped`.
@@ -42,11 +51,17 @@ public struct SoundSettings: Sendable, Equatable {
     public static let defaultVolume: Double = 0.60
 
     public init(enabled: Bool = true, volume: Double = SoundSettings.defaultVolume,
-                quietDuringDoNotDisturb: Bool = true, pack: SoundPack = .chiptune) {
+                quietDuringDoNotDisturb: Bool = true, pack: SoundPack = .chiptune,
+                choiceForNeedsAnswer: CueChoice = .standard,
+                choiceForFinish: CueChoice = .standard,
+                choiceForFail: CueChoice = .standard) {
         self.enabled = enabled
         self.volume = Self.clampedVolume(volume)
         self.quietDuringDoNotDisturb = quietDuringDoNotDisturb
         self.pack = pack
+        self.choiceForNeedsAnswer = choiceForNeedsAnswer
+        self.choiceForFinish = choiceForFinish
+        self.choiceForFail = choiceForFail
     }
 }
 
@@ -67,12 +82,22 @@ public extension SoundSettings {
     /// `@testable import`ed. Wiring that has to be right belongs behind something a
     /// test can call.
     ///
-    /// `pack` is not persisted yet — §14's Sound Pack control is Plan 6.5's, and
-    /// inventing a key for it now would mean a stored value nothing writes, which
-    /// is the exact defect this initialiser closes.
+    /// **`pack` and the three per-cue choices were the same "persisted but never
+    /// read" gap this initialiser already closed twice, a third time.** Plan 6.5
+    /// Task 1 gave `Preferences` `pack`/`choiceForNeedsAnswer`/`choiceForFinish`/
+    /// `choiceForFail` and `UserDefaultsPreferenceStore` has saved and loaded them
+    /// since — but until Task 6, nothing mapped them into the `SoundSettings` the
+    /// running engine actually reads, so a pack chosen last session came back to
+    /// `.chiptune` on every launch regardless of what was on disk. Exactly the
+    /// shape `volume`/`quietDuringDoNotDisturb`/`selectedPage` shipped through six
+    /// task reviews before this comment existed to name it.
     init(_ preferences: Preferences) {
         self.init(enabled: preferences.soundEnabled,
                   volume: preferences.volume,
-                  quietDuringDoNotDisturb: preferences.quietDuringDoNotDisturb)
+                  quietDuringDoNotDisturb: preferences.quietDuringDoNotDisturb,
+                  pack: preferences.pack,
+                  choiceForNeedsAnswer: preferences.choiceForNeedsAnswer,
+                  choiceForFinish: preferences.choiceForFinish,
+                  choiceForFail: preferences.choiceForFail)
     }
 }

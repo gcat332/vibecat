@@ -61,3 +61,40 @@ public extension SoundPack {
         }
     }
 }
+
+/// Plan 6.5 Task 6: resolving `Cue` through the Notifications page's per-cue
+/// overrides before the pack's own table is consulted at all.
+///
+/// **Lives here, not in `CueRenderer.swift`, for the same reason `SoundPack
+/// .notes(for:)` does** — `Cue` is UI-level, and this is the second (and, for
+/// now, last) place anything maps a `Cue` onto a concrete note list.
+/// `CueRenderer.render` calls this instead of `settings.pack.notes(for:)`
+/// directly, which is the one-line change that makes `choiceForNeedsAnswer`/
+/// `Finish`/`Fail` real rather than merely persisted.
+public extension SoundSettings {
+    /// `.ask` and `.askMulti` both read `choiceForNeedsAnswer` — the prototype
+    /// gives multi-question demand no picker of its own (`settings.html:339-361`
+    /// has three per-cue rows, not four), so both share the row that already
+    /// exists. `.meow` is not one of the three overridable rows and always
+    /// plays its own table regardless of any choice.
+    func notes(for cue: Cue) -> [Note] {
+        switch cue {
+        case .ask, .askMulti: return notes(resolving: choiceForNeedsAnswer, standard: cue)
+        case .done:            return notes(resolving: choiceForFinish, standard: cue)
+        case .error:           return notes(resolving: choiceForFail, standard: cue)
+        case .meow:            return pack.notes(for: .meow)
+        }
+    }
+
+    /// `.standard` is the cue's own table; `.meow` substitutes the meow cue's
+    /// table wholesale; `.none` — written decision 1's third case — renders
+    /// nothing, which `CueRenderer.render` already treats as silence for an
+    /// empty note list (the same path an empty `SoundPack.silent` table takes).
+    private func notes(resolving choice: CueChoice, standard cue: Cue) -> [Note] {
+        switch choice {
+        case .standard: return pack.notes(for: cue)
+        case .meow:     return pack.notes(for: .meow)
+        case .none:     return []
+        }
+    }
+}

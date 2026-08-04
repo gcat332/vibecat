@@ -13,7 +13,11 @@ public struct CueRenderer: Sendable {
     public static func render(_ cue: Cue, settings: SoundSettings,
                              sampleRate: Double) -> [Float] {
         guard settings.enabled else { return [] }
-        return render(notes: settings.pack.notes(for: cue),
+        // `settings.notes(for:)` (`SoundPack.swift`), not `settings.pack.notes
+        // (for:)` directly — Plan 6.5 Task 6's per-cue overrides sit between the
+        // cue and the pack's own table, and this is the one call site that
+        // must not skip past them.
+        return render(notes: settings.notes(for: cue),
                       volume: settings.volume, sampleRate: sampleRate)
     }
 

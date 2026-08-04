@@ -113,11 +113,24 @@ import VibeCatCore
     private struct CacheKey: Equatable {
         let volume: Double
         let pack: SoundPack
+        // Plan 6.5 Task 6: these three now decide what `CueRenderer.render`
+        // produces for `.ask`/`.askMulti`, `.done` and `.error` respectively
+        // (`SoundSettings.notes(for:)`), so a cached buffer rendered under one
+        // choice is wrong under another — the same reason `pack` was already
+        // here. Omitting them would mean flipping "Needs an answer" from
+        // standard to Meow mid-session kept playing the old rising call from
+        // cache, silently, for the rest of the session.
+        let choiceForNeedsAnswer: CueChoice
+        let choiceForFinish: CueChoice
+        let choiceForFail: CueChoice
         let sampleRate: Double
 
         init(settings: SoundSettings, sampleRate: Double) {
             volume = settings.volume
             pack = settings.pack
+            choiceForNeedsAnswer = settings.choiceForNeedsAnswer
+            choiceForFinish = settings.choiceForFinish
+            choiceForFail = settings.choiceForFail
             self.sampleRate = sampleRate
         }
     }
