@@ -43,6 +43,23 @@
 	<key>NSFocusStatusUsageDescription</key>
 	<string>VibeCat stays silent while you are in a Focus or Do Not Disturb session.</string>
 
+	<!-- §14's "Also post a system notification" and §15's Notifications
+	     permission need NO usage-description key either, and this is the
+	     measured reason rather than an assumption (2026-08-04, macOS 26.5).
+	     UserNotifications is gated on the process having an *application
+	     bundle*: with no CFBundleIdentifier — a bare `swift run vibecat`, or a
+	     `swift` script — the very first touch of
+	     UNUserNotificationCenter.current() raises
+	     NSInternalInconsistencyException, "bundleProxyForCurrentProcess is
+	     nil", which is an uncaught ObjC exception and therefore SIGABRT: the
+	     probe process died with exit 134 at current(), *before* any
+	     requestAuthorization. So the abort Plan 6.2 shipped for Focus has an
+	     exact analogue here, but the fix is the CFBundleIdentifier above plus
+	     Notifier.hasApplicationBundle, not a string in this file. The text in
+	     the permission alert is the app's own name; macOS gives us nowhere to
+	     supply a sentence. Nothing goes here for it — same shape of
+	     deliberate absence as the Screen Recording note below. -->
+
 	<!-- Screen recording has NO usage-description key on macOS, unlike camera
 	     or microphone: it is granted only in System Settings > Privacy &amp;
 	     Security > Screen Recording, prompted by CGRequestScreenCaptureAccess().
