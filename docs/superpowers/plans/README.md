@@ -17,7 +17,8 @@ plan files twice; it is cheaper to keep it written down.
 | 6.5 | The Notifications page — the four alert switches, the Sound section that gives Plan 6.2's engine its sheet, stall detection, and the system-notification fallback | §14's Notifications | **done** — [the plan](2026-08-04-notifications-page.md), 7 tasks; 647 tests. The browser diff found the page did not fit its own window |
 | **6.6** | The Display page — 21 controls, and the one that re-threads `SessionRow.Options`, picks the list's overflow cue, settles §6.3's per-face width and ships the motion control | §14's Display, §9.3's UI | not written |
 | **6.7** | The General and Integrations pages | §14 | not written |
-| **6** | Jump, and everything else gated on keyboard input — sound is 6.2, the Settings shell is 6.4 | §13, §9.3's UI | not written |
+| **6.1** | Keyboard answering, `Other…`, the three motion defects a motion switch exposes, the duplicate tier, and §6.2's choosable right flank | §10.1, §9.3, §6.2 | **written** — [the plan](2026-08-04-keyboard-and-switches.md), 6 tasks |
+| **6** | Jump and §16's AppleScript hint — everything else that was gated on keyboard input is 6.1 | §13, §16 | not written |
 | **7** | Generic adapter and custom sources | §3 | not written |
 | **8** | Matching motion cost to motion content | §9.1's rates | not written |
 
