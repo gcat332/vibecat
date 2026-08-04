@@ -202,6 +202,57 @@ struct SoundSectionTests {
         #expect(afterChoice == CueRenderer.render(.meow, settings: player.settings, sampleRate: rate))
     }
 
+    // MARK: - The store → engine seam, enumerated rather than named
+
+    @Test func aSoundFieldAddedWithoutMappingFailsWithoutAnyoneRememberingToTestIt() {
+        // **The fifth instance of "persisted but never read" in this project was
+        // found on this exact seam.** `SoundSettings(_ preferences:)` silently
+        // dropped `pack` and all three `CueChoice` fields until Task 6 noticed;
+        // `volume` and `quietDuringDoNotDisturb` had already been dropped by the
+        // same initialiser once before that. Plan 6.5 Task 1 put a `Mirror` guard
+        // on the *store* seam (`aFieldAddedWithoutPersistenceFailsWithout
+        // AnyoneRememberingToTestIt`, `PreferenceStoreTests.swift`) — this is
+        // Task 7 closing the other half, the store→engine one, which had none.
+        //
+        // Every field of `written` differs from `Preferences()`'s default, so
+        // every field of the mapped `SoundSettings` must differ from
+        // `SoundSettings()`'s. Nothing is named: a field added to both types and
+        // forgotten in the mapping comes back as its default and fails here,
+        // saying which. A field added to `Preferences` alone trips the `count`
+        // assertion instead, which is the prompt to decide whether the engine
+        // needs it.
+        let written = Preferences(
+            soundEnabled: false, volume: 0.23, quietDuringDoNotDisturb: false,
+            selectedPage: "integrations",
+            alerts: AlertPolicy(onNeedsAnswer: false, onFinish: false, onFail: false, onStall: true),
+            pack: .silent,
+            choiceForNeedsAnswer: .meow, choiceForFinish: .meow, choiceForFail: .meow,
+            postsSystemNotification: true)
+        let mapped = SoundSettings(written)
+
+        let defaults = Dictionary(uniqueKeysWithValues:
+            Mirror(reflecting: SoundSettings()).children.map {
+                ($0.label ?? "?", String(describing: $0.value))
+            })
+        let mappedChildren = Mirror(reflecting: mapped).children.map {
+            ($0.label ?? "?", String(describing: $0.value))
+        }
+
+        #expect(mappedChildren.count == 7,
+                "SoundSettings grew or shrank — check `SoundSettings(_ preferences:)` maps the new field")
+        for (label, value) in mappedChildren {
+            #expect(value != defaults[label],
+                    "`\(label)` is at its default after mapping a non-default Preferences, so `SoundSettings(_ preferences:)` is not reading it")
+        }
+        // The other direction, which the enumeration above cannot see: every
+        // field of `SoundSettings` must have a `Preferences` field behind it. A
+        // mapping that hardcoded a non-default constant would pass the loop.
+        #expect(mapped == SoundSettings(enabled: false, volume: 0.23,
+                                        quietDuringDoNotDisturb: false, pack: .silent,
+                                        choiceForNeedsAnswer: .meow, choiceForFinish: .meow,
+                                        choiceForFail: .meow))
+    }
+
     // MARK: - Play bypasses AlertPolicy and reaches the row's own cue
 
     @Test @MainActor func eachPlayButtonReachesItsOwnRowsCue() {
