@@ -133,9 +133,23 @@ private let externalDisplay = ScreenMetrics(
     c.dismiss()
 }
 
-@MainActor @Test func theTierStartsAtRest() {
+@MainActor @Test func theTierStartsAtRestAndHoverMovesIt() {
+    // Repointed from a deleted `NotchController.tier`, which only ever held
+    // `.hover` or `.rest` — never `.drawer` — so it was a `Bool` wearing an
+    // `IslandTier`: `setHovering(_:)` took a `Bool`, stored it as a tier, and
+    // `reflow()` converted it straight back. `IslandModel.tier` is the real one
+    // and is computed, so there was nothing to keep in step.
+    //
+    // Asserting the *transition* rather than only the initial value, because the
+    // old test could not fail against the wiring it lived next to: `.rest` is what
+    // a model with no drawer and no hover computes anyway, so it held whether or
+    // not `setHovering` reached the model at all. This version fails if it does not.
     let (c, _) = controller { mbp14 }
-    #expect(c.tier == .rest)
+    #expect(c.model.tier == .rest)
+    c.setHovering(true)
+    #expect(c.model.tier == .hover, "setHovering did not reach the model")
+    c.setHovering(false)
+    #expect(c.model.tier == .rest, "the hover never came back off")
 }
 
 /// The island tracks the store: an event moves it off dormant.

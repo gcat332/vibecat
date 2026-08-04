@@ -6,7 +6,6 @@ import VibeCatCore
 /// `IslandModel` in step with the app model and with the display.
 @MainActor public final class NotchController {
     public private(set) var geometry: IslandGeometry?
-    public private(set) var tier: IslandTier = .rest
 
     /// The one object the view reads. Built here, handed to SwiftUI once in
     /// `present()`, and mutated thereafter — never rebuilt into a fresh view
@@ -398,15 +397,23 @@ import VibeCatCore
         dismiss()
     }
 
-    /// Updates the model's hover flag and the hover monitor's own hit-test
-    /// frame, re-renders, then keeps the panel in step with the model's own
-    /// tier. The handler for the hover monitor's edge (a tier change),
+    /// Syncs the hover monitor's own hit-test frame, re-renders, then keeps the
+    /// panel in step with the model's tier.
+    ///
+    /// It used to also set `model.hovering` from a second `tier` property on this
+    /// class — but that property only ever held `.hover` or `.rest`, never
+    /// `.drawer`, so it was a `Bool` wearing an `IslandTier`: `setHovering(_:)`
+    /// took a `Bool`, stored it as a tier, and this line converted it straight
+    /// back. `IslandModel.tier` is the real one, and it is computed rather than
+    /// stored, so there is nothing here to keep in step with it. `setHovering`
+    /// now writes `model.hovering` directly.
+    ///
+    /// The handler for the hover monitor's edge (a tier change),
     /// `appModel.onChange` (a session-count or state change), and — via
     /// `setHovering`/`setQuestion`/`click` below — every way the drawer's own
     /// tier can change, all funnel through here rather than each repeating
     /// this same synchronisation.
     private func reflow() {
-        model.hovering = (tier == .hover)
         hover?.frame = model.frames.body
         render()
 
@@ -476,7 +483,7 @@ import VibeCatCore
     /// test in `NotchControllerTests` that drives hover without a real
     /// cursor — one path, not two copies of the same two lines.
     func setHovering(_ hovering: Bool) {
-        tier = hovering ? .hover : .rest
+        model.hovering = hovering
         reflow()
     }
 
