@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import VibeCatCore
 @testable import VibeCatUI
 
 // MARK: - SoundPack

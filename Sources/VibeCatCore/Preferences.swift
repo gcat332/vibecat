@@ -19,12 +19,35 @@ public struct Preferences: Sendable, Equatable {
     /// Which pane the window reopens on. A key, not an index, so reordering the
     /// sidebar cannot silently change which page someone lands on.
     public var selectedPage: String
+    /// §14's four switches, `Alert me when an agent…` (`settings.html:328-336`).
+    public var alerts: AlertPolicy
+    /// §14's Sound pack picker (`settings.html:341`).
+    public var pack: SoundPack
+    /// §14's three per-cue pickers (`settings.html:344-357`). Each defaults to
+    /// the cue's own sound rather than any override.
+    public var choiceForNeedsAnswer: CueChoice
+    public var choiceForFinish: CueChoice
+    public var choiceForFail: CueChoice
+    /// §14's `Also post a system notification` (`settings.html:368`),
+    /// `aria-checked="false"` — off until Task 7 gives it a real destination.
+    public var postsSystemNotification: Bool
 
     public init(soundEnabled: Bool = true, volume: Double = 0.60,
-                quietDuringDoNotDisturb: Bool = true, selectedPage: String = "general") {
+                quietDuringDoNotDisturb: Bool = true, selectedPage: String = "general",
+                alerts: AlertPolicy = AlertPolicy(), pack: SoundPack = .chiptune,
+                choiceForNeedsAnswer: CueChoice = .standard,
+                choiceForFinish: CueChoice = .standard,
+                choiceForFail: CueChoice = .standard,
+                postsSystemNotification: Bool = false) {
         self.soundEnabled = soundEnabled
         self.volume = volume
         self.quietDuringDoNotDisturb = quietDuringDoNotDisturb
         self.selectedPage = selectedPage
+        self.alerts = alerts
+        self.pack = pack
+        self.choiceForNeedsAnswer = choiceForNeedsAnswer
+        self.choiceForFinish = choiceForFinish
+        self.choiceForFail = choiceForFail
+        self.postsSystemNotification = postsSystemNotification
     }
 }

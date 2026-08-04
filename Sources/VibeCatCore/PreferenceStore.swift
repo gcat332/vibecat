@@ -51,6 +51,41 @@ public struct UserDefaultsPreferenceStore: PreferenceStoring {
            SettingsPageKey.isKnown(page) {
             prefs.selectedPage = page
         }
+        // Three of `AlertPolicy`'s four fields default to `true`, exactly the
+        // trap `soundEnabled` and `quietDuringDoNotDisturb` above already guard
+        // against: `bool(forKey:)` returns `false` for an absent key, so reading
+        // unconditionally would ship a fresh install with alerts off.
+        var alerts = fallback.alerts
+        if defaults.object(forKey: key("alerts.onNeedsAnswer")) != nil {
+            alerts.onNeedsAnswer = defaults.bool(forKey: key("alerts.onNeedsAnswer"))
+        }
+        if defaults.object(forKey: key("alerts.onFinish")) != nil {
+            alerts.onFinish = defaults.bool(forKey: key("alerts.onFinish"))
+        }
+        if defaults.object(forKey: key("alerts.onFail")) != nil {
+            alerts.onFail = defaults.bool(forKey: key("alerts.onFail"))
+        }
+        if defaults.object(forKey: key("alerts.onStall")) != nil {
+            alerts.onStall = defaults.bool(forKey: key("alerts.onStall"))
+        }
+        prefs.alerts = alerts
+        // `SoundPack(rawValue:)` and `CueChoice(rawValue:)` both fail rather than
+        // crash on an unrecognised string — written decision 1: a plist naming a
+        // pack or choice this build does not implement (`"soft"`, `"blip"`) must
+        // fall back to the prototype's default, not force-unwrap into a trap.
+        if let raw = defaults.string(forKey: key("pack")) {
+            prefs.pack = SoundPack(rawValue: raw) ?? fallback.pack
+        }
+        if let raw = defaults.string(forKey: key("choiceForNeedsAnswer")) {
+            prefs.choiceForNeedsAnswer = CueChoice(rawValue: raw) ?? fallback.choiceForNeedsAnswer
+        }
+        if let raw = defaults.string(forKey: key("choiceForFinish")) {
+            prefs.choiceForFinish = CueChoice(rawValue: raw) ?? fallback.choiceForFinish
+        }
+        if let raw = defaults.string(forKey: key("choiceForFail")) {
+            prefs.choiceForFail = CueChoice(rawValue: raw) ?? fallback.choiceForFail
+        }
+        prefs.postsSystemNotification = defaults.bool(forKey: key("postsSystemNotification"))
         return prefs
     }
 
@@ -59,6 +94,15 @@ public struct UserDefaultsPreferenceStore: PreferenceStoring {
         defaults.set(preferences.volume, forKey: key("volume"))
         defaults.set(preferences.quietDuringDoNotDisturb, forKey: key("quietDuringDoNotDisturb"))
         defaults.set(preferences.selectedPage, forKey: key("selectedPage"))
+        defaults.set(preferences.alerts.onNeedsAnswer, forKey: key("alerts.onNeedsAnswer"))
+        defaults.set(preferences.alerts.onFinish, forKey: key("alerts.onFinish"))
+        defaults.set(preferences.alerts.onFail, forKey: key("alerts.onFail"))
+        defaults.set(preferences.alerts.onStall, forKey: key("alerts.onStall"))
+        defaults.set(preferences.pack.rawValue, forKey: key("pack"))
+        defaults.set(preferences.choiceForNeedsAnswer.rawValue, forKey: key("choiceForNeedsAnswer"))
+        defaults.set(preferences.choiceForFinish.rawValue, forKey: key("choiceForFinish"))
+        defaults.set(preferences.choiceForFail.rawValue, forKey: key("choiceForFail"))
+        defaults.set(preferences.postsSystemNotification, forKey: key("postsSystemNotification"))
     }
 
     static func clampedVolume(_ value: Double, fallback: Double) -> Double {

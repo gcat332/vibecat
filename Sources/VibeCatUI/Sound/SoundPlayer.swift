@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import VibeCatCore
 
 /// The only file in this plan that touches an audio device.
 ///

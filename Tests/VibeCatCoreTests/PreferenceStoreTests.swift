@@ -69,6 +69,40 @@ import Foundation
     }
 }
 
+// MARK: - the four new alert/sound fields (Plan 6.5, Task 1)
+
+@Test func aNewAlertFieldRoundTripsAndDefaultsWhenAbsent() {
+    // `withFreshDefaults` below is the real fixture, installed by Plan 6.4's fix
+    // round — a fixed suite plus a per-test `keyPrefix`, cleaned up on the way
+    // out. Its predecessor built a suite per test and leaked 175 plists into
+    // `~/Library/Preferences`, because emptying a defaults domain is not
+    // cleaning up after yourself — `cfprefsd` writes it back.
+    withFreshDefaults { defaults, prefix in
+        let store = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
+        #expect(store.load().alerts == AlertPolicy(), "an untouched store must give the prototype's states")
+        var p = store.load()
+        p.alerts.onStall = true
+        p.postsSystemNotification = true
+        store.save(p)
+        #expect(store.load().alerts.onStall == true)
+        #expect(store.load().postsSystemNotification == true)
+        // And the fields this plan did not touch survived.
+        #expect(store.load().volume == 0.60)
+    }
+}
+
+@Test func anUnknownPackOrChoiceInThePlistFallsBackRatherThanCrashing() {
+    // 6.2's decision 3: Soft/System/Blip do not exist. A plist naming one — or a
+    // future build's key read by an older one — must not produce a nil enum.
+    withFreshDefaults { defaults, prefix in
+        defaults.set("soft", forKey: prefix + "pack")
+        defaults.set("blip", forKey: prefix + "choiceForFail")
+        let loaded = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix).load()
+        #expect(loaded.pack == .chiptune)
+        #expect(loaded.choiceForFail == .standard)
+    }
+}
+
 @Test func anUnknownSelectedPageFallsBackToGeneralRatherThanOpeningNothing() {
     // A page key that no longer exists — a renamed pane, a hand-edited plist —
     // must not open a window with no pane selected.
@@ -145,7 +179,10 @@ private func withFreshDefaults(_ body: (UserDefaults, String) throws -> Void) re
         // snapshot had not caught up with — and `SettingsPageKey`-style drift is
         // covered, because a fifth key would have to be added to `save(_:)` and
         // `everyFieldSurvivesASaveAndReload` reads all four back.
-        for name in ["soundEnabled", "volume", "quietDuringDoNotDisturb", "selectedPage"] {
+        for name in ["soundEnabled", "volume", "quietDuringDoNotDisturb", "selectedPage",
+                     "alerts.onNeedsAnswer", "alerts.onFinish", "alerts.onFail", "alerts.onStall",
+                     "pack", "choiceForNeedsAnswer", "choiceForFinish", "choiceForFail",
+                     "postsSystemNotification"] {
             defaults.removeObject(forKey: prefix + name)
         }
         defaults.synchronize()

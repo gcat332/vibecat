@@ -1,4 +1,5 @@
 import Foundation
+import VibeCatCore
 
 /// §12's five cues. `ask`, `askMulti`, `done` and `error` fire from a state
 /// change; `meow` never does — it exists for the Settings sheet's per-cue
@@ -7,23 +8,17 @@ public enum Cue: String, Sendable, CaseIterable {
     case ask, askMulti, done, error, meow
 }
 
-/// A pack is "a handful of oscillator settings rather than a folder of files"
-/// (§12), which is why this is an enum returning arrays rather than a resource
-/// bundle.
-///
-/// **Only `chiptune` and `silent` exist, deliberately.** `settings.html` offers
-/// Chiptune / Soft / System / Silent and per-cue alternatives Blip / Meow /
-/// None, but nothing in this repo defines what Soft, System or Blip sound like —
-/// no frequencies, no waveforms, nothing. Inventing them would be inventing
-/// design rather than implementing it. Adding a case later is additive.
-public enum SoundPack: String, Sendable, CaseIterable {
-    case chiptune, silent
-
+/// The oscillator maths for `SoundPack`. **The enum itself now lives in
+/// `VibeCatCore/SoundPack.swift`** — `Preferences.pack` needed it visible from
+/// Core, and Core may never import `VibeCatUI` — so this is an extension: the
+/// pack's *identity* is data Core can hold, its *sound* stays here because
+/// `Cue` and `Note` are both UI-level.
+public extension SoundPack {
     /// Transcribed from `island-motion.html:894-912`. Every offset, duration,
     /// gain and detune below is from that block. §12's durations are the
     /// arithmetic consequence of the last note's `at + duration` and are
     /// asserted in `everyCueLastsWhatTheSpecTableSays`.
-    public func notes(for cue: Cue) -> [Note] {
+    func notes(for cue: Cue) -> [Note] {
         switch self {
         case .silent: return []
         case .chiptune: break
