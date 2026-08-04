@@ -36,6 +36,10 @@ public enum SettingsPalette {
     public static let pane = RGBA(hex: "#161618")!
     /// `settings.html:13` — a settings group's card.
     public static let card = RGBA(hex: "#2A2A2D")!
+    /// `settings.html:13` — `--card2`, one step lighter than `card`: the fill
+    /// for a control that sits *on* a card rather than *is* one — `.sel` and
+    /// `.btn` (`settings.html:106,111`) both read it.
+    public static let card2 = RGBA(hex: "#323236")!
     /// `settings.html:14` — `rgba(255,255,255,.08)`, the hairline between rows.
     /// `RGBA` carries no alpha channel (see `Color(_:)` at `IslandView.swift:8`,
     /// which only reads `r`/`g`/`b`) — every other token here is fully opaque, so
