@@ -758,6 +758,24 @@ worth reading out of order:
   `minimumInterval(for:)` already applies, and a view transform is run by the render
   server regardless. Documented, not invented around. **Whether `reduced` should do
   more is the owner's call.**
+- **§10.3's confirmation banner was never in the mockup, so the drawer's height was
+  never budgeted for it.** Restoring `Other…` in Task 5 surfaced it: at production
+  width, three choices plus `Other…` plus the destructive banner pushed `PanelBar`'s
+  mute and gear **entirely out of frame** — confirmed by rendering, not by reading a
+  negative margin. Contained two ways, both real fixes rather than loosened
+  assertions: `QuestionFace.rows`' gap corrected to the prototype's `5px` (it was
+  `8`, a pre-existing divergence this exposed), and `Other…` hidden while a
+  confirmation is showing, reappearing when it clears. **The underlying mismatch
+  stands** — the mockup gives `.question` 288pt and has no second ask in it at all,
+  because §10.3 is a spec rule the prototype never drew. Whoever owns panel size
+  (Plan 6.6) inherits the real budget question.
+- **`.sessionCount(0)` now passes through instead of collapsing to `.nothing`.**
+  `CollapsedLayout` already treats the two as indistinguishable on every axis, pinned
+  by `aZeroCountCollapsesToNothing`, so the old ternary's special-casing was an
+  accident of the hardcoding rather than a decision. And the cat's left edge was
+  rasterised across all three `RightFlank` values and does not move — §5.3's
+  constant `LW = 58pt` is what pins it, and a flank change that moved the cat would
+  be a defect, not a side effect.
 - **`off` renders at phase 0**, which is the prototype's own answer rather than a
   convenience: `island-motion.html:439`'s entire reduced-motion rule is
   `animation:none`, and a CSS element with no animation renders at its base style —
