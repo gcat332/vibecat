@@ -514,7 +514,9 @@ struct IslandGoldenTests {
     /// `IslandShape`'s two rounded corners live at its extreme left/right
     /// edges regardless of height (see its own `path(in:)` — the radius is
     /// `min(bottomRadius, rect.height, rect.width / 2)`, and `bottomRadius`
-    /// is 15pt against every fixture's width here), so growing the shape
+    /// is at most `IslandGeometry.openBottomRadius`'s 20pt — 15 collapsed, 20
+    /// while a drawer is open since Plan 6.3 Task 5 — against every fixture's
+    /// width here), so growing the shape
     /// downward for the drawer does not bring any antialiased corner pixel
     /// nearer the cutout's own columns, which sit in the middle of the
     /// width — the one artifact `DrawerGeometryTests`' own comment warns

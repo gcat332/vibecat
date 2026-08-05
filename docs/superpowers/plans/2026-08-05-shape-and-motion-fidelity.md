@@ -306,13 +306,16 @@ Two smaller prototype behaviours, both currently absent:
    30ms. Ours shares one response. That lag is what makes the shape read as the
    width leading and the body following.
 
-- [ ] Tests: the open radius differs from the closed one, asserted on the rendered
+- [x] Tests: the open radius differs from the closed one, asserted on the rendered
       corner rather than a property; the height animation's duration exceeds the
       width's by 30ms.
-- [ ] Mutation-verify: equalise the durations → the lag test fails. Morph the
+- [x] Mutation-verify: equalise the durations → the lag test fails. Morph the
       *collapsed* radius too → an existing collapsed golden must fail, which is the
       guard that the written 15pt decision survives.
-- [ ] Full suite, commit.
+- [x] Full suite, commit.
+- [x] **Carried, as the third item:** §9.3 now reaches the island's own six shape
+      and hover clocks (`IslandMotion.gated`), the fourth bypass of the kind Plan
+      6.1's Task 2 closed three of.
 
 ---
 

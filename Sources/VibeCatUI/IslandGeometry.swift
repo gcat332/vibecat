@@ -53,6 +53,30 @@ public enum IslandTier: Sendable, Equatable {
     /// gesture that should expand it) came from two of the three sites above
     /// disagreeing about it.
     var takesHoverReveal: Bool { openFace == nil }
+
+    /// **The bottom radius the island's silhouette carries at this tier** —
+    /// `IslandGeometry.bottomRadius` (15) collapsed, `.openBottomRadius` (20)
+    /// open. Plan 6.3 Task 5; `island-motion.html:82` against `:162`/`:164`.
+    ///
+    /// Keyed to `openFace`, and therefore to the same predicate as
+    /// `takesHoverReveal` and `IslandGeometry.frames`'s width arm — **not to
+    /// `IslandBody.drawerBelowNotch > 0`**, for the reason `IslandBody.revealWidth`
+    /// gives at length: "is any of the body below the notch line" is a fact about
+    /// the height, and a face that ever took height 0 would silently put the
+    /// collapsed radius back on an open drawer. The prototype states the rule the
+    /// same way — the 20px radius is set by the `ask`/`askmulti`/`list` *states*,
+    /// which are exactly the states that also set `width:560px`, and no `:hover`
+    /// or height selector touches it.
+    ///
+    /// One property rather than a ternary at each of the three shapes that draw a
+    /// bottom corner (`IslandBody`'s two silhouette halves and `DrawerView`'s own
+    /// fill/clip pair): the three have to agree, because they are stacked in the
+    /// same colour and the *union* of their coverage is what is visible. Two of
+    /// them at 20 and one at 15 paints a 15pt corner and nothing else changes,
+    /// which is a divergence with no symptom other than the pixels.
+    var bottomRadius: CGFloat {
+        openFace == nil ? IslandGeometry.bottomRadius : IslandGeometry.openBottomRadius
+    }
 }
 
 /// What the drawer is showing, and how tall that makes it. Design §6.3.
@@ -151,7 +175,31 @@ public struct IslandGeometry: Sendable, Equatable {
     /// 12 padding + 18 cat + 4 gap + 14 badge + 10 padding. Constant so that
     /// the island's left edge — and therefore the cat — never moves.
     public static let leftFlank: CGFloat = 58
+    /// The **collapsed** bottom radius, and a deliberate divergence from the
+    /// prototype's `9px` (`island-motion.html:82`): it matches the measured
+    /// hardware corner (~14pt) so our curve sits over the machine's rather than
+    /// beside it. Written down in this repo more than once precisely so nobody
+    /// "corrects" it back — see `minimumRightFlank` just below, which derives from
+    /// it, and `plans/README.md`.
     public static let bottomRadius: CGFloat = 15
+    /// **The bottom radius while a drawer is open** —
+    /// `island-motion.html:162` and `:164`, where the `ask`, `askmulti` and `list`
+    /// states all set `border-radius: 0 0 20px 20px`. Added by Plan 6.3 Task 5;
+    /// before it the island was a flat 15 at every tier, so the one radius the
+    /// prototype does *not* diverge from ours was the one we did not have.
+    ///
+    /// Taken from the prototype verbatim, unlike `bottomRadius` above, and the
+    /// asymmetry is the point rather than an inconsistency: 15 is a measurement of
+    /// a *cutout* our collapsed corner has to cover, and there is no cutout beside
+    /// a 288pt drawer for the open corner to match. Nothing in the hardware
+    /// argument that produced 15 reaches down there, so the design's own number
+    /// governs.
+    ///
+    /// `IslandTier.bottomRadius` is what chooses between the two, and
+    /// `IslandMotion.shapeDuration`/`easeCurve` are the clock and curve the change
+    /// runs on (`island-motion.html:86`: `border-radius var(--t-shape) var(--ease)`
+    /// — the one shape property the prototype does *not* put on a spring).
+    public static let openBottomRadius: CGFloat = 20
 
     /// The smallest right flank the island ever has, even with nothing to show.
     ///
@@ -210,6 +258,25 @@ public struct IslandGeometry: Sendable, Equatable {
         Self.leftFlank + notch.width + Self.minimumRightFlank
     }
 
+    /// `minimumWidth`'s open-tier twin: the same rule, measured against the
+    /// radius the **open** silhouette actually draws.
+    ///
+    /// Plan 6.3 Task 5. `minimumRightFlank` is `bottomRadius` — 15 — because that
+    /// is the collapsed corner, and §5.1's guarantee is "our curve starts at or
+    /// beyond `notch.maxX`, so our black covers the hardware's corner rather than
+    /// competing with it". Giving the open island a **20pt** corner while leaving
+    /// the floor at 15 breaks exactly that: the last 20pt of the open body is a
+    /// curve, so 15pt of clearance puts 5pt of it back inside the cutout.
+    ///
+    /// It binds on no Mac — the floor itself only binds for a cutout wider than
+    /// 487pt (see `openWidth(face:)`) — and it is here for the same reason that
+    /// floor is: a rule whose failing case is never constructed is a rule nobody
+    /// has checked, and `anAbsurdlyWideCutoutTakesTheFloorRatherThanTheDesignWidth`
+    /// constructs it.
+    public var minimumOpenWidth: CGFloat {
+        Self.leftFlank + notch.width + Self.openBottomRadius
+    }
+
     /// The island's width while `face`'s drawer is open — **the face's own flat
     /// width, floored at `minimumWidth`.**
     ///
@@ -232,8 +299,10 @@ public struct IslandGeometry: Sendable, Equatable {
     ///
     /// See `DrawerFace.width` for why the face's number is literal rather than
     /// derived from `notch.width`, and what that means on a notchless display.
+    /// **`minimumOpenWidth`, not `minimumWidth`, since Plan 6.3 Task 5** — the open
+    /// corner is 20pt, so 20pt is what has to be cleared. See that property.
     public func openWidth(face: DrawerFace) -> CGFloat {
-        max(face.width, minimumWidth)
+        max(face.width, minimumOpenWidth)
     }
 
     public func frames(rightFlank: CGFloat, tier: IslandTier) -> IslandFrames {

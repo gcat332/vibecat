@@ -20,6 +20,18 @@ struct DrawerView: View {
     var sessions: [Session] = []
     let accent: RGBA
     let width: CGFloat
+    /// The bottom corner radius, `IslandGeometry.openBottomRadius` (20) in
+    /// production — `island-motion.html:162`/`:164` give every expanded state
+    /// `border-radius: 0 0 20px 20px`. Plan 6.3 Task 5.
+    ///
+    /// Defaulted rather than required, and the default is the *open* value rather
+    /// than `IslandGeometry.bottomRadius`, because a `DrawerView` exists only while
+    /// a drawer is open: there is no tier at which this view is the collapsed 15,
+    /// so a caller that says nothing should get 20 and not the value it would have
+    /// to override. `IslandView` passes `model.tier.bottomRadius` anyway, so
+    /// production reads the one property that decides the radius rather than this
+    /// default.
+    var bottomRadius: CGFloat = IslandGeometry.openBottomRadius
     /// Fires with the `Reply` a tap inside `QuestionFace` produced. Threaded
     /// straight through to it — `DrawerView` itself makes no answering
     /// decision, `QuestionModel` already does (see its own doc comment).
@@ -85,7 +97,7 @@ struct DrawerView: View {
     private var accentColor: Color { Color(accent) }
 
     var body: some View {
-        IslandShape()
+        IslandShape(bottomRadius: bottomRadius)
             .fill(Color(islandGroundColour))
             .overlay(alignment: .top) {
                 VStack(spacing: 0) {
@@ -153,13 +165,16 @@ struct DrawerView: View {
             // fill beneath it — `IslandBody` does the same, for the same
             // reason: without it, a row's own rounded-rect background could
             // paint square into a corner the shape has already rounded off.
-            .clipShape(IslandShape())
+            .clipShape(IslandShape(bottomRadius: bottomRadius))
             // `IslandShape` always draws a flat top and rounded bottom
             // corners regardless of the rect it is given (see its own doc
             // comment) — reusing it here, rather than a second shape with
             // its own copy of `IslandGeometry.bottomRadius`, is what makes
             // these corners "IslandShape-consistent" by construction instead
-            // of by two literals that could drift apart.
+            // of by two literals that could drift apart. Both this and the fill
+            // above take `bottomRadius`, not the shape's default: the fill and its
+            // own clip disagreeing would round the ground at one radius and the
+            // content at another.
             .frame(width: width, height: face.height)
     }
 }

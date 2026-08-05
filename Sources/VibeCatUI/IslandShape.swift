@@ -27,12 +27,42 @@ public struct IslandShape: Shape, Sendable {
     /// below it, and the drawer's own bottom carries the radius for both.
     public let roundsBottom: Bool
 
-    public init(roundsBottom: Bool = true) {
+    /// How round the bottom corners are: `IslandGeometry.bottomRadius` (15)
+    /// collapsed, `.openBottomRadius` (20) while a drawer is open. Plan 6.3 Task 5;
+    /// before it this was a direct read of `IslandGeometry.bottomRadius` and the
+    /// island was 15 at every tier, where `island-motion.html:162`/`:164` give the
+    /// open states 20.
+    ///
+    /// A `var`, and the shape's `animatableData`, so a change to it **interpolates**
+    /// rather than jumping. `island-motion.html:86` transitions `border-radius` over
+    /// `var(--t-shape)` on `var(--ease)` — the one shape property in that rule that
+    /// is not on a spring — and a `Shape` whose `animatableData` is
+    /// `EmptyAnimatableData` (the default) cannot be transitioned at all, whatever
+    /// animation encloses it.
+    ///
+    /// `IslandTier.bottomRadius` is the one place the 15-or-20 choice is made; this
+    /// is a plain number so the shape stays usable for a corner that is neither
+    /// (`min` below still shrinks it to fit a short or narrow rect).
+    public var bottomRadius: CGFloat
+
+    public init(roundsBottom: Bool = true,
+                bottomRadius: CGFloat = IslandGeometry.bottomRadius) {
         self.roundsBottom = roundsBottom
+        self.bottomRadius = bottomRadius
+    }
+
+    /// The radius, so a 15 → 20 change is interpolated by whatever `.animation`
+    /// encloses the shape. `Shape`'s default is `EmptyAnimatableData`, which
+    /// silently makes every radius change a hard cut — including a cut nothing in
+    /// this suite could have seen, since a single frame of a hard cut and a single
+    /// frame of a finished interpolation are the same picture.
+    public var animatableData: CGFloat {
+        get { bottomRadius }
+        set { bottomRadius = newValue }
     }
 
     public func path(in rect: CGRect) -> Path {
-        let r0 = roundsBottom ? IslandGeometry.bottomRadius : 0
+        let r0 = roundsBottom ? bottomRadius : 0
         // Two invariants keep the contour from folding back on itself: the two
         // corners cannot be taller than the rect, nor wider than it.
         let r = min(r0, rect.height, rect.width / 2)

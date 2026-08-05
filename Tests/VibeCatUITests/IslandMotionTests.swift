@@ -342,18 +342,28 @@ private func ease(_ x: Double) -> Double { cssBezier(0.22, 0.9, 0.28, 1, atX: x)
         return IslandMotion.easeDurationsRead
     }
 
-    // 1. The hover reveal's TWO `--ease` clocks — `--t-hover` 280ms on its width
-    //    and a bare 160ms on its opacity (island-motion.html:125). One duration
-    //    here until Plan 6.3 Task 4; the set is the assertion, so three equal
-    //    clocks collapse it to one element and fail.
+    // 1. `IslandBody`'s THREE `--ease` clocks — the hover reveal's `--t-hover`
+    //    280ms width and its bare 160ms opacity (island-motion.html:125), plus the
+    //    bottom-radius morph's `--t-shape` 440ms (line 86). One duration until Plan
+    //    6.3 Task 4, two until Task 5; the set is the assertion, so any two of the
+    //    three collapsing onto one clock drops an element and fails.
+    //
+    //    **The radius is the third and it is not on a spring.** Line 86 is
+    //    `border-radius var(--t-shape) var(--ease)` inside the same rule whose other
+    //    two clauses are `var(--spring-w)`, so the radius sharing the width's clock
+    //    while taking the bezier is a distinction the prototype draws deliberately.
+    //    `IslandMotion.shapeDuration` appearing here is what says our radius took
+    //    the bezier: a radius put on `widthSpring` instead would leave this set at
+    //    two elements.
     let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
                             motion: MotionPreference(chosen: .full, systemWantsReduced: false))
     model.state = .waiting
     model.sessionCount = 3
     model.hovering = true
     let hover = durations { _ = IslandBody(model: model, now: Date()).body }
-    #expect(hover == [IslandMotion.hoverFadeDuration, IslandMotion.hoverRevealDuration],
-            "IslandBody.body asked for --ease at \(hover), expected exactly [\(IslandMotion.hoverFadeDuration), \(IslandMotion.hoverRevealDuration)] — the hover reveal's width and fade are no longer on two separate clocks, or one of them reverted")
+    #expect(hover == [IslandMotion.hoverFadeDuration, IslandMotion.hoverRevealDuration,
+                      IslandMotion.shapeDuration],
+            "IslandBody.body asked for --ease at \(hover), expected exactly [\(IslandMotion.hoverFadeDuration), \(IslandMotion.hoverRevealDuration), \(IslandMotion.shapeDuration)] — the hover reveal's width and fade are no longer on two separate clocks, one of them reverted, or the bottom-radius morph lost its --t-shape bezier")
 
     // 2. The drawer's face swap, `--t-face` 190ms (island-motion.html:173).
     let question = QuestionModel(event: VibeEvent(id: "e", cli: "claude-code", kind: .permission,
@@ -399,13 +409,14 @@ private func ease(_ x: Double) -> Double { cssBezier(0.22, 0.9, 0.28, 1, atX: x)
 /// exists to prevent — §9.1's two springs went unchecked for four plans precisely
 /// because they were assembled at their call sites.
 ///
-/// The six sites — five replaced by Plan 6.3 Task 3, the sixth split off the
-/// first by Task 4:
+/// The seven sites — five replaced by Plan 6.3 Task 3, the sixth split off the
+/// first by Task 4, the seventh added by Task 5:
 ///
 /// | site | prototype | was |
 /// |---|---|---|
 /// | `IslandView.swift` hover reveal **width**, 280ms | `island-motion.html:125` | `.easeOut` |
 /// | `IslandView.swift` hover reveal **opacity**, 160ms | `island-motion.html:125` | *shared the 280ms clock* |
+/// | `IslandView.swift` **bottom-radius morph**, 440ms | `island-motion.html:86` | *the radius was a constant 15* |
 /// | `DrawerView.swift` face swap, 190ms | `island-motion.html:173` | `.easeInOut` |
 /// | `QuestionFace.swift` sub-face swap, 190ms | `island-motion.html:173` | `.easeInOut` |
 /// | `SessionRow.swift` row background, 130ms | `island-motion.html:346` | `.easeOut` |
@@ -421,8 +432,20 @@ private func ease(_ x: Double) -> Double { cssBezier(0.22, 0.9, 0.28, 1, atX: x)
 /// here. `theRevealsTwoClocksSitOnTheirOwnProperties` in `HoverMotionTests` is what
 /// says the two are on the right properties; this only counts them.
 ///
-/// Would fail if: a seventh `--ease` surface were added with an inline
-/// `.timingCurve(0.22, 0.9, 0.28, 1, …)`, or one of the six reverted to a
+/// **`IslandView.swift: 3` since Plan 6.3 Task 5, and the third is a decision this
+/// test forced rather than a number nudged to make it pass.** Task 3 left this
+/// assertion knowing Task 5 would have to break it, because the whole reason it
+/// exists is that five `--ease` surfaces had drifted onto `.easeOut`/`.easeInOut`
+/// unnoticed — so a new site must not be able to arrive silently either. What was
+/// checked before editing it: that `island-motion.html:86` really does put
+/// `border-radius` on `var(--ease)` and not on `var(--spring-w)` like the other two
+/// clauses of the same rule; and that the radius reaches `IslandMotion.ease` **once**
+/// in that file, as a single `let` in `IslandBody.body` shared by both silhouette
+/// halves, rather than twice — two halves calling it separately would have made this
+/// `4` and hidden which of them a later deletion took.
+///
+/// Would fail if: an eighth `--ease` surface were added with an inline
+/// `.timingCurve(0.22, 0.9, 0.28, 1, …)`, or one of the seven reverted to a
 /// built-in curve (the `.easeOut`/`.easeInOut` scan below).
 @Test func theFiveEaseSitesAllRouteThroughIslandMotion() throws {
     let sources = URL(fileURLWithPath: #filePath)
@@ -455,14 +478,228 @@ private func ease(_ x: Double) -> Double { cssBezier(0.22, 0.9, 0.28, 1, atX: x)
     }
 
     let callsPerFile = Dictionary(grouping: easeCallers, by: { $0 }).mapValues(\.count)
-    #expect(callsPerFile == ["IslandView.swift": 2, "DrawerView.swift": 1,
+    #expect(callsPerFile == ["IslandView.swift": 3, "DrawerView.swift": 1,
                              "QuestionFace.swift": 1, "SessionRow.swift": 1,
                              "SettingsSwitch.swift": 1],
-            "the IslandMotion.ease call sites per file changed: \(callsPerFile.sorted { $0.key < $1.key }) — one of the six --ease sites in the table above has gone (IslandView holds two since Task 4: the reveal's width and its opacity), or a seventh arrived without a row")
+            "the IslandMotion.ease call sites per file changed: \(callsPerFile.sorted { $0.key < $1.key }) — one of the seven --ease sites in the table above has gone (IslandView holds three since Task 5: the reveal's width, its opacity, and the bottom-radius morph), or an eighth arrived without a row")
     #expect(inlineBeziers.isEmpty,
             "a --ease bezier is spelled out away from IslandMotion in \(inlineBeziers) — that is how the two shape springs went unchecked for four plans")
     // The two that stay are the looping keyframe approximations, and
     // `theLoopingKeyframeCurvesAreADeliberateDivergence` is why.
     #expect(builtInCurves.sorted() == ["BadgeCanvas.swift", "CatCanvas.swift"],
             "the set of built-in easing curves left in VibeCatUI changed: \(builtInCurves.sorted()). Only CatCanvas's and BadgeCanvas's autoreversing keyframe approximations are allowed to keep one — see theLoopingKeyframeCurvesAreADeliberateDivergence")
+}
+
+// MARK: - 5. Plan 6.3 Task 5: the height trails the width by 30ms
+
+/// **`island-motion.html:132`: `transition:height calc(var(--t-shape) + 30ms)
+/// var(--spring-h)`.** So the drawer's height runs 470ms against the width's 440ms,
+/// and the *lag* is the design content — the width leads and the body follows it
+/// down, which is the other half of §9.1's "one body with mass" (the first half
+/// being that the width overshoots 5.5× as far,
+/// `widthOvershootsFarMoreThanHeightAsTheDesignRequires`). Both axes on one clock
+/// is a box being rescaled.
+///
+/// **Asserted as the difference, never as two numbers.** `#expect(response ==
+/// 0.42)` beside `#expect(heightResponse == 0.45)` passes intact if someone later
+/// retunes both to 0.5 — the pair of literals would be wrong and the pair of
+/// assertions would be updated together without anyone noticing the lag had gone.
+/// The difference is the invariant, and the one thing the prototype actually
+/// writes down (`+ 30ms`, in a `calc`).
+///
+/// **And it is not tautological**, which is the trap this repo has fallen into
+/// before: `heightResponse` is spelled out as `0.45` and not as `response + 0.030`
+/// precisely so this can fail. `IslandMotion.heightResponse`'s own doc comment
+/// records that decision.
+///
+/// Would fail if: the two responses were equalised in either direction (the
+/// mutation this task was asked to try); if the lag were applied to the width
+/// instead, which the sign catches; or if the lag drifted to a "rounder" 50ms.
+@Test func theDrawersHeightTrailsTheWidthByThePrototypes30ms() {
+    #expect(IslandMotion.heightResponse > IslandMotion.response,
+            "the drawer's height response (\(IslandMotion.heightResponse)s) does not exceed the width's (\(IslandMotion.response)s) — island-motion.html:132 runs the height LONGER, so either they have been equalised or the lag is on the wrong axis")
+
+    let lag = IslandMotion.heightResponse - IslandMotion.response
+    #expect(abs(lag - IslandMotion.heightLag) < 1e-9,
+            "the height trails the width by \(lag * 1000)ms; island-motion.html:132's `calc(var(--t-shape) + 30ms)` is \(IslandMotion.heightLag * 1000)ms")
+    #expect(IslandMotion.heightLag == 0.030,
+            "IslandMotion.heightLag is \(IslandMotion.heightLag * 1000)ms, not the prototype's 30ms — the constant the assertion above compares against has itself moved")
+
+    // The lag is small against the clocks it separates: 30ms on 440 is 6.8%, which
+    // reads as a follow rather than as a second, separate movement. A "lag" that
+    // doubled the height's clock would satisfy every assertion above.
+    #expect(lag / IslandMotion.response < 0.10,
+            "the height runs \(lag / IslandMotion.response * 100)% longer than the width — past about a tenth the drawer stops reading as the same body following and starts reading as a second animation")
+}
+
+/// **The bottom-radius morph is on `--ease` over `--t-shape`, and on neither
+/// spring** — `island-motion.html:86`, the third clause of the one rule that moves
+/// the island's shape:
+///
+/// ```
+/// transition:width var(--t-shape) var(--spring-w),
+///            transform var(--t-shape) var(--spring-w),
+///            border-radius var(--t-shape) var(--ease);
+/// ```
+///
+/// The radius shares the width's *clock* and refuses its *curve*, and that is a
+/// deliberate distinction rather than an oversight in the mockup: `--spring-w`
+/// overshoots 8%, so a radius on it would swell past 20pt and settle back. On a
+/// width that reads as mass; on a corner it reads as a wobble.
+///
+/// `theEaseSitesAreReachedByARealRender` is what says a built `IslandBody.body`
+/// actually asks for `--ease` at this duration. This says the duration is the
+/// prototype's token and that it is not either spring's response — the two ways the
+/// clock could be wrong while still being an `--ease` clock.
+///
+/// Would fail if: the radius were given `--t-hover`, `--t-face` or either spring's
+/// response by copy-paste; or if `shapeDuration` were "tidied" to equal `response`,
+/// which is the most plausible wrong edit, since 0.42 is what the springs use and
+/// looks like the same number.
+/// `@MainActor` only because `FaceCrossfade.duration` is — the comparison against
+/// `--t-face` is the point of reaching for it.
+@MainActor @Test func theRadiusMorphsOverTShapeOnTheEaseCurveAndNotOnEitherSpring() {
+    #expect(IslandMotion.shapeDuration == 0.440,
+            "--t-shape is 440ms at island-motion.html:25; shapeDuration is \(IslandMotion.shapeDuration * 1000)ms")
+    #expect(IslandMotion.shapeDuration != IslandMotion.response,
+            "the radius clock has been collapsed onto the width spring's response — 0.42 is §9.1's spring parameter with an asymptotic settle, 0.44 is a bezier's exact end, and they are not interchangeable")
+    #expect(IslandMotion.shapeDuration != IslandMotion.heightResponse)
+    #expect(IslandMotion.shapeDuration != IslandMotion.hoverRevealDuration,
+            "the radius is on --t-hover, the reveal's clock, not --t-shape")
+    #expect(IslandMotion.shapeDuration != FaceCrossfade.duration,
+            "the radius is on --t-face, the crossfade's clock, not --t-shape")
+
+    // `--ease` cannot overshoot, which is the property that makes it the right
+    // curve for a corner and the wrong one for the width. Derived from the curve
+    // production animates on, not from the four control points restated.
+    var peak = 0.0
+    for step in 0...1000 { peak = max(peak, IslandMotion.easeCurve.value(at: Double(step) / 1000)) }
+    #expect(peak <= 1.0,
+            "IslandMotion.easeCurve reaches \(peak) — a radius on an overshooting curve swells past 20pt and settles back, which is a wobble")
+}
+
+// MARK: - 6. §9.3 reaches the island's own six clocks
+
+/// **The fourth §9.3 bypass, and the first that could be counted per site.**
+///
+/// Plan 6.1's Task 2 closed three — `IslandBody.phase`, `BadgeCanvas`, `CatCanvas`
+/// — and made `motion:` a required, undefaulted parameter on the two canvases so a
+/// fourth could not be added silently. The island's **own** six shape and hover
+/// clocks were nonetheless never consulting the preference, because a `.animation`
+/// modifier takes no `MotionPreference` and so there was no parameter to leave
+/// undefaulted. `IslandMotion.gated(_:by:)` is that parameter, and this is the
+/// assertion that a site cannot slip back out of it.
+///
+/// | evaluated | gated sites |
+/// |---|---|
+/// | `IslandBody.body` | the click's width spring, the hover's width spring, the reveal's 160ms fade, the reveal's 280ms width, the bottom-radius morph |
+/// | `IslandView.body` | the drawer's height spring |
+///
+/// **Counted rather than sampled**, for the reason
+/// `IslandMotion.gatedSuppressionCount` gives at length: a boolean "does anything
+/// consult the preference" is satisfied by one site out of six, which is the exact
+/// shape of the three bypasses that stood for four plans. `5 / 0` and `0 / 5` are
+/// six independent facts.
+///
+/// Would fail if: any one of the six reverted to a bare `.animation(IslandMotion
+/// .widthSpring, …)` (reads `4 / 0` at motion off); if `gated` returned its argument
+/// unconditionally (reads `0 / 5` at off, so the first expectation fails); if the
+/// gate were keyed to `chosen` rather than `effective` — that is
+/// `MotionPreference.allowsMotion`'s job and `.noMotion` here has
+/// `systemWantsReduced: false` deliberately, so a gate reading only the system
+/// setting passes nothing; or if a seventh clock were added ungated (the totals
+/// below are exact, not `>=`).
+///
+/// What it does **not** prove, the standing limit of every counter in this file: that
+/// the `nil` reached the modifier, or that SwiftUI declined to interpolate.
+@MainActor @Test func motionOffSuppressesEveryOneOfTheIslandsSixClocks() {
+    let geometry = IslandGeometry(screen: IslandGoldenTests.mbp14)
+
+    @MainActor func model(_ motion: MotionPreference) -> IslandModel {
+        let m = IslandModel(geometry: geometry, motion: motion)
+        m.state = .waiting
+        m.sessionCount = 3
+        m.sessions = []
+        m.hovering = true
+        m.drawerOpen = true
+        return m
+    }
+
+    @MainActor func counts(_ build: () -> Void) -> (suppressed: Int, passed: Int) {
+        IslandMotion.gatedSuppressionCount = 0
+        IslandMotion.gatedPassCount = 0
+        build()
+        return (IslandMotion.gatedSuppressionCount, IslandMotion.gatedPassCount)
+    }
+
+    // A user who chose `off` with the system asking for nothing — the weaker of the
+    // two inputs, so this proves the preference is honoured on its own rather than
+    // riding on the system's coat-tails (`MotionPreference.noMotion`'s own note).
+    let off = MotionPreference(chosen: .off, systemWantsReduced: false)
+    let bodyOff = counts { _ = IslandBody(model: model(off), now: Date()).body }
+    #expect(bodyOff == (suppressed: 5, passed: 0),
+            "at motion off, IslandBody.body suppressed \(bodyOff.suppressed) of its clocks and let \(bodyOff.passed) through, expected 5 and 0 — one of the click's width spring, the hover's width spring, the reveal's fade, the reveal's width or the bottom-radius morph is not going through IslandMotion.gated")
+
+    let viewOff = counts { _ = IslandView(model: model(off)).body }
+    #expect(viewOff == (suppressed: 1, passed: 0),
+            "at motion off, IslandView.body suppressed \(viewOff.suppressed) clocks and let \(viewOff.passed) through, expected 1 and 0 — the drawer's height spring is not gated")
+
+    // Full motion: the same six sites, all reached, none suppressed. Without this
+    // half, `gated` returning nil unconditionally would satisfy everything above —
+    // and would silently delete every animation in the island.
+    let full = MotionPreference(chosen: .full, systemWantsReduced: false)
+    let bodyFull = counts { _ = IslandBody(model: model(full), now: Date()).body }
+    #expect(bodyFull == (suppressed: 0, passed: 5),
+            "at full motion, IslandBody.body suppressed \(bodyFull.suppressed) of its clocks and let \(bodyFull.passed) through, expected 0 and 5")
+
+    let viewFull = counts { _ = IslandView(model: model(full)).body }
+    #expect(viewFull == (suppressed: 0, passed: 1),
+            "at full motion, IslandView.body suppressed \(viewFull.suppressed) clocks and let \(viewFull.passed) through, expected 0 and 1")
+}
+
+/// **`reduced` keeps the island moving, and `off` is the only level that stops it.**
+///
+/// §9.3's three levels are not "on / half / off": `MotionPreference.resolve(_:)`
+/// expresses `reduced` as **halving `framesPerSecond` and nothing else**, and a
+/// `.animation` transition has no frame rate this app paces — the render server
+/// interpolates it. So the honest reading of `reduced` for a transition is
+/// "unchanged", exactly as `IslandView.phase(at:cycle:motion:)` reads it for a
+/// cycle, and inventing a shortened duration or a weakened overshoot here would be
+/// a behaviour §9.3 does not describe.
+///
+/// The system override is checked in both directions because it is one-directional:
+/// a system asking for less beats a user asking for more, and it never drags a user
+/// who chose `off` back into motion.
+///
+/// Would fail if: `gated` were keyed to `chosen` rather than `effective` (row 4
+/// would keep animating a system that asked for less); if it treated `reduced` as
+/// `off` (rows 2 and 4); or if the `off` + `systemWantsReduced` row were promoted
+/// back to motion, which is the specific mistake `MotionPreference.refreshed`'s own
+/// doc comment records having been made once.
+@MainActor @Test func onlyMotionOffSuppressesATransitionAndReducedIsUnchanged() {
+    let cases: [(chosen: MotionLevel, system: Bool, animates: Bool, why: String)] = [
+        (.full, false, true, "the default"),
+        (.reduced, false, true, "reduced halves a frame rate; a transition has none to halve"),
+        (.off, false, false, "the user asked for no motion"),
+        (.full, true, true, "the system asks for less, which resolves to reduced — and reduced still moves"),
+        (.off, true, false, "off stays off; the override never drags a user back into motion"),
+        (.reduced, true, true, "already reduced"),
+    ]
+    for c in cases {
+        let motion = MotionPreference(chosen: c.chosen, systemWantsReduced: c.system)
+        let got = IslandMotion.gated(.linear(duration: 1), by: motion)
+        #expect((got != nil) == c.animates,
+                "chosen=\(c.chosen) system=\(c.system) resolved to \(motion.effective) and \(got == nil ? "suppressed" : "kept") the transition; expected it \(c.animates ? "kept" : "suppressed") — \(c.why)")
+    }
+
+    // The gate *is* `allowsMotion`, not a second reading of §9.3's precedence. If
+    // this ever diverges, one of the two is wrong and there is no way to tell which.
+    for chosen in MotionLevel.allCases {
+        for system in [false, true] {
+            let motion = MotionPreference(chosen: chosen, systemWantsReduced: system)
+            #expect((IslandMotion.gated(.linear(duration: 1), by: motion) != nil)
+                        == motion.allowsMotion,
+                    "gated disagrees with MotionPreference.allowsMotion at chosen=\(chosen) system=\(system) — §9.3's precedence is being re-derived rather than reused")
+        }
+    }
 }

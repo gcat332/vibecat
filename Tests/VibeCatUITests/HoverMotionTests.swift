@@ -73,9 +73,18 @@ private func protoShapeWidth(atMs ms: Double) -> Double {
 }
 
 /// The peak of a `Spring`'s approach to 1, and when it happens. 2ms steps out to
-/// 800ms, which is well past both springs' settling time at `response 0.42`.
-private func springPeak(damping: Double) -> (value: Double, atMs: Double) {
-    let spring = Spring(response: IslandMotion.response, dampingRatio: damping)
+/// 800ms, which is well past both springs' settling time at `response 0.42`/`0.45`.
+///
+/// `response` is a parameter as of Plan 6.3 Task 5, because the two springs no
+/// longer share one: the drawer's height runs 30ms longer than the width
+/// (`IslandMotion.heightResponse`). The peak *value* is invariant under response —
+/// a spring's overshoot is a function of damping alone, and time only rescales —
+/// so the overshoot figures below are unaffected; the peak's *time* is not, and
+/// passing the wrong response would report the drawer settling 30ms earlier than
+/// production does.
+private func springPeak(damping: Double,
+                        response: Double = IslandMotion.response) -> (value: Double, atMs: Double) {
+    let spring = Spring(response: response, dampingRatio: damping)
     var best = (value: 0.0, atMs: 0.0)
     for step in 0...400 {
         let ms = Double(step) * 2
@@ -163,7 +172,8 @@ private func springPeak(damping: Double) -> (value: Double, atMs: Double) {
     #expect(IslandMotion.heightDamping == 0.80)
 
     let width = springPeak(damping: IslandMotion.widthDamping).value - 1
-    let height = springPeak(damping: IslandMotion.heightDamping).value - 1
+    let height = springPeak(damping: IslandMotion.heightDamping,
+                            response: IslandMotion.heightResponse).value - 1
     #expect(abs(width - 0.083) < 0.002,
             "the width spring's overshoot measured \(width); IslandMotion records 8.3% against the prototype's 8.0%")
     #expect(abs(height - 0.015) < 0.002,

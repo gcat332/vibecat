@@ -305,7 +305,16 @@ private let externalDisplay = ScreenMetrics(
 /// `theBodyAlwaysClearsTheCutoutByACornerRadius` makes of every collapsed state,
 /// so the open tier is held to §5.1 by the same standard.
 ///
-/// Would fail if: `openWidth(face:)` returned `face.width` unfloored.
+/// **The floor is `minimumOpenWidth`, not `minimumWidth`, since Plan 6.3 Task 5.**
+/// That task gave the open island the prototype's 20pt bottom radius
+/// (`island-motion.html:162`/`:164`) while the collapsed one keeps its measured
+/// 15 — and `minimumRightFlank` is 15 because it *is* `bottomRadius`. So on this
+/// fixture the 673pt floor left the last 5pt of a 20pt curve inside the cutout,
+/// which is precisely the failure §5.1 forbids, reintroduced by a radius change
+/// three files away. 678 is the same rule read against the radius actually drawn.
+///
+/// Would fail if: `openWidth(face:)` returned `face.width` unfloored, or floored it
+/// against the *collapsed* corner again.
 @Test func anAbsurdlyWideCutoutTakesTheFloorRatherThanTheDesignWidth() {
     let huge = ScreenMetrics(
         frame: CGRect(x: 0, y: 0, width: 3000, height: 1000),
@@ -317,10 +326,16 @@ private let externalDisplay = ScreenMetrics(
     #expect(g.notch.width == 600, "setup: the fixture's cutout is not 600pt wide")
 
     let open = g.frames(rightFlank: 0, tier: .drawer(face: .sessionList)).body
-    #expect(open.width == g.minimumWidth,
-            "open width \(open.width)pt took the design's \(DrawerFace.sessionList.width) over the \(g.minimumWidth)pt floor")
-    #expect(open.maxX >= g.notch.maxX + IslandGeometry.bottomRadius,
-            "the open body ends \(open.maxX - g.notch.maxX)pt past a \(g.notch.width)pt cutout, inside our own \(IslandGeometry.bottomRadius)pt corner — the hardware's corner shows through")
+    #expect(open.width == g.minimumOpenWidth,
+            "open width \(open.width)pt took the design's \(DrawerFace.sessionList.width) over the \(g.minimumOpenWidth)pt floor")
+    #expect(open.maxX >= g.notch.maxX + IslandGeometry.openBottomRadius,
+            "the open body ends \(open.maxX - g.notch.maxX)pt past a \(g.notch.width)pt cutout, inside our own \(IslandGeometry.openBottomRadius)pt open corner — the hardware's corner shows through")
+    // The collapsed floor is *not* enough here, and saying so is what stops
+    // `openWidth` being "simplified" back onto `minimumWidth`: the difference
+    // between the two floors is exactly the difference between the two radii.
+    #expect(g.minimumOpenWidth - g.minimumWidth
+                == IslandGeometry.openBottomRadius - IslandGeometry.bottomRadius,
+            "the open floor clears the cutout by \(g.minimumOpenWidth - g.minimumWidth)pt more than the collapsed one, but the open corner is \(IslandGeometry.openBottomRadius - IslandGeometry.bottomRadius)pt rounder")
 }
 
 /// §5.1's fallback, stated rather than left to be discovered.

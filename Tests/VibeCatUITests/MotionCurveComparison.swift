@@ -124,16 +124,21 @@ struct MotionCurveComparison {
     /// the prototype's ratio, so a future tuning pass that flattens the
     /// difference again fails here rather than passing on a technicality.
     @Test func widthOvershootsFarMoreThanHeightAsTheDesignRequires() {
-        func overshoot(_ damping: Double) -> Double {
-            let spring = Spring(response: IslandMotion.response, dampingRatio: damping)
+        // Each half evaluated at its *own* response since Plan 6.3 Task 5 — the
+        // drawer's is 30ms longer. Overshoot is a function of damping alone, so the
+        // two figures are unchanged; reading the wrong response here would still
+        // give the right answer, which is exactly why it is worth stating that this
+        // is not the assertion protecting the lag.
+        func overshoot(_ damping: Double, response: Double) -> Double {
+            let spring = Spring(response: response, dampingRatio: damping)
             var peak = 0.0
             for step in 0...400 {
                 peak = max(peak, spring.value(target: 1.0, time: Double(step) * 0.005))
             }
             return peak - 1
         }
-        let width = overshoot(IslandMotion.widthDamping)
-        let height = overshoot(IslandMotion.heightDamping)
+        let width = overshoot(IslandMotion.widthDamping, response: IslandMotion.response)
+        let height = overshoot(IslandMotion.heightDamping, response: IslandMotion.heightResponse)
 
         #expect(width > height,
                 "§9.1 requires width to overshoot more than height; width \(pct(width)) against height \(pct(height))")

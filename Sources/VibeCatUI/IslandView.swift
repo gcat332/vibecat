@@ -180,6 +180,15 @@ public struct IslandView: View {
                 // regardless of where the cursor drifts while it is open.
                 DrawerView(question: model.question, sessions: model.sessions,
                            accent: model.state.accent, width: model.drawerWidth,
+                           // The same 20pt the drawer half of `IslandBody`'s
+                           // silhouette draws, from the same
+                           // `IslandTier.bottomRadius`. It has to be: this fills
+                           // directly over that half in the identical ground
+                           // colour, so the visible corner is the union of the
+                           // two, and the shallower one wins. A `DrawerView` left
+                           // at the collapsed 15 paints a 15pt corner over a
+                           // correct 20pt one and nothing else changes.
+                           bottomRadius: model.tier.bottomRadius,
                            onAnswer: { model.onAnswer?($0) },
                            muted: model.muted,
                            onToggleMute: { model.onToggleMute?() },
@@ -188,7 +197,11 @@ public struct IslandView: View {
                     .padding(.top, model.geometry.notch.height)
             }
         }
-        .animation(IslandMotion.heightSpring, value: drawerHeight)
+        // Gated by §9.3 since Plan 6.3 Task 5, like the island's other five clocks
+        // — see `IslandMotion.gated`. The height spring itself now runs 30ms longer
+        // than the width's, which is `IslandMotion.heightResponse`'s job and not
+        // this line's.
+        .animation(IslandMotion.gated(IslandMotion.heightSpring, by: model.motion), value: drawerHeight)
     }
 
     /// 0 with the drawer closed, else the open face's own height — the one
@@ -649,6 +662,19 @@ struct IslandBody: View {
         model.tier.takesHoverReveal ? hoverRevealWidth : 0
     }
 
+    /// The bottom radius this island draws right now — 15 collapsed, 20 open.
+    /// Plan 6.3 Task 5.
+    ///
+    /// A one-line forward to `IslandTier.bottomRadius`, which is where the rule and
+    /// its reasoning live, exactly as `revealWidth` forwards to
+    /// `takesHoverReveal`. Here so `body` names the quantity once and the two
+    /// silhouette halves, the clip shape and the `.animation`'s `value:` cannot
+    /// drift into four readings of it.
+    ///
+    /// Not `private`: `theOpenAndCollapsedRadiiAreTheTwoPrototypeValues` reads it
+    /// directly, the same compile-time protection `restingWidth` has.
+    var bottomRadius: CGFloat { model.tier.bottomRadius }
+
     var body: some View {
         let panel = model.panelFrames
         let body = model.frames.body
@@ -672,6 +698,23 @@ struct IslandBody: View {
         let localOrigin = IslandFrames(body: body, panel: panel.panel).bodyInPanel.origin
         let cell: CGFloat = 1
         let drawerBelow = drawerBelowNotch
+        // Plan 6.3 Task 5. `island-motion.html:86` is the third clause of the one
+        // rule that moves the island's shape: `transition:width var(--t-shape)
+        // var(--spring-w), transform … var(--spring-w), border-radius
+        // var(--t-shape) var(--ease)`. So the radius shares the width's *clock* and
+        // not its *curve* — 440ms, on the bezier, deliberately not on the
+        // overshooting spring, because a corner that overshoots past 20pt and
+        // settles back is a wobble and a width that does it is mass.
+        //
+        // One `let` feeding both silhouette halves rather than
+        // `IslandMotion.ease(duration:)` at each: the two are stacked in the same
+        // colour, so the visible corner is the *union* of their coverage and a pair
+        // that disagreed mid-transition would paint the shallower of the two. It
+        // also keeps `IslandView.swift` at three `--ease` call sites rather than
+        // four, which is the number `theFiveEaseSitesAllRouteThroughIslandMotion`
+        // now pins.
+        let radiusMorph = IslandMotion.gated(
+            IslandMotion.ease(duration: IslandMotion.shapeDuration), by: model.motion)
 
         // Plan 5, Task 1: **two** silhouette rects, not one.
         //
@@ -701,10 +744,46 @@ struct IslandBody: View {
             // just shifted. It would also unpin the left edge §5.3 exists to
             // keep fixed.
             VStack(alignment: .leading, spacing: 0) {
-                IslandShape(roundsBottom: drawerBelow == 0)
+                IslandShape(roundsBottom: drawerBelow == 0, bottomRadius: bottomRadius)
                     .fill(Color(islandGroundColour))
                     .overlay(alignment: .topLeading) { content(cell: cell) }
-                    .clipShape(IslandShape(roundsBottom: drawerBelow == 0))
+                    .clipShape(IslandShape(roundsBottom: drawerBelow == 0,
+                                           bottomRadius: bottomRadius))
+                    // **Where the radius transition is declared.** On this half and
+                    // not the drawer's because this is the half that *persists*
+                    // across the gesture — SwiftUI does not interpolate the
+                    // `animatableData` of a view it is inserting, so a modifier on
+                    // the conditionally-inserted drawer half below could never fire.
+                    //
+                    // Written *above* the `.frame` on purpose, the same mechanism
+                    // `content(cell:)`'s two reveal clocks use:
+                    // `.animation(_:value:)` governs what is below it in the chain,
+                    // so this reaches the fill and the clip shape — the two things
+                    // whose radius it is about — and the outer
+                    // `.animation(widthSpring, value: restingWidth)` keeps the
+                    // frame's own width. Hoisted outside the `.frame` it would take
+                    // the width off §9.1's spring and onto a bezier on every click,
+                    // since both values change on the same gesture.
+                    //
+                    // **Recorded divergence, Plan 6.3 Task 5: today this
+                    // interpolation is masked, and the corner still hard-cuts.**
+                    // Plan 5 split the silhouette in two, and the bottom corner
+                    // therefore changes *owner* at the instant the drawer opens —
+                    // this half stops rounding (`roundsBottom:` below) and the
+                    // drawer half appears already at 20. So what the eye sees is a
+                    // 20pt corner unrolling as the drawer's own height clamps the
+                    // radius (`IslandShape.path`'s `min(r, rect.height, …)`), on the
+                    // height spring's clock, not a 15→20 bezier on 440ms. The
+                    // *values* are the prototype's at both ends, which is what
+                    // `theOpenIslandsBottomCornerIsTheProtoypes20ptAndTheCollapsed
+                    // OneIsStill15` measures; the 440ms in between is not reachable
+                    // without re-unifying the two halves. Not done here: since Task
+                    // 1 gave the open tier a width and `revealWidth` drops the
+                    // reveal, the two halves are the same width whenever a drawer is
+                    // open, so re-unifying is now *possible* — but the split also
+                    // pins `.contentShape`'s tappable rect and the aura's traced
+                    // alpha, and that is a structural change, not a radius one.
+                    .animation(radiusMorph, value: bottomRadius)
                     // `revealWidth`, not `hoverRevealWidth`: the reveal is
                     // dropped while a drawer is open (see that property for why),
                     // and this frame and `content(cell:)`'s own reveal frame now
@@ -714,7 +793,11 @@ struct IslandBody: View {
                     .frame(width: restingWidth + revealWidth,
                            height: model.geometry.notch.height)
                 if drawerBelow > 0 {
-                    IslandShape()
+                    // The half that actually *shows* the open radius: while a
+                    // drawer hangs below it the collapsed half rounds nothing, so
+                    // 20pt is drawn here and by `DrawerView`'s own fill on top of
+                    // it. Both read `IslandTier.bottomRadius`.
+                    IslandShape(bottomRadius: bottomRadius)
                         .fill(Color(islandGroundColour))
                         .frame(width: model.drawerWidth, height: drawerBelow)
                 }
@@ -738,7 +821,13 @@ struct IslandBody: View {
                 // reading `heightDamping` — pass the whole suite. The named
                 // accessor is counted, so it cannot silently become the other
                 // half of §9.1. See `IslandMotion.widthSpringReadCount`.
-                .animation(IslandMotion.widthSpring, value: restingWidth)
+                //
+                // **Through `IslandMotion.gated`, Plan 6.3 Task 5.** §9.3's motion
+                // `off` reached the cat, the badge and their phases (Plan 6.1 Task
+                // 2) and none of the island's own six clocks; see `gated`'s doc
+                // comment for what `off` and `reduced` mean for a transition and
+                // why that is not the same answer Task 2 gave for a loop.
+                .animation(IslandMotion.gated(IslandMotion.widthSpring, by: model.motion), value: restingWidth)
                 // **The hover's SHAPE clock — the first of hover's three, and the
                 // same spring as the click above.** Kept as a second modifier
                 // rather than folded into the first because the two are keyed to
@@ -770,7 +859,7 @@ struct IslandBody: View {
                 // its hovered width and settles back. `IslandMotion.hoverReveal
                 // Duration`'s doc comment carries the full before/after table
                 // including what this costs on the front half of the gesture.
-                .animation(IslandMotion.widthSpring, value: hoverRevealWidth)
+                .animation(IslandMotion.gated(IslandMotion.widthSpring, by: model.motion), value: hoverRevealWidth)
                 // Fix round 1: the click that opens the drawer. Scoped to
                 // the stack's own rect via `.contentShape` — that is
                 // `restingWidth + revealWidth` wide by `body.height` tall,
@@ -874,11 +963,11 @@ struct IslandBody: View {
             // repo does not take a view-inspection dependency.
             RevealContent(session: model.revealed, now: now)
                 .opacity(revealWidth > 0 ? 1 : 0)
-                .animation(IslandMotion.ease(duration: IslandMotion.hoverFadeDuration),
+                .animation(IslandMotion.gated(IslandMotion.ease(duration: IslandMotion.hoverFadeDuration), by: model.motion),
                            value: revealWidth)
                 .frame(width: revealWidth, alignment: .leading)
                 .clipped()
-                .animation(IslandMotion.ease(duration: IslandMotion.hoverRevealDuration),
+                .animation(IslandMotion.gated(IslandMotion.ease(duration: IslandMotion.hoverRevealDuration), by: model.motion),
                            value: revealWidth)
         }
         .frame(height: model.geometry.notch.height)

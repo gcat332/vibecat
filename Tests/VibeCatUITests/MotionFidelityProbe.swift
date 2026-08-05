@@ -436,16 +436,23 @@ struct MotionFidelityProbe {
                                   only because Task 1 made it tier-aware
           silhouette x-offset     fixed (left edge pinned by IslandGeometry.frames) —
                                   the prototype recentres instead, §5.3 says we do not
-          bottom radius           15pt, constant (IslandShape)
-          drawer height           0 → 420pt   spring(response .42, damping .80)
+          bottom radius           15pt → 20pt   440ms  --ease  (Task 5:
+                                  IslandTier.bottomRadius / IslandMotion.shapeDuration;
+                                  the interpolation is masked — see IslandView's own
+                                  note on `.animation(radiusMorph,`)
+          drawer height           0 → 420pt   spring(response \(f(IslandMotion.heightResponse, 2)), damping .80)
+                                  — \(f(IslandMotion.heightLag * 1000, 0))ms longer than the width's, Task 5
           face crossfade          190ms / 5pt rise / 3pt blur (FaceCrossfade) — matches
         """)
 
-        let spring = Spring(response: IslandMotion.response, dampingRatio: IslandMotion.heightDamping)
+        // `heightResponse` since Task 5: 470ms against the width's 440, which is
+        // the lag this table is now comparing rather than assuming away.
+        let spring = Spring(response: IslandMotion.heightResponse,
+                            dampingRatio: IslandMotion.heightDamping)
         print("""
 
           DRAWER HEIGHT
-          t(ms)   prototype (470ms / spring-h)   ours spring(.42/.80)   Δ      proto pt   ours pt
+          t(ms)   prototype (470ms / spring-h)   ours spring(\(f(IslandMotion.heightResponse, 2))/.80)   Δ      proto pt   ours pt
         """)
         var worstH = (dev: 0.0, ms: 0.0, p: 0.0, o: 0.0)
         for step in 0...240 {
@@ -459,14 +466,29 @@ struct MotionFidelityProbe {
             let o = spring.value(target: 1.0, time: ms / 1000)
             print("  \(String(format: "%5.0f", ms))          \(pct(p))                  \(pct(o))       \(pct(p - o))   \(f(p * 420))    \(f(o * 420))")
         }
-        var settle = Double.nan
-        for step in 1...400 {
-            let ms = Double(step) * 5
-            if abs(spring.value(target: 1.0, time: ms / 1000) - 1) < 0.005 { settle = ms; break }
+        // Task 5's lag, measured as the thing it is about: when each axis first
+        // gets within 0.5% of its target, width against height. Two springs
+        // sharing one response arrive together; that is what the +30ms removes.
+        func settling(_ damping: Double, response: Double) -> Double {
+            let s = Spring(response: response, dampingRatio: damping)
+            for step in 1...800 {
+                let ms = Double(step) * 2
+                if abs(s.value(target: 1.0, time: ms / 1000) - 1) < 0.005 { return ms }
+            }
+            return .nan
         }
+        let settle = settling(IslandMotion.heightDamping, response: IslandMotion.heightResponse)
+        let widthSettle = settling(IslandMotion.widthDamping, response: IslandMotion.response)
+        let sharedSettle = settling(IslandMotion.heightDamping, response: IslandMotion.response)
         print("""
           worst Δ \(pct(worstH.dev)) at \(Int(worstH.ms))ms (proto \(pct(worstH.p)) / ours \(pct(worstH.o)))
           prototype lands exactly at 470ms; ours within 0.5% at \(settle.isNaN ? "never <2s" : "\(Int(settle))ms")
+
+          THE 30ms LAG (Task 5) — first sample within 0.5% of target
+            width   spring(\(f(IslandMotion.response, 2))/\(f(IslandMotion.widthDamping, 2)))  \(Int(widthSettle))ms
+            height  spring(\(f(IslandMotion.heightResponse, 2))/\(f(IslandMotion.heightDamping, 2)))  \(Int(settle))ms   → the body lands \(Int(settle - widthSettle))ms after the width
+            height on the SHARED response (before Task 5)  \(Int(sharedSettle))ms
+            prototype: 440ms / 470ms, a \(Int(IslandMotion.heightLag * 1000))ms lag written as calc(--t-shape + 30ms)
 
           WIDTH: the prototype travels 287pt over 440ms on an overshooting curve.
           Ours travelled 0pt when this probe was written. Since Plan 6.3 Task 1 it
@@ -637,6 +659,79 @@ struct MotionFidelityProbe {
         """)
     }
 
+    // MARK: - 3b. The two corners, magnified (Plan 6.3 Task 5)
+
+    /// Writes the collapsed and open bottom-right corners side by side at 8×, so the
+    /// 15 → 20 difference is something an eye can check rather than a number.
+    ///
+    ///     VIBECAT_MOTION_PROBE=1 VIBECAT_RADIUS_SHEET=/tmp/radii.png \
+    ///         swift test --filter cornerSheet
+    ///
+    /// Nothing is asserted here — `theOpenIslandsBottomCornerIsThePrototypes20ptAnd
+    /// TheCollapsedOneIsStill15` in `IslandShapeTests` is the assertion, and it reads
+    /// the same two renders.
+    @Test(.enabled(if: Self.on))
+    @MainActor func cornerSheet() throws {
+        guard let path = ProcessInfo.processInfo.environment["VIBECAT_RADIUS_SHEET"] else {
+            print("\n  (set VIBECAT_RADIUS_SHEET=/tmp/radii.png for the visual)")
+            return
+        }
+        let magnify: CGFloat = 8
+        // 28, not 34: the collapsed body is only `notch.height` (32pt) tall, so a
+        // crop taller than that runs off the top of the raster.
+        let crop = 28     // points of corner to keep
+        var tiles: [Raster] = []
+        for open in [false, true] {
+            let m = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
+                                motion: MotionPreference(chosen: .full, systemWantsReduced: false))
+            m.state = .waiting
+            m.sessionCount = 0
+            if open {
+                m.question = QuestionModel(event: VibeEvent(
+                    id: "q", cli: "claude-code", kind: .permission, session: "s",
+                    cwd: "/tmp/proj", title: "Bash command", body: "pnpm install",
+                    choices: [Choice(id: "allow", label: "Allow once")], wantsReply: true))
+                m.drawerOpen = true
+            }
+            let full = try rasterise(IslandView(model: m), scale: magnify)
+            let inPanel = IslandFrames(body: m.frames.body,
+                                       panel: m.panelFrames.panel).bodyInPanel
+            let side = Int(CGFloat(crop) * magnify)
+            let x0 = Int((inPanel.maxX * magnify).rounded()) - side
+            let y0 = Int((inPanel.maxY * magnify).rounded()) - side
+            var bytes = [UInt8](repeating: 0, count: side * side * 4)
+            for y in 0..<side {
+                for x in 0..<side {
+                    let p = full[x0 + x, y0 + y]
+                    let i = (y * side + x) * 4
+                    bytes[i] = p.r; bytes[i + 1] = p.g; bytes[i + 2] = p.b; bytes[i + 3] = p.a
+                }
+            }
+            tiles.append(Raster(width: side, height: side, bytes: bytes))
+        }
+        // Two tiles side by side, a 16px gutter between.
+        let gutter = 16
+        let w = tiles[0].width * 2 + gutter, h = tiles[0].height
+        var sheet = [UInt8](repeating: 0, count: w * h * 4)
+        for (i, tile) in tiles.enumerated() {
+            let dx = i * (tile.width + gutter)
+            for y in 0..<tile.height {
+                for x in 0..<tile.width {
+                    let p = tile[x, y]
+                    let o = (y * w + dx + x) * 4
+                    sheet[o] = p.r; sheet[o + 1] = p.g; sheet[o + 2] = p.b; sheet[o + 3] = p.a
+                }
+            }
+        }
+        let ok = Raster(width: w, height: h, bytes: sheet).writePNG(to: path)
+        print("""
+
+          CORNERS AT \(Int(magnify))× — left: collapsed (\(f(IslandGeometry.bottomRadius))pt) ·
+          right: open (\(f(IslandGeometry.openBottomRadius))pt)
+          \(ok ? "wrote" : "FAILED to write") \(path)  \(w)×\(h)
+        """)
+    }
+
     // MARK: - 4. The two curves as motion
 
     @Test(.enabled(if: Self.on))
@@ -659,7 +754,9 @@ struct MotionFidelityProbe {
         @MainActor func frame(atMs ms: Double) -> some View {
             let pw = css(0.32, 1.5, 0.5, 1, duration: 0.440, atMs: ms)
             let ph = css(0.34, 1.22, 0.5, 1, duration: 0.470, atMs: ms)
-            let ourH = Spring(response: IslandMotion.response,
+            // `heightResponse`, not `response`, since Plan 6.3 Task 5 gave the
+            // drawer's height the prototype's own +30ms.
+            let ourH = Spring(response: IslandMotion.heightResponse,
                               dampingRatio: IslandMotion.heightDamping)
                 .value(target: 1.0, time: ms / 1000)
             let ourWp = Spring(response: IslandMotion.response,

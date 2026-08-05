@@ -94,12 +94,58 @@ import SwiftUI
 enum IslandMotion {
     // MARK: - §9.1's two shape springs
 
-    /// §9.1's `0.42`, unchanged, and close to the prototype's own 440ms.
+    /// §9.1's `0.42`, unchanged, and close to the prototype's own 440ms. **The
+    /// *width's* response** — `heightResponse` is 30ms longer, see below.
     static let response: Double = 0.42
     /// Overshoots 8.3%, against the prototype's 8.0%. Was `0.72` (3.8%).
     static let widthDamping: Double = 0.62
     /// Overshoots 1.5%, matching the prototype exactly. Was `0.78` (2.0%).
     static let heightDamping: Double = 0.80
+
+    /// **The drawer height's own response, 30ms longer than the width's** —
+    /// `island-motion.html:132`, `transition:height calc(var(--t-shape) + 30ms)
+    /// var(--spring-h)`, so 470ms against the width's 440ms. Added by Plan 6.3
+    /// Task 5; before it both morphs shared `response` and the two axes landed
+    /// together.
+    ///
+    /// The lag is the whole content of the value. §9.1 asks the island to read as
+    /// **one body with mass**, and `widthDamping`/`heightDamping` carry half of
+    /// that (the width overshoots 5.5× as far). This carries the other half: with
+    /// one response the two axes are a box being rescaled, and with the height
+    /// trailing, the width leads and the body follows it down. Two 30ms-apart
+    /// arrivals are the cheapest thing in the whole design that says the drawer is
+    /// hanging off the bar rather than being drawn at the same time as it.
+    ///
+    /// **Deliberately spelled out as `0.45` rather than written `response + 0.030`.**
+    /// The derived form makes the only assertion available — that the difference is
+    /// 30ms — tautological: it would hold against every possible pair of values,
+    /// including the equalised pair that is the exact mutation
+    /// `theDrawersHeightTrailsTheWidthByThePrototypes30ms` exists to fail. Two
+    /// literals and one asserted difference is a test that can fail; one literal
+    /// and a derived twin is not.
+    ///
+    /// **`+30ms` absolute, not `×470/440`.** The prototype's own arithmetic is
+    /// `calc(--t-shape + 30ms)`, and a ratio applied to our 0.42 would give 0.4489
+    /// — a number that is neither the prototype's nor derivable from anything in
+    /// §9.1. `response` is 0.42 rather than 0.44 because §9.1 named 0.42 (see
+    /// `theThreeHoverClocksAreThePrototypesOwnTokens`, which pins the two as within
+    /// 5% and says why); the *offset* is the prototype's, whatever the base is.
+    static let heightResponse: Double = 0.45
+
+    /// The `30ms` of `calc(var(--t-shape) + 30ms)` (`island-motion.html:132`),
+    /// named so the assertion on the difference between the two responses can quote
+    /// the prototype rather than a bare `0.03`.
+    static let heightLag: Double = 0.030
+
+    /// `--t-shape: 440ms` (`island-motion.html:25`), as a *duration* rather than as
+    /// a spring response.
+    ///
+    /// Only one thing uses it: the bottom-radius morph, which line 86 puts on
+    /// `var(--t-shape) var(--ease)` — a bezier, not one of the two springs. So this
+    /// is the token's literal value where `response`/`heightResponse` are springs
+    /// approximating it, and the two must not be conflated: 0.42 is a spring
+    /// parameter with an asymptotic settle, 0.44 is a bezier's exact end.
+    static let shapeDuration: Double = 0.44
 
     /// **The one animation the island's *width* may morph on** — §9.1's
     /// overshooting half. Two callers, both in `IslandBody.body` and both a width:
@@ -126,11 +172,15 @@ enum IslandMotion {
     /// **The one animation the drawer's *height* may morph on** — §9.1's nearly
     /// critically damped half. Sole caller: `IslandView.body`'s
     /// `.animation(_:value: drawerHeight)`.
+    ///
+    /// **`heightResponse`, not `response`, since Plan 6.3 Task 5**: the prototype
+    /// runs the height 30ms longer than the width, and this is where that lag
+    /// lives. See `heightResponse`.
     @MainActor static var heightSpring: Animation {
         #if DEBUG
         heightSpringReadCount += 1
         #endif
-        return .spring(response: response, dampingFraction: heightDamping)
+        return .spring(response: heightResponse, dampingFraction: heightDamping)
     }
 
     #if DEBUG
@@ -279,14 +329,131 @@ enum IslandMotion {
     /// merely the count.
     static let hoverFadeDuration: Double = 0.16
 
+    // MARK: - §9.3's gate
+
+    /// **`animation`, or `nil` when §9.3 says nothing may move.** Every
+    /// `.animation(_:value:)` the island's own shape and hover reveal run on goes
+    /// through here — the six of them, listed in `gatedSuppressionCount`.
+    ///
+    /// ## The bypass this closes
+    ///
+    /// `CLAUDE.md`: *"Reduced motion is a real path, not a courtesy. Everything
+    /// animated goes through `MotionPreference.resolve`."* Plan 6.1's Task 2 fixed
+    /// three surfaces that did not — `IslandBody.phase`, `BadgeCanvas`, `CatCanvas`
+    /// — and made `motion:` a required, undefaulted parameter on the two canvases
+    /// so a fourth could not be added silently. **The island's own six shape and
+    /// hover clocks were the fourth**, found by Plan 6.3 Task 4 and closed here.
+    /// They were not caught by that guard because they are not canvases: a
+    /// `.animation` modifier takes no `MotionPreference`, so there was no parameter
+    /// to leave undefaulted. This function is the parameter.
+    ///
+    /// ## What `off` does to a *transition*, and why it is not "nothing happens"
+    ///
+    /// Plan 6.1 Task 2 justified motion `off` posing the cat at phase 0 from the
+    /// prototype's own reduced-motion rule, `island-motion.html:439`:
+    /// `@media (prefers-reduced-motion:reduce){*{animation:none!important}}`. **That
+    /// rule does not decide this case, and pretending it does would be the wrong
+    /// answer.** CSS `animation:none` cancels *keyframe animations* — the looping
+    /// cat, badge and aura, which is exactly what Task 2 was about — and has no
+    /// effect whatsoever on a `transition`. Every clock this function gates is a
+    /// transition (`transition:width…`, `transition:height…`,
+    /// `transition:border-radius…`, `transition:max-width…`), so under the
+    /// prototype's own stylesheet they all keep running at reduced motion. The
+    /// mockup is a one-line courtesy here; §9.3 and `CLAUDE.md` are not.
+    ///
+    /// So the answer is derived from what the two things *are* rather than copied:
+    ///
+    /// - **A loop has a pose to fall back to; a transition has a destination.** The
+    ///   hover reveal is the session's name and elapsed time (§9.1/§5.2) — it is
+    ///   *information*, not decoration, and so is a 288pt drawer holding a question
+    ///   someone has to answer. "No animation" for a loop can mean "hold still";
+    ///   for a transition it can only mean **arrive instantly**. Suppressing the
+    ///   destination instead of the interpolation would delete the feature, and a
+    ///   reduce-motion user would be the only one who could not read a session name
+    ///   or answer a prompt.
+    /// - So `off` returns `nil`, which is `.animation(nil, value:)` — SwiftUI's own
+    ///   spelling for "apply this change with no animation". The end state is
+    ///   identical to full motion's end state; only the 280/440/470ms in between
+    ///   are gone.
+    ///
+    /// ## `reduced` is deliberately identical to `full`
+    ///
+    /// Exactly as `IslandView.phase(at:cycle:motion:)` is, and for the same reason
+    /// stated in `MotionPreference.allowsMotion`'s own doc comment:
+    /// `MotionPreference.resolve(_:)` expresses `reduced` as **halving
+    /// `framesPerSecond` and nothing else**, leaving `cycle` and continuity alone.
+    /// There is no frame rate to halve here — a `.animation` transition is
+    /// interpolated by the render server, not by a `TimelineView` this app paces —
+    /// so the only ways to "reduce" a transition would be to shorten it or to
+    /// weaken the overshoot, and both are behaviours §9.3 does not describe.
+    /// Inventing one would also be reducing twice on the surfaces that already have
+    /// a resolved profile.
+    ///
+    /// The gate is therefore `allowsMotion` (`effective != .off`), which is §9.3's
+    /// precedence already resolved: the system asking for less beats a user asking
+    /// for more, and it never drags a user who chose `off` back into motion. This
+    /// function re-derives none of that.
+    ///
+    /// ## Why the argument is still evaluated when it is about to be thrown away
+    ///
+    /// `gated(IslandMotion.widthSpring, by: …)` reads `widthSpring` — and therefore
+    /// bumps `widthSpringReadCount` — even at motion `off`. That is deliberate:
+    /// those four counters exist to say *which modifier is wired to which curve*
+    /// (`theTwoShapeSpringsAreWiredToTheirOwnHalfOfTheMorph`), a question that has
+    /// nothing to do with the current motion level, and making them
+    /// motion-dependent would turn one clear fact into two conditional ones. The
+    /// two counters below are what say whether the gate itself fired.
+    @MainActor static func gated(_ animation: Animation,
+                                 by motion: MotionPreference) -> Animation? {
+        guard motion.allowsMotion else {
+            #if DEBUG
+            gatedSuppressionCount += 1
+            #endif
+            return nil
+        }
+        #if DEBUG
+        gatedPassCount += 1
+        #endif
+        return animation
+    }
+
+    #if DEBUG
+    /// How many animations `gated` has turned into `nil` since this was zeroed, and
+    /// `gatedPassCount` how many it let through.
+    ///
+    /// **Together they are a per-site fact, which is what the four Plan 6.1 fixes
+    /// did not have.** Building `IslandBody.body` once evaluates exactly five gated
+    /// sites and `IslandView.body` exactly one:
+    ///
+    /// | evaluated | gated sites |
+    /// |---|---|
+    /// | `IslandBody.body` | the click's width spring, the hover's width spring, the reveal's 160ms fade, the reveal's 280ms width, the bottom-radius morph |
+    /// | `IslandView.body` | the drawer height spring |
+    ///
+    /// So `motionOffSuppressesEveryOneOfTheIslandsSixClocks` can assert `5 / 0` at
+    /// motion `off` and `0 / 5` at `full`, and **one site reverting to a bare
+    /// `.animation(IslandMotion.widthSpring, …)` reads `4 / 0`** rather than
+    /// leaving the suite green. A single boolean "does anything consult the
+    /// preference" could not see that, and that shape of assertion is what let
+    /// three §9.3 bypasses stand for four plans.
+    ///
+    /// Same standing limit as every other counter in this type and in `IslandView`:
+    /// it proves the gate ran while a body was built, not that the `nil` reached the
+    /// modifier or that SwiftUI declined to interpolate. Introspecting the built
+    /// tree for that needs a view-inspection dependency this project does not take.
+    @MainActor static var gatedSuppressionCount = 0
+    /// Counts animations `gated` let through. See `gatedSuppressionCount`.
+    @MainActor static var gatedPassCount = 0
+    #endif
+
     #if DEBUG
     /// Which durations `ease(duration:)` has been asked for since this was last
     /// emptied.
     ///
     /// Durations and not a bare count, because the duration is the only thing that
     /// says *which* `--ease` surface was reached: 0.28 is the hover reveal's width,
-    /// 0.16 its opacity, 0.19 the face crossfade, 0.13 a session row, 0.18 the
-    /// settings switch. So
+    /// 0.16 its opacity, **0.44 the bottom-radius morph (Task 5)**, 0.19 the face
+    /// crossfade, 0.13 a session row, 0.18 the settings switch. So
     /// `theEaseSitesAreReachedByARealRender` can assert per-site rather than
     /// "something somewhere asked for the curve" — which is what makes reverting one
     /// site to `.easeOut` fail a test that evaluates a body, and not only the source
@@ -295,8 +462,9 @@ enum IslandMotion {
     /// A `Set` and not an ordered array, which was the first draft: this is appended
     /// to on *every* body build, and in a debug build of the actual app nothing ever
     /// empties it, so an array is an unbounded leak that grows with uptime. A set is
-    /// bounded by the number of distinct `--ease` durations in the codebase — five
-    /// since Task 4 split the hover fade off onto its own 160ms.
+    /// bounded by the number of distinct `--ease` durations in the codebase — six
+    /// since Task 5 added `--t-shape` for the radius, five after Task 4 split the
+    /// hover fade off onto its own 160ms.
     /// Nothing is lost: no site asks for two durations, so "which durations" already
     /// identifies the set of sites reached, and call order was never the claim.
     ///
