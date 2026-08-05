@@ -178,12 +178,31 @@ ever diffed the implementation against them, and ten minutes of reading their CS
 custom properties turned up five divergences.
 
 - **A divergence from the prototype is either a fix or a written decision.**
-  Never a silent third thing. The `15pt` bottom radius against the prototype's
-  `9px` is the model case: it matches measured hardware and the reason is written
-  down so nobody "corrects" it back.
+  Never a silent third thing.
+
+  **The example this rule used to give was itself a misreading, which makes it a
+  better lesson than the one it replaced.** Four documents — this file among them —
+  said our `15pt` bottom radius was a written divergence from "the prototype's
+  `9px`". It is not. `island-motion.html:83` is `border-radius: 0 0 15px 15px`:
+  **the prototype's bottom radius is 15 and always was.** The `9px` is
+  `--fillet` (line 31), the concave weld where the island meets the bezel — a
+  different property entirely, six lines away.
+
+  The cost of that confusion was real. Someone read `9px` as the bottom radius,
+  found the fillets beside it, and **deleted the fillets** rather than re-spelling a
+  number that never needed changing — so the island met the screen at a right angle
+  for four plans until the owner noticed it looked wrong. Plan 6.3 Task 6 restored
+  them at the prototype's own `9pt`.
+
+  **So: cite the line, not the recollection.** A divergence you cannot point at in
+  the prototype's source may not be one.
 - **Motion is the interface's grammar, not decoration.** Pixel art on a grid,
-  modern easing moving it. Width morph spring `0.42/0.72`, drawer height
-  `0.42/0.78` — width overshoots more so the island reads as one body with mass.
+  modern easing moving it. Width morph spring `0.42/0.62`, drawer height
+  `0.45/0.80` — width overshoots more so the island reads as one body with mass,
+  and those numbers are Plan 4.5's measured retune plus Plan 6.3's 30ms height lag,
+  not the originals. `--ease` (`cubic-bezier(.22,.9,.28,1)`) is a **third** curve for
+  everything that is not a shape spring, and it lives in `IslandMotion` with them so
+  the next one cannot drift 350 lines away unnoticed.
   Faces fade in *inside* a shape already at the right size; they never slide in
   from outside. The blink is the one instantaneous thing in the whole interface,
   because a blink is instantaneous.

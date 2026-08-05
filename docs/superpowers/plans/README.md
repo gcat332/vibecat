@@ -226,6 +226,21 @@ value — it is an architectural mismatch:**
   longer exists. Also noted: the prototype still carries the exact claim §5.5
   struck out, in a comment above those fillets — **where the prototype and a dated
   spec correction disagree, the correction wins.**
+
+  **Reversed again 2026-08-05, and this time by the owner looking at the real app.**
+  The fillets are back, at the prototype's own `9pt`, because the island met the
+  bezel at a right angle and read wrong on hardware — which is the same kind of
+  evidence §5.5 used to remove them. So the precedence rule above held only until
+  newer evidence of the same kind arrived, which is what it should do.
+
+  **Two things are worth carrying out of this, because the cost was four plans
+  long.** First: `CLAUDE.md` went on citing the withdrawn claim as its *model case*
+  for "a divergence is either a fix or a written decision" for two days after this
+  entry withdrew it — a register is only as good as the documents that read it, so
+  a withdrawal has to be pushed, not published. Second, and the reason the fillets
+  were ever deleted: someone read `9px` as the bottom radius, found the fillets six
+  lines away, and removed **them** rather than re-spelling a number that never
+  needed changing. Cite the line, not the recollection.
 - **The motion curves.** The prototype is explicit cubic-beziers over
   `--t-shape: 440ms` — `--spring-w: cubic-bezier(.32,1.5,.5,1)` (that `1.5` is
   real overshoot) and `--spring-h: cubic-bezier(.34,1.22,.5,1)`. We use SwiftUI
