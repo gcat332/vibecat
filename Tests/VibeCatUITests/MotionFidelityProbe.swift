@@ -140,9 +140,11 @@ struct MotionFidelityProbe {
           .island   border-radius 15px → 20px   440ms  cubic-bezier(.22,.9,.28,1)
           .drawer   height        0 → 420px    470ms  cubic-bezier(.34,1.22,.5,1)   [calc(--t-shape + 30ms)]
           .face     opacity/translateY(4px)/blur(3px)  190ms  --ease  [--t-face]
-        ours (width column re-measured after Plan 6.3 Task 1 gave the drawer a width)
-          silhouette width        \(f(collapsed)) → \(f(openW))pt   — the travel exists now;
-                                  which curve carries it is Tasks 2–5, not this line
+        ours (width re-measured after Task 1; curve identified by Task 2)
+          silhouette width        \(f(collapsed)) → \(f(openW))pt   — §9.1 WIDTH spring
+                                  (response .42 / damping \(f(IslandMotion.widthDamping, 2))), keyed to
+                                  IslandBody.restingWidth, which moves on the click
+                                  only because Task 1 made it tier-aware
           silhouette x-offset     fixed (left edge pinned by IslandGeometry.frames) —
                                   the prototype recentres instead, §5.3 says we do not
           bottom radius           15pt, constant (IslandShape)
@@ -179,8 +181,31 @@ struct MotionFidelityProbe {
 
           WIDTH: the prototype travels 287pt over 440ms on an overshooting curve.
           Ours travelled 0pt when this probe was written. Since Plan 6.3 Task 1 it
-          travels \(f(openW - collapsed))pt — 423.1 → 560 from the hovered start a click
-          actually happens in. Whether a curve is keyed to it is Task 2's question.
+          travels \(f(openW - collapsed))pt — 423.1 → \(f(openW)) from the hovered start a click
+          actually happens in. **Task 2's answer: the §9.1 width spring carries it.**
+        """)
+
+        let wSpring = Spring(response: IslandMotion.response,
+                             dampingRatio: IslandMotion.widthDamping)
+        let from = 423.1
+        var lowest = openW, highest = from, peakMs = 0.0
+        for step in 0...500 {
+            let ms = Double(step) * 2
+            let w = from + (openW - from) * wSpring.value(target: 1.0, time: ms / 1000)
+            lowest = min(lowest, w)
+            if w > highest { highest = w; peakMs = ms }
+        }
+        print("""
+
+          DOES THE WIDTH EVER MOVE BACKWARDS?  423.1 → \(f(openW)) on spring(.42/\(f(IslandMotion.widthDamping, 2)))
+            lowest sample  \(f(lowest, 2))pt   (start \(f(from, 2))pt — a dip would be below it)
+            peak           \(f(highest, 2))pt at \(Int(peakMs))ms  (+\(f(highest - openW, 2))pt past target,
+                           = \(f((highest - openW) / (openW - from) * 100, 1))% of travel — §9.1's overshoot, forwards)
+            so: no dip. The only backwards motion in the whole morph is the
+            settle from the overshoot peak back down to \(f(openW)), which is the
+            rule §9.1 asks for rather than a defect. On CLOSE the same curve
+            undershoots symmetrically — down to \(f(from - (highest - openW), 2))pt, \(f(highest - openW, 2))pt past 423.1 —
+            and back up. Also §9.1, in the other direction.
         """)
     }
 
@@ -335,9 +360,10 @@ struct MotionFidelityProbe {
         }
 
         // Measured numbers, not invented ones. mbp14 / 3 sessions:
-        //   collapsed 273.1 · hovered 423.1 · prototype's list panel 560.
+        //   collapsed 273.1 · hovered 423.1 · open 560 (DrawerFace.width).
         // The click always happens while hovering, so 423.1 is where ours starts.
         let hovered = 423.1, resting = 273.1, protoTo = 560.0
+        let ourTo = DrawerFace.sessionList.width
         let notchMid: CGFloat = 300          // stage centre
         let leftEdge = notchMid - 185 / 2 - 58   // notch.minX − LW, the pinned edge
 
@@ -347,22 +373,38 @@ struct MotionFidelityProbe {
             let ourH = Spring(response: IslandMotion.response,
                               dampingRatio: IslandMotion.heightDamping)
                 .value(target: 1.0, time: ms / 1000)
+            let ourWp = Spring(response: IslandMotion.response,
+                               dampingRatio: IslandMotion.widthDamping)
+                .value(target: 1.0, time: ms / 1000)
             // Prototype: 273 → 560 on --spring-w, recentred on the notch.
             let protoW = resting + (protoTo - resting) * pw
-            // Ours: 423 → 273 (the reveal is dropped), left edge pinned. Carried
-            // on the drawer-height spring, because nothing keys a curve to it.
-            let ourW = hovered + (resting - hovered) * ourH
+            // Ours: 423.1 → 560 (the reveal is dropped and the face's own width
+            // takes over), left edge pinned — §5.3, we do not recentre. On the
+            // §9.1 WIDTH spring, keyed to `IslandBody.restingWidth`, which Plan
+            // 6.3 Task 1 made tier-aware and Task 2 confirmed is the key that
+            // moves on the click. This line used to read `hovered + (resting -
+            // hovered) * ourH` — 423 → 273 on the height spring — which was the
+            // defect and the best guess available before Task 2 measured it.
+            let ourW = hovered + (ourTo - hovered) * ourWp
             return VStack(alignment: .leading, spacing: 6) {
                 Text("\(Int(ms))ms").font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(Color(hazeColour))
                 ZStack(alignment: .topLeading) {
-                    Color.clear.frame(width: 600, height: 130)
+                    // Wide/tall enough to dominate the ZStack at every sample,
+                    // including both curves' overshoot. `.offset` does not affect
+                    // layout but `.frame(width:)` does, so a stage the shapes can
+                    // outgrow would give the GIF frames of differing sizes.
+                    Color.clear.frame(width: 820, height: 190)
                     IslandShape().fill(Color(RGBA(hex: "#FFA63C")!).opacity(0.9))
                         .frame(width: protoW, height: 32 + 388 * ph / 3)
                         .offset(x: notchMid - protoW / 2)
                 }
                 ZStack(alignment: .topLeading) {
-                    Color.clear.frame(width: 600, height: 130)
+                    // Wide/tall enough to dominate the ZStack at every sample,
+                    // including both curves' overshoot. `.offset` does not affect
+                    // layout but `.frame(width:)` does, so a stage the shapes can
+                    // outgrow would give the GIF frames of differing sizes.
+                    Color.clear.frame(width: 820, height: 190)
                     IslandShape().fill(Color(RGBA(hex: "#5B9DF9")!).opacity(0.9))
                         .frame(width: ourW, height: 32 + 388 * ourH / 3)
                         .offset(x: leftEdge)

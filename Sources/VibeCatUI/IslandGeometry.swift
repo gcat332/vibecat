@@ -22,6 +22,37 @@ public enum IslandTier: Sendable, Equatable {
     var openFace: DrawerFace? {
         if case let .drawer(face) = self { face } else { nil }
     }
+
+    /// **Whether §9.1's 150pt hover reveal reaches the island's width at this
+    /// tier — the one place the rule "an open island's width does not depend on
+    /// hover" is written down.**
+    ///
+    /// Plan 6.3 Task 2. Before it, that rule was an emergent property of three
+    /// separate expressions that each half-stated it and could each have been
+    /// changed alone: `IslandGeometry.frames`'s `.drawer` arm not reading its
+    /// `rightFlank` argument, `IslandModel.drawerWidth` going through
+    /// `openWidth(face:)` rather than a `CollapsedLayout`, and
+    /// `IslandBody.revealWidth` zeroing the reveal off a *height* proxy
+    /// (`drawerBelowNotch > 0`). Nothing named the shared rule, so nothing could
+    /// be asserted about it. Both consequences now derive from `openFace`:
+    /// non-nil fixes the width from the face, and nil is exactly when hover may
+    /// add to it.
+    ///
+    /// **The prototype states the same rule twice, in the same direction.** Its
+    /// expanded states set `width:560px` outright
+    /// (`island-motion.html:161–164`), which no `:hover` selector touches — and
+    /// its reveal is gated on being collapsed at all:
+    /// `.island[data-collapsed="true"]:hover .detail{max-width:150px}`
+    /// (`island-motion.html:129`). So opening the island both fixes its width
+    /// and switches the reveal off, and those are the two things this property
+    /// governs here.
+    ///
+    /// Deliberately *not* an argument to `frames`, and not a stored flag: it is
+    /// a fact about the tier, and the measured defect this replaces
+    /// (hover+closed 423pt → hover+open 273pt, the island contracting on the
+    /// gesture that should expand it) came from two of the three sites above
+    /// disagreeing about it.
+    var takesHoverReveal: Bool { openFace == nil }
 }
 
 /// What the drawer is showing, and how tall that makes it. Design §6.3.
@@ -211,10 +242,14 @@ public struct IslandGeometry: Sendable, Equatable {
         // It used to reach only the height, which made the *open* island's width
         // a function of the session tally's digit count — see `DrawerFace.width`
         // for the measurement and for why the open number is a flat one.
-        let width = switch tier {
-        case .rest, .hover: Self.leftFlank + notch.width + right
-        case let .drawer(face): openWidth(face: face)
-        }
+        //
+        // Task 2: written as `openFace`, not as a `switch` over the three cases,
+        // so that this arm and `IslandTier.takesHoverReveal` are two readings of
+        // one predicate rather than two rules that can drift. `right` carries the
+        // reveal (see `CollapsedLayout.rightFlankWidth`), and it is unreachable
+        // here whenever a face is open — which *is* the rule.
+        let width = tier.openFace.map(openWidth(face:))
+            ?? (Self.leftFlank + notch.width + right)
         let height = notch.height + tier.extraHeight
 
         // leftEdge = notch.minX − LW. The right flank cancels out of the

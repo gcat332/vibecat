@@ -255,6 +255,46 @@ private let externalDisplay = ScreenMetrics(
     #expect(open[0] == DrawerFace.question.width)
 }
 
+/// **Plan 6.3 Task 2: the rule and its width consequence, tied together.**
+///
+/// `IslandTier.takesHoverReveal` is the sentence "an open island's width does not
+/// depend on hover". This asserts that `frames` obeys it *and* that the tiers it
+/// says do take the reveal actually do — one test over `takesHoverReveal`'s two
+/// values, rather than a restatement of `openFace == nil`, which would be a
+/// tautology.
+///
+/// The reveal is fed in the way production feeds it: `CollapsedLayout
+/// .rightFlankWidth` adds exactly `hoverReveal` for hovering against not, at every
+/// content, so the pair of flank widths handed to `frames` here is the real pair.
+///
+/// Would fail if: `frames`'s width expression folded `right` into the open arm
+/// (the drawer's width becomes hover-dependent again while `takesHoverReveal`
+/// still says it is not — the exact disagreement Task 2 exists to remove), or if
+/// the collapsed arms stopped reading `right` at all (hover stops widening the
+/// closed island, while `takesHoverReveal` still says it should), or if
+/// `takesHoverReveal` were hardcoded either way.
+@Test func onlyTheTiersThatTakeTheHoverRevealAreWidenedByIt() {
+    let g = IslandGeometry(screen: mbp14)
+    let content = CollapsedLayout(right: .sessionCount(3), hovering: false).rightFlankWidth
+    let hovered = CollapsedLayout(right: .sessionCount(3), hovering: true).rightFlankWidth
+    #expect(hovered - content == CollapsedLayout.hoverReveal,
+            "setup: the two flank widths differ by \(hovered - content)pt, not the reveal's \(CollapsedLayout.hoverReveal)")
+
+    var tiers: [IslandTier] = [.rest, .hover]
+    tiers.append(contentsOf: DrawerFace.allCases.map { .drawer(face: $0) })
+    for tier in tiers {
+        let flat = g.frames(rightFlank: content, tier: tier).body.width
+        let wide = g.frames(rightFlank: hovered, tier: tier).body.width
+        if tier.takesHoverReveal {
+            #expect(wide - flat == CollapsedLayout.hoverReveal,
+                    "\(tier) takes the reveal but the width moved \(wide - flat)pt, not \(CollapsedLayout.hoverReveal)")
+        } else {
+            #expect(wide == flat,
+                    "\(tier) does not take the reveal, yet its width moved from \(flat) to \(wide)")
+        }
+    }
+}
+
 /// §5.1's floor, at the only geometry that can make it bind: a cutout wide enough
 /// that the design's 560 would end the body *inside* the hole, putting the
 /// hardware's own corner back on screen.

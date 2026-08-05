@@ -637,8 +637,17 @@ struct IslandBody: View {
     /// open+no-hover, **0** open+hover. Through `NSHostingView` the digit came
     /// out as a clipped "p". Both call sites reading this one property is the
     /// fix; `theSessionCountSurvivesAnOpenDrawerWhileHovering` is the test.
+    /// **Plan 6.3 Task 2: the predicate is now `model.tier.takesHoverReveal`,
+    /// not `drawerBelowNotch > 0`.** The two give the same answer today — a body
+    /// is taller than the notch exactly when `IslandTier.extraHeight` is
+    /// non-zero, and every `DrawerFace.height` is positive — but they are not the
+    /// same *question*. "Is any of the body below the notch line" is a fact about
+    /// the height, and it was deciding a rule about the width; a face that ever
+    /// took height 0 would have silently put the reveal back. `takesHoverReveal`
+    /// is where that rule is stated, alongside the width half of it in
+    /// `IslandGeometry.frames`, so both halves move together or neither does.
     var revealWidth: CGFloat {
-        drawerBelowNotch > 0 ? 0 : hoverRevealWidth
+        model.tier.takesHoverReveal ? hoverRevealWidth : 0
     }
 
     var body: some View {

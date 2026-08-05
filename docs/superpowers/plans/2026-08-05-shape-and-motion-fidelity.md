@@ -87,7 +87,8 @@ session list's line 2 truncating to `As…`. Its ink saturates at 420pt; it is g
   samples an animation's curve over time and is committed for this plan. The
   env-gated `VIBECAT_GIF` / `VIBECAT_FILMSTRIP` tools write real files — use them.
 - **Run the suite with `Scripts/test.sh`** (`swift test --no-parallel`; its header
-  says why). Current total is **701** after Task 1, ~22s. Zero warnings in debug and `-c release`.
+  says why). Current total is **706** after Task 2 (701 after Task 1), ~22s. Zero
+  warnings in debug, `-c release` and `--build-tests`.
 - **Measure cost with `getrusage(RUSAGE_SELF)`. Never `ps %cpu`.** Plan 6.1 measured
   motion `off` at 0.38% of a core against `full`'s ~12%; a wider, more animated
   island must not undo that. **Re-measure both.**
@@ -153,6 +154,22 @@ drawn inside the cutout at the new width (§5.1).
 **Files:** `Sources/VibeCatUI/NotchController.swift`, `IslandModel.swift`
 **Test:** `Tests/VibeCatUITests/NotchControllerTests.swift`
 
+> **Corrected 2026-08-05 by Task 2 itself. The contraction below no longer
+> happens.** Re-measured on Task 1's commit before any Task 2 change, painted
+> columns on `mbp14` / 3 sessions: hover+closed **423**, hover+open **560**. Task
+> 1's `DrawerFace.width` fixed the endpoints, exactly as its own report predicted.
+> The 423 → 273 figures in the paragraph below are the **historical** record of
+> what the owner saw, kept because that is what the plan exists to explain — they
+> are not a live defect, and Tasks 3–6 must not read them as one. What Task 2
+> actually delivered: the rule stated once (`IslandTier.takesHoverReveal`), and
+> the two things the investigation could not determine — **the §9.1 width spring
+> carries the morph**, keyed to `IslandBody.restingWidth`, which moves on the click
+> only because Task 1 made that property tier-aware; and **the width never moves
+> backwards mid-morph** (lowest sample 423.10pt from a 423.10pt start; the only
+> reversal is the settle from a 571.4pt overshoot peak, which is §9.1's own rule).
+> Files touched were `IslandGeometry.swift` and `IslandView.swift`, not the two
+> named above. See `.superpowers/sdd/2026-08-05-shape-and-motion-fidelity/task-2-report.md`.
+
 Measured: hover+closed paints **423** columns, hover+open paints **273**. Clicking
 always happens while hovering, so opening throws away the 150pt hover reveal and —
 before Task 1 — gained nothing. **The island contracts on the gesture that should
@@ -169,18 +186,27 @@ clock — so in the prototype the open width **does not depend on hover at all.*
 That is probably our rule too, and it is worth stating in one place instead of being
 an emergent property of three.
 
-- [ ] Tests first: opening never reduces the painted width, from both hovered and
+- [x] Tests first: opening never reduces the painted width, from both hovered and
       unhovered starts; and the width while open is the same either way.
-- [ ] Mutation-verify: make the open width hover-dependent again → the "same either
-      way" test must fail.
-- [ ] **Then look at it in motion**: `VIBECAT_GIF=/tmp/open.gif` over the
+      (`openingTheDrawerWidensThePaintedIslandFromEitherStart`,
+      `hoveringChangesNothingAboutTheOpenIslandsPaintedExtent`.)
+- [x] Mutation-verify: make the open width hover-dependent again → the "same either
+      way" test must fail. (Mutation B, `revealWidth` losing its gate: it does. The
+      weaker spelling — `openWidth` maxed against the collapsed width — does **not**
+      bind at any realistic flank and only Task 1's `rightFlank: 5000` test sees it.)
+- [x] **Then look at it in motion**: `VIBECAT_GIF=/tmp/open.gif` over the
       collapsed→open transition, and report whether the width ever moves *backwards*
       mid-animation. The investigation could not determine which curve carries
       423→273 today, because both inner `.animation(value:)` keys are unchanged when
       `drawerOpen` flips — so it may be a snap or it may ride the height spring.
       **Find out; a backwards step mid-morph would be visible and is not fixed by the
       endpoints being right.**
-- [ ] Full suite, commit.
+      Answered: the §9.1 **width** spring, and only because Task 1 made
+      `IslandBody.restingWidth` tier-aware — before that neither `.animation(value:)`
+      key moved, which is exactly why a static render could not see it. No backwards
+      step. `/tmp/vibecat-open.gif`, 15 frames, our left edge at column 156 in every
+      one of them.
+- [x] Full suite, commit.
 
 ---
 

@@ -282,6 +282,97 @@ struct IslandGoldenTests {
                 "the painted ground's own left edge moved from \(closed.first) to \(open.first)")
     }
 
+    /// **Plan 6.3 Task 2: the gesture runs the right way round, measured off the
+    /// pixels rather than off the geometry that produced them.**
+    ///
+    /// The reported symptom was directional, not a wrong number: hover+closed
+    /// painted **423** columns and hover+open painted **273**, so clicking to
+    /// open *contracted* the island by 150pt where the mockup expands it by 287.
+    /// Clicking always happens while hovering — `NotchPanel.acceptsClicks` is
+    /// gated on `model.hovering` (see `NotchController.reflow`) — so the hovered
+    /// row is the real gesture and the unhovered row is the hypothetical one.
+    /// Both are here because "opening widens" has to be true from either start
+    /// for the rule to be about opening rather than about hover.
+    ///
+    /// Three claims, and each fails against a different mistake:
+    ///
+    /// 1. **Opening widens, from both starts.** Reverting `IslandGeometry
+    ///    .frames`'s `.drawer` arm to the flank sum — the exact pre-Task-1
+    ///    shape — makes the hovered pair 423 → 273 and this reddens.
+    /// 2. **The open width is the same hovered and not.** Making the open width
+    ///    hover-dependent again (`openWidth` maxed against the *collapsed* width,
+    ///    or `IslandBody.revealWidth` dropping its `takesHoverReveal` gate and
+    ///    always returning `hoverRevealWidth`) separates the two open renders and
+    ///    this reddens. That second mutation is invisible to every geometry test
+    ///    in the suite, because it is in the view's own frame maths.
+    /// 3. **The open width is the face's own 560, not merely "bigger".** Without
+    ///    this a drawer 1pt wider than the hovered bar would satisfy claims 1 and
+    ///    2 while still being 137pt short of the mockup.
+    ///
+    /// Whole-render columns, not the bar's rows alone: this asks what the island
+    /// occupies on screen, which is what the owner was looking at.
+    @MainActor @Test func openingTheDrawerWidensThePaintedIslandFromEitherStart() throws {
+        @MainActor func painted(hovering: Bool, open: Bool) throws -> Int {
+            // .idle: a continuous mood takes `IslandView`'s TimelineView branch
+            // and reads the wall clock, which has flaked multi-render comparisons
+            // in this suite before. Held to the same choice as
+            // `openingTheDrawerDoesNotMoveTheCatsPaintedLeftEdge`.
+            let m = Self.model(.idle, count: 3, hovering: hovering)
+            m.drawerOpen = open
+            if open {
+                #expect(m.tier.openFace != nil,
+                        "setup: hovering=\(hovering) never reached the drawer tier, so nothing below is about an open island")
+            }
+            let raster = try rasterise(IslandView(model: m), scale: 1)
+            return try #require(Self.paintedColumns(raster),
+                                "hovering=\(hovering) open=\(open): the island painted nothing").count
+        }
+
+        let restClosed = try painted(hovering: false, open: false)
+        let restOpen = try painted(hovering: false, open: true)
+        let hoverClosed = try painted(hovering: true, open: false)
+        let hoverOpen = try painted(hovering: true, open: true)
+
+        #expect(restOpen > restClosed,
+                "unhovered: opening took the painted island from \(restClosed)pt to \(restOpen)pt — it did not widen")
+        #expect(hoverOpen > hoverClosed,
+                "hovered — the gesture that actually happens: opening took the painted island from \(hoverClosed)pt to \(hoverOpen)pt. This is the reported defect: 423 → 273.")
+        #expect(restOpen == hoverOpen,
+                "the open island painted \(hoverOpen)pt hovered against \(restOpen)pt not — the open width still depends on hover")
+        #expect(restOpen == Int(DrawerFace.sessionList.width),
+                "the open island painted \(restOpen)pt, not the face's own \(Int(DrawerFace.sessionList.width))pt")
+    }
+
+    /// The other half of Task 2's rule at the pixel level: with a drawer open,
+    /// hovering must change **nothing at all** about the painted silhouette — not
+    /// its width, not its left edge.
+    ///
+    /// `openingTheDrawerWidensThePaintedIslandFromEitherStart` above compares
+    /// column *counts*, which a shape that moved and resized by offsetting
+    /// amounts could still satisfy. This compares the extent itself.
+    ///
+    /// Would fail if `IslandBody.revealWidth` stopped consulting the tier (the
+    /// reveal reappears at 150pt on the right), or if `IslandGeometry.frames`
+    /// began folding `rightFlank` into the open width.
+    @MainActor @Test func hoveringChangesNothingAboutTheOpenIslandsPaintedExtent() throws {
+        @MainActor func extent(hovering: Bool) throws -> (first: Int, last: Int, count: Int) {
+            let m = Self.model(.idle, count: 3, hovering: hovering)
+            m.drawerOpen = true
+            return try Self.silhouette(m)
+        }
+        let notHovered = try extent(hovering: false)
+        let hovered = try extent(hovering: true)
+        #expect(hovered == notHovered,
+                "the open island's painted extent moved with the cursor: \(notHovered) not hovered against \(hovered) hovered")
+
+        // Not vacuous: the same comparison with the drawer *closed* must differ,
+        // or this pair could be identical because hover reaches nothing at all.
+        let closedRest = try Self.silhouette(Self.model(.idle, count: 3))
+        let closedHovered = try Self.silhouette(Self.model(.idle, count: 3, hovering: true))
+        #expect(closedHovered.count - closedRest.count == Int(CollapsedLayout.hoverReveal),
+                "setup: hover moved the *closed* island by \(closedHovered.count - closedRest.count)pt, not \(Int(CollapsedLayout.hoverReveal)) — the reveal is not working at all, so the open comparison above proves nothing")
+    }
+
     /// §6.2: "configurable: session count (default), agent icon, or nothing."
     /// Design §5.3's `LW = 58pt` invariant, re-checked against the one axis
     /// that changes here — the right flank's own *content*, not merely its

@@ -218,6 +218,102 @@ private let externalDisplay = ScreenMetrics(
     }
 }
 
+/// **Plan 6.3 Task 2: which of the two curves carries the open morph — and the
+/// investigation could not tell, so this is the answer written down.**
+///
+/// `.animation(_:value:)` installs its animation only for a transaction in which
+/// its `value` changed. `IslandBody` carries two, on the same subtree: the §9.1
+/// width spring keyed to `restingWidth`, and the 280ms hover-reveal ease keyed to
+/// `hoverRevealWidth`. When `drawerOpen` flips, only one of those two keys may
+/// move, or the question "which curve is this" has no answer.
+///
+/// It is `restingWidth` — and only because Task 1 made that property tier-aware.
+/// While it hardcoded `tier: .rest` **neither** key changed on the click (the
+/// investigation's finding: `hoverRevealWidth` cannot change either, because
+/// `NotchController.click()` never clears the hover tier, so `model.hovering`
+/// stays true for the whole life of an open drawer). Two unchanged keys means no
+/// `.animation(value:)` installs at all and the width is left to whatever
+/// transaction the drawer-height spring one level up in `IslandView` happens to
+/// establish — which is exactly the ambiguity that could not be measured from a
+/// static render, and is why the endpoints being right was not the whole answer.
+///
+/// Would fail if: `restingWidth` reverted to `tier: .rest` (the first assertion —
+/// the key stops moving, and the width goes back to riding whatever curve it can
+/// find), or if `revealWidth`'s job were moved into `hoverRevealWidth` so that
+/// property started reacting to the drawer too (the second — both curves would
+/// then install on the same change and the later modifier would silently win).
+@MainActor @Test func theWidthSpringIsTheCurveTheOpenMorphIsKeyedTo() {
+    // Hovered, because that is the only state a click can arrive in:
+    // `NotchPanel.acceptsClicks` is gated on `model.hovering`.
+    let closed = islandBody(.waiting, count: 3, hovering: true)
+    let open = islandBody(.waiting, count: 3, hovering: true)
+    open.model.drawerOpen = true
+    #expect(open.model.tier.openFace != nil, "setup: the fixture never opened")
+
+    #expect(open.restingWidth != closed.restingWidth,
+            "restingWidth is \(closed.restingWidth) closed and \(open.restingWidth) open — the width spring's own key does not move on the click, so nothing keys a curve to the morph")
+    #expect(open.hoverRevealWidth == closed.hoverRevealWidth,
+            "hoverRevealWidth moved from \(closed.hoverRevealWidth) to \(open.hoverRevealWidth) on a change of drawer alone — the 280ms reveal ease now competes with the width spring for the same transaction")
+
+    // The reveal is nevertheless *dropped* from the laid-out width, and it is
+    // `revealWidth` that does it — one property, two callers, so the silhouette's
+    // frame and `RevealContent`'s cannot disagree (F1 of Plan 4's final review).
+    #expect(closed.revealWidth == CollapsedLayout.hoverReveal)
+    #expect(open.revealWidth == 0,
+            "the reveal survived into the open island at \(open.revealWidth)pt — the open width depends on hover again")
+}
+
+/// **Plan 6.3 Task 2's real question: does the width ever move *backwards*
+/// mid-morph?** Endpoints being right does not answer it, and a transient dip
+/// would be plainly visible.
+///
+/// The laid-out width is `restingWidth + revealWidth`, one `.frame(width:)`, so
+/// SwiftUI interpolates it as a single animatable value along the one curve
+/// `theWidthSpringIsTheCurveTheOpenMorphIsKeyedTo` identifies. This samples that
+/// trajectory at 2ms over a second and asks two things of it:
+///
+/// - it never falls below where it started (**no dip**), and in particular never
+///   reaches the collapsed 273.1pt the island used to *end* at; and
+/// - it does overshoot its target, so the sampling is not vacuously passing on a
+///   curve that simply does not move — §9.1's "one body with mass" is carried by
+///   that overshoot, and `IslandMotion`'s own doc comment measures it at 8.3%.
+///
+/// The endpoints are read off the model rather than written down, so this is a
+/// test of the production widths and not of two literals beside them.
+///
+/// Would fail if: the `.drawer` arm of `IslandGeometry.frames` went back to the
+/// flank sum — `to` becomes 273.1 against a `from` of 423.1 and every sample
+/// after the first is a backwards step, which is precisely the reported defect;
+/// or if `IslandMotion.widthDamping` reached 1.0 and the overshoot vanished.
+///
+/// What it does **not** prove: that SwiftUI's own `.spring` sampler agrees with
+/// `Spring.value(target:time:)` frame for frame. That is the same curve type from
+/// the same framework fed the same two parameters, and the direction and
+/// monotonicity of a spring's step response do not depend on the sampler.
+@MainActor @Test func theOpenMorphNeverMovesTheWidthBackwards() {
+    let closed = islandBody(.waiting, count: 3, hovering: true)
+    let open = islandBody(.waiting, count: 3, hovering: true)
+    open.model.drawerOpen = true
+    let from = closed.restingWidth + closed.revealWidth
+    let to = open.restingWidth + open.revealWidth
+    #expect(to > from,
+            "the morph runs \(from) → \(to): opening still narrows the island, so there is no forward direction for the rest of this test to check")
+
+    let spring = Spring(response: IslandMotion.response, dampingRatio: IslandMotion.widthDamping)
+    var lowest = to, highest = from
+    for step in 0...500 {
+        let w = from + (to - from) * spring.value(target: 1.0, time: Double(step) * 0.002)
+        lowest = min(lowest, w)
+        highest = max(highest, w)
+    }
+    // A hair of slop for the sampler, not for the rule: a real dip is bounded
+    // below by the collapsed width the old code ended at, 150pt away.
+    #expect(lowest >= from - 0.01,
+            "the width dipped to \(lowest)pt from a start of \(from)pt — the island narrows part-way through the gesture that should only widen it")
+    #expect(highest > to,
+            "the width peaked at \(highest)pt against a target of \(to)pt — it never overshoots, so §9.1's width-overshoots-more rule is not in this morph and the samples above prove nothing about a curve that has no shape")
+}
+
 /// `IslandBody`'s left- and right-flank padding is a respelling, in SwiftUI's
 /// `.padding`/`.frame` vocabulary, of `IslandGeometry.leftFlank` and
 /// `CollapsedLayout.padding`. Nothing in the type system keeps a respelling
