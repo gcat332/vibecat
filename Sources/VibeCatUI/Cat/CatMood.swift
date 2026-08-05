@@ -1,4 +1,5 @@
 import Foundation
+import VibeCatCore
 
 /// How often a mood needs redrawing, and whether it needs redrawing at all.
 ///

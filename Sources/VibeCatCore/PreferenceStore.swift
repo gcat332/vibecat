@@ -98,6 +98,43 @@ public struct UserDefaultsPreferenceStore: PreferenceStoring {
         if let raw = defaults.string(forKey: key("rightFlank")) {
             prefs.rightFlank = RightFlank(rawValue: raw) ?? fallback.rightFlank
         }
+        if let raw = defaults.string(forKey: key("coat")) {
+            prefs.coat = Coat(rawValue: raw) ?? fallback.coat
+        }
+        // `SessionCardOptions`'s nine fields all default to `true`, exactly the
+        // trap `soundEnabled` and the alert switches above already guard
+        // against: `bool(forKey:)` returns `false` for a key nobody ever wrote,
+        // so reading any of these nine unconditionally would ship a fresh
+        // install with a blank session list.
+        var cardOptions = fallback.cardOptions
+        if defaults.object(forKey: key("cardOptions.activity")) != nil {
+            cardOptions.activity = defaults.bool(forKey: key("cardOptions.activity"))
+        }
+        if defaults.object(forKey: key("cardOptions.lastMessage")) != nil {
+            cardOptions.lastMessage = defaults.bool(forKey: key("cardOptions.lastMessage"))
+        }
+        if defaults.object(forKey: key("cardOptions.tasks")) != nil {
+            cardOptions.tasks = defaults.bool(forKey: key("cardOptions.tasks"))
+        }
+        if defaults.object(forKey: key("cardOptions.agents")) != nil {
+            cardOptions.agents = defaults.bool(forKey: key("cardOptions.agents"))
+        }
+        if defaults.object(forKey: key("cardOptions.subagents")) != nil {
+            cardOptions.subagents = defaults.bool(forKey: key("cardOptions.subagents"))
+        }
+        if defaults.object(forKey: key("cardOptions.project")) != nil {
+            cardOptions.project = defaults.bool(forKey: key("cardOptions.project"))
+        }
+        if defaults.object(forKey: key("cardOptions.worktree")) != nil {
+            cardOptions.worktree = defaults.bool(forKey: key("cardOptions.worktree"))
+        }
+        if defaults.object(forKey: key("cardOptions.model")) != nil {
+            cardOptions.model = defaults.bool(forKey: key("cardOptions.model"))
+        }
+        if defaults.object(forKey: key("cardOptions.effort")) != nil {
+            cardOptions.effort = defaults.bool(forKey: key("cardOptions.effort"))
+        }
+        prefs.cardOptions = cardOptions
         return prefs
     }
 
@@ -117,6 +154,16 @@ public struct UserDefaultsPreferenceStore: PreferenceStoring {
         defaults.set(preferences.postsSystemNotification, forKey: key("postsSystemNotification"))
         defaults.set(preferences.motion.rawValue, forKey: key("motion"))
         defaults.set(preferences.rightFlank.rawValue, forKey: key("rightFlank"))
+        defaults.set(preferences.coat.rawValue, forKey: key("coat"))
+        defaults.set(preferences.cardOptions.activity, forKey: key("cardOptions.activity"))
+        defaults.set(preferences.cardOptions.lastMessage, forKey: key("cardOptions.lastMessage"))
+        defaults.set(preferences.cardOptions.tasks, forKey: key("cardOptions.tasks"))
+        defaults.set(preferences.cardOptions.agents, forKey: key("cardOptions.agents"))
+        defaults.set(preferences.cardOptions.subagents, forKey: key("cardOptions.subagents"))
+        defaults.set(preferences.cardOptions.project, forKey: key("cardOptions.project"))
+        defaults.set(preferences.cardOptions.worktree, forKey: key("cardOptions.worktree"))
+        defaults.set(preferences.cardOptions.model, forKey: key("cardOptions.model"))
+        defaults.set(preferences.cardOptions.effort, forKey: key("cardOptions.effort"))
     }
 
     static func clampedVolume(_ value: Double, fallback: Double) -> Double {

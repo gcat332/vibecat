@@ -71,6 +71,19 @@ private func fixtureMetrics() -> ScreenMetrics {
     #expect(none.model.layout.right == .nothing)
 }
 
+/// The same shape again for §7.3's coat, Plan 6.6's Task 1. `IslandModel.coat`
+/// has existed since Plan 3 — `IslandView` already reads `model.coat` into
+/// `ResolvedCat` — so the only new wiring is `NotchController.init` reading
+/// `Preferences.coat` into it, which this drives end to end.
+@MainActor @Test func aStoredCoatReachesTheIslandAtLaunch() {
+    let c = controller(InMemoryPreferenceStore(Preferences(coat: .siamese)))
+    #expect(c.model.coat == .siamese,
+            "a stored coat does not reach the island — §7.3's preference is write-only")
+
+    let plain = controller(InMemoryPreferenceStore(Preferences(coat: .plain)))
+    #expect(plain.model.coat == .plain)
+}
+
 /// The two above plus the mute glyph, in one controller, from one `load()`.
 ///
 /// Separate from them on purpose: those two would both pass if `init` read the
@@ -111,6 +124,12 @@ private func fixtureMetrics() -> ScreenMetrics {
 /// flipped in Settings takes effect without a relaunch. The distinction is
 /// recorded because a future reader looking for "where is this read at launch"
 /// would otherwise conclude those two are unwired.
+///
+/// `cardOptions` is the one entry below naming no reader at all, on purpose —
+/// see its own comment. That is the plan's own predicted case ("a field whose
+/// only reader arrives in Task 3 or 4") rather than an oversight: recording it
+/// honestly is what this guard is for, and claiming a reader that does not
+/// exist yet would defeat the point of it.
 @Test func everyPreferenceFieldHasANamedProductionReader() {
     let readers: [String: String] = [
         "soundEnabled": "NotchController.init → IslandModel.muted; SoundSettings(_:) → SoundPlayer",
@@ -125,6 +144,10 @@ private func fixtureMetrics() -> ScreenMetrics {
         "postsSystemNotification": "Notifier.postStalls(from:preferences:) (re-read per stall)",
         "motion": "NotchController.init → IslandModel.motion.chosen",
         "rightFlank": "NotchController.init → IslandModel.rightFlank",
+        "coat": "NotchController.init → IslandModel.coat (IslandView already reads model.coat into ResolvedCat)",
+        "cardOptions": "NOT YET WIRED — Plan 6.6's Task 4 re-threads SessionListFace's `options` " +
+                        "parameter from this field; SessionRow.Options has no consumer of a stored " +
+                        "preference until then",
     ]
 
     let fields = Mirror(reflecting: Preferences()).children.map { $0.label ?? "?" }

@@ -103,6 +103,70 @@ import Foundation
     }
 }
 
+// MARK: - the two new Display fields (Plan 6.6, Task 1)
+
+@Test func aStoredCoatRoundTripsAndAnUnknownOneFallsBackRatherThanCrashing() {
+    // Same shape as `pack`/`motion`/`rightFlank` above: `Coat(rawValue:)` fails
+    // rather than force-unwraps on a plist string this build does not know —
+    // a future build's sixth coat, or a hand-edited plist.
+    withFreshDefaults { defaults, prefix in
+        let store = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
+        var p = store.load()
+        p.coat = .siamese
+        store.save(p)
+        #expect(store.load().coat == .siamese)
+
+        defaults.set("hairless", forKey: prefix + "coat")
+        #expect(UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix).load().coat == .tabby)
+    }
+}
+
+@Test func aFreshStoreShowsEverySessionCardFieldOnRatherThanBlankingTheList() {
+    // The trap `soundEnabled` and the alert switches already guard against:
+    // `bool(forKey:)` returns `false` for a key nobody ever wrote, and all
+    // nine of these default to `true`. Reading unconditionally would ship a
+    // fresh install with a blank session list.
+    withFreshDefaults { defaults, prefix in
+        let loaded = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix).load()
+        #expect(loaded.cardOptions == SessionCardOptions())
+    }
+}
+
+// **A confirmed, accepted gap, recorded rather than hidden.** Mutation-testing
+// the nine `cardOptions` keys found one shape neither this test nor
+// `everyFieldRoundTripsAndNoTwoSiblingKeysAreCrossed` can catch: crossing two
+// of the nine keys whose *values happen to be equal* — e.g. swapping
+// `cardOptions.activity` and `cardOptions.tasks`'s save keys when both hold
+// `false` — round-trips to the same struct and stays green. A `Bool` has only
+// two values and nine flags share a type, so no single written value can make
+// every pair of siblings differ (proved combinatorially: two boolean
+// partitions can separate at most 4 equivalence classes, and 9 flags forced
+// into 4 classes always leaves some class with 3+ members whose internal pairs
+// are indistinguishable — closing this fully would need roughly four
+// differently-patterned round trips, not one). This is the load-bearing
+// reason `SessionCardOptions` stores nine *named* keys rather than one raw
+// bitmask in the first place: a raw integer would let this same crossed-key
+// class of bug silently reinterpret every flag at once, where here it can only
+// ever mix up two same-valued switches — annoying if it happened, not a
+// silent full reinterpretation.
+@Test func settingOneSessionCardFlagDoesNotResetItsSiblings() {
+    withFreshDefaults { defaults, prefix in
+        let store = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
+        var p = store.load()
+        p.cardOptions.lastMessage = false
+        store.save(p)
+        let read = store.load().cardOptions
+        #expect(read.lastMessage == false)
+        // Every sibling this test did not touch must still read back `true` —
+        // the fresh-install default — rather than `false`, which is what a
+        // shared/crossed key or an unconditional `bool(forKey:)` read would
+        // produce.
+        #expect(read.activity && read.tasks && read.agents && read.subagents &&
+                read.project && read.worktree && read.model && read.effort,
+                "flipping one session-card flag must not flip its siblings")
+    }
+}
+
 @Test func anUnknownSelectedPageFallsBackToGeneralRatherThanOpeningNothing() {
     // A page key that no longer exists — a renamed pane, a hand-edited plist —
     // must not open a window with no pane selected.
@@ -182,7 +246,10 @@ private func withFreshDefaults(_ body: (UserDefaults, String) throws -> Void) re
         for name in ["soundEnabled", "volume", "quietDuringDoNotDisturb", "selectedPage",
                      "alerts.onNeedsAnswer", "alerts.onFinish", "alerts.onFail", "alerts.onStall",
                      "pack", "choiceForNeedsAnswer", "choiceForFinish", "choiceForFail",
-                     "postsSystemNotification", "motion", "rightFlank"] {
+                     "postsSystemNotification", "motion", "rightFlank", "coat",
+                     "cardOptions.activity", "cardOptions.lastMessage", "cardOptions.tasks",
+                     "cardOptions.agents", "cardOptions.subagents", "cardOptions.project",
+                     "cardOptions.worktree", "cardOptions.model", "cardOptions.effort"] {
             defaults.removeObject(forKey: prefix + name)
         }
         defaults.synchronize()
@@ -218,6 +285,18 @@ private let sharedTestSuite = "vibecat.tests"
     // a save/load that wrote either under the wrong key would read back an
     // unparseable string and fall back to a *default* — which still differs
     // from what was written, so the round trip still catches it.
+    //
+    // Plan 6.6's Task 1 adds a fourth such enum (`coat`) the same way, plus
+    // `cardOptions` — nine `Bool`s of the same type, where "every sibling
+    // differs" is impossible: a `Bool` has exactly two values and all nine
+    // default to `true`, so making every one differ from its default would
+    // make all nine `false` and indistinguishable from each other, which is
+    // exactly the degenerate case this file's own history warns about. The
+    // values below alternate instead, so **most** adjacent pairs differ and a
+    // crossed key between them is still caught; a swap between two flags that
+    // happen to share a value is the one shape a `Bool` genuinely cannot
+    // detect, and mutation-testing that pair specifically (see the task
+    // report) is how that limit was confirmed rather than assumed.
     let written = Preferences(
         soundEnabled: false,
         volume: 0.23,
@@ -230,7 +309,11 @@ private let sharedTestSuite = "vibecat.tests"
         choiceForFail: .none,
         postsSystemNotification: true,
         motion: .off,
-        rightFlank: .agentIcon)
+        rightFlank: .agentIcon,
+        coat: .siamese,
+        cardOptions: SessionCardOptions(activity: false, lastMessage: true, tasks: false,
+                                        agents: true, subagents: false, project: true,
+                                        worktree: false, model: true, effort: false))
 
     withFreshDefaults { defaults, prefix in
         let store = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
@@ -246,6 +329,16 @@ private let sharedTestSuite = "vibecat.tests"
         #expect(read.pack == .silent)
         #expect(read.motion == .off, "motion's key is crossed")
         #expect(read.rightFlank == .agentIcon, "rightFlank's key is crossed")
+        #expect(read.coat == .siamese, "coat's key is crossed")
+        #expect(read.cardOptions.activity == false, "cardOptions.activity's key is crossed")
+        #expect(read.cardOptions.lastMessage == true, "cardOptions.lastMessage's key is crossed")
+        #expect(read.cardOptions.tasks == false, "cardOptions.tasks's key is crossed")
+        #expect(read.cardOptions.agents == true, "cardOptions.agents's key is crossed")
+        #expect(read.cardOptions.subagents == false, "cardOptions.subagents's key is crossed")
+        #expect(read.cardOptions.project == true, "cardOptions.project's key is crossed")
+        #expect(read.cardOptions.worktree == false, "cardOptions.worktree's key is crossed")
+        #expect(read.cardOptions.model == true, "cardOptions.model's key is crossed")
+        #expect(read.cardOptions.effort == false, "cardOptions.effort's key is crossed")
     }
 }
 
@@ -267,7 +360,15 @@ private let sharedTestSuite = "vibecat.tests"
         choiceForNeedsAnswer: .meow, choiceForFinish: .meow, choiceForFail: .meow,
         postsSystemNotification: true,
         motion: .off,
-        rightFlank: .agentIcon)
+        rightFlank: .agentIcon,
+        coat: .siamese,
+        // Every field `false`, unlike the sibling-crossing test above: this
+        // one only needs `cardOptions` as a *whole* to differ from its default
+        // (`String(describing:)` on the struct prints all nine sub-fields), so
+        // the simplest value that guarantees that is every flag flipped.
+        cardOptions: SessionCardOptions(activity: false, lastMessage: false, tasks: false,
+                                        agents: false, subagents: false, project: false,
+                                        worktree: false, model: false, effort: false))
 
     withFreshDefaults { defaults, prefix in
         let store = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
@@ -278,10 +379,10 @@ private let sharedTestSuite = "vibecat.tests"
             Mirror(reflecting: Preferences()).children.map { ($0.label ?? "?", String(describing: $0.value)) })
         let readChildren = Mirror(reflecting: read).children.map { ($0.label ?? "?", String(describing: $0.value)) }
 
-        // Was 10. Plan 6.1's Task 1 added `motion` and `rightFlank`, so this is
+        // Was 12. Plan 6.6's Task 1 added `coat` and `cardOptions`, so this is
         // the assertion the plan predicted would fail before any production
         // code existed — it did, and updating the number is the fix.
-        #expect(readChildren.count == 12, "Preferences grew or shrank — update both round-trip tests")
+        #expect(readChildren.count == 14, "Preferences grew or shrank — update both round-trip tests")
         for (label, value) in readChildren {
             #expect(value != defaultChildren[label],
                     "`\(label)` came back as its default, so it is not persisted in both directions")

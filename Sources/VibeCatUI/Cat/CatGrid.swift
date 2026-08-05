@@ -1,9 +1,4 @@
-/// Which markings the cat wears. Design §7.3: a coat repaints cells with a
-/// tone already in the ramp, so the fur stays the state's colour and "colour
-/// means state" survives the customisation.
-public enum Coat: String, Sendable, CaseIterable {
-    case tabby, plain, tuxedo, siamese, patched
-}
+import VibeCatCore
 
 /// The cat, as cells. Design §7.1's grid verbatim — kept as character art so
 /// it stays editable as art rather than as a table of enum cases.

@@ -1,8 +1,9 @@
 import Foundation
 
-/// The preferences that exist today. **Twelve, and each one has a control that
-/// means something** — Plan 6.4 added the first four, Plan 6.5's Notifications
-/// page four more, Plan 6.1's Task 1 the last two (`motion`, `rightFlank`).
+/// The preferences that exist today. **Fourteen, and each one has a control
+/// that means something** — Plan 6.4 added the first four, Plan 6.5's
+/// Notifications page four more, Plan 6.1's Task 1 two more (`motion`,
+/// `rightFlank`), Plan 6.6's Task 1 the last two (`coat`, `cardOptions`).
 ///
 /// §14 describes roughly 47 controls across four pages. The remaining keys arrive
 /// with the pages that own them (6.6 Display, 6.7 General and Integrations),
@@ -47,6 +48,16 @@ public struct Preferences: Sendable, Equatable {
     /// `IslandModel.layout`'s hardcoded behaviour today (Plan 6.1's Task 5 makes
     /// this preference the thing that actually drives it).
     public var rightFlank: RightFlank
+    /// §7.3's coat picker (`settings.html`'s `#skins`). Default `.tabby`,
+    /// matching `IslandModel.coat`'s and `CatGrid`'s own default so a model
+    /// built with no preference wired in yet renders exactly as it always has.
+    public var coat: Coat
+    /// §11's nine session-card switches (`settings.html:445-490`), as data —
+    /// see `SessionCardOptions`'s own doc comment for why this is nine named
+    /// `Bool`s rather than `SessionRow.Options`'s raw `Int`. Default is every
+    /// field on, matching `SessionRow.Options.all` and `settings.html`'s own
+    /// switches, every one of which is `aria-checked="true"`.
+    public var cardOptions: SessionCardOptions
 
     public init(soundEnabled: Bool = true, volume: Double = 0.60,
                 quietDuringDoNotDisturb: Bool = true, selectedPage: String = "general",
@@ -56,7 +67,9 @@ public struct Preferences: Sendable, Equatable {
                 choiceForFail: CueChoice = .standard,
                 postsSystemNotification: Bool = false,
                 motion: MotionLevel = .full,
-                rightFlank: RightFlank = .sessionCount) {
+                rightFlank: RightFlank = .sessionCount,
+                coat: Coat = .tabby,
+                cardOptions: SessionCardOptions = SessionCardOptions()) {
         self.soundEnabled = soundEnabled
         self.volume = volume
         self.quietDuringDoNotDisturb = quietDuringDoNotDisturb
@@ -69,5 +82,7 @@ public struct Preferences: Sendable, Equatable {
         self.postsSystemNotification = postsSystemNotification
         self.motion = motion
         self.rightFlank = rightFlank
+        self.coat = coat
+        self.cardOptions = cardOptions
     }
 }

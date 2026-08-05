@@ -191,6 +191,12 @@ import VibeCatCore
         // ~40 test call sites depend on, and adding a parameter here would not
         // make this line any more likely to be written.
         self.model.rightFlank = prefs.rightFlank
+        // §7.3's coat, same seam again: `IslandModel.coat` has carried a
+        // constructor parameter since Plan 3, but nothing before Plan 6.6's
+        // Task 1 read `Preferences.coat` into it — the field did not exist.
+        // Assigned post-init for the same reason `rightFlank` is: existing
+        // call sites depend on the constructor's `.tabby` default.
+        self.model.coat = prefs.coat
         // Read once, here, rather than left at IslandModel's own `false`
         // default — a relaunch with sound already muted must show muted
         // immediately, not flip visibly once something else happens to

@@ -1,6 +1,7 @@
 import SwiftUI
 import Testing
 import CoreGraphics
+import VibeCatCore
 @testable import VibeCatUI
 
 @MainActor @Test func theCatCanvasEvaluatesForEveryCoatMoodAndPhase() {

@@ -1,4 +1,5 @@
 import Testing
+import VibeCatCore
 @testable import VibeCatUI
 
 private let eyeTones: Set<Tone> = [.eyeWhite, .sparkle, .pupil]
