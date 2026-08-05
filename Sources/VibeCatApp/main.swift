@@ -74,8 +74,29 @@ BackdropSampler.requestAccessIfAskedTo()
 // still owns, and what no test can check, is the *argument*: omit `preferences:`
 // below and the controller silently builds its own empty `InMemoryPreferenceStore`,
 // taking motion, the right flank and the mute glyph down with it.
+// Plan 7 Task 6, item 1: mirror the bundled `vibecat-hook` to the one fixed path
+// a generated snippet can safely point at — `~/Library/Application Support/
+// VibeCat/bin/vibecat-hook`. Before this the hook had no installed home at all
+// and lived at `.build/{debug,release}/vibecat-hook`, so a snippet pasted into
+// another CLI's config file pointed inside a build directory. All of the
+// behaviour (where "beside me" resolves to, the size/mtime comparison, and the
+// three fail-open levels) is in `HookBinary` where `HookBinaryTests` drives it;
+// this line is the whole of what this untestable file contributes. It cannot
+// fail the launch: every path through `install` returns `nil` rather than
+// throwing, and a snippet whose path has gone stale still exits 0 because of the
+// `[ -x … ]` guard `HookSnippet` wraps it in.
+HookBinary.installIfNeeded()
+
 let preferences = UserDefaultsPreferenceStore()
-let model = AppModel(socketPath: SocketPath.default, preferences: preferences)
+// `sources:` is Plan 7 Task 6's other half — see `AppModel.sources`' own doc
+// comment. Omit it and the app resolves every `cli` against the built-in presets
+// alone, none of which may carry an icon (§3: a committed vendor logo is a
+// trademark question), so `Session.icon` would be `nil` for every session and
+// Plan 7's whole mechanism would stay unpopulated. The same
+// `JSONFileCustomSourceStore()` default the hook uses, deliberately: one file,
+// one set of definitions, two processes that cannot disagree.
+let model = AppModel(socketPath: SocketPath.default, preferences: preferences,
+                     sources: JSONFileCustomSourceStore())
 let controller = NotchController(model: model, preferences: preferences)
 
 // §12's cues. The player is owned here rather than by AppModel or
@@ -174,6 +195,17 @@ controller.present()
 if CommandLine.arguments.contains("--settings-focus-probe") {
     SettingsFocusProbe.run(openSettings: { controller.model.onOpenSettings?() },
                            isOpen: { settings.isOpen })
+}
+
+// Plan 7 Task 6's hardware run: the whole chain from a real CLI's hook to a real
+// drawn row, which no test can cross (two process boundaries and two files on
+// disk). Placed after `present()` for the same reason `SettingsFocusProbe` is —
+// it watches the shipped app with the island already up, not a headless
+// stand-in. `HookLoopProbe`'s own doc comment says what it prints and how to
+// drive it. Gated on DEBUG and an explicit flag, so an ordinary launch and every
+// release build take the normal path.
+if CommandLine.arguments.contains("--hook-loop-probe") {
+    HookLoopProbe.run(model: model)
 }
 #endif
 

@@ -149,6 +149,57 @@ On brand icons: VibeCat ships neutral geometric marks and lets a source point at
 its own icon file. Bundling third-party logos is a trademark question we do not
 need to answer to ship — and custom sources need the mechanism anyway.
 
+> **Corrected 2026-08-06, after Plan 7 shipped.** The sketch above is right about
+> the shape and wrong about two of its members. Both were found by building it and
+> then running it against a second CLI on real hardware.
+>
+> **`hookInstall` is not a member of `SourceAdapter`, and could not usefully be
+> one.** The thing a person installs is a *shell command line*, and it is the same
+> line for every CLI — `HookSnippet.command(binaryPath:cli:socketPath:)` — because
+> any CLI that can run a command as a hook runs this same invocation. What differs
+> per CLI is the **wrapper**: Claude Code takes a `"hooks"` block in
+> `~/.claude/settings.json`, Codex takes a differently-shaped `hooks.json`, another
+> CLI might take TOML. Putting that wrapper on the adapter would be a per-vendor
+> branch inside the core, which is exactly what this section's own first sentence
+> forbids. So the generator is a free function and the wrapper is the config
+> format's business, not the adapter's.
+>
+> **`hookInstall` also presupposed something that did not exist: an installed hook
+> binary.** `vibecat-hook` was never bundled — it lived at
+> `.build/{debug,release}/vibecat-hook`, which moves with the build configuration —
+> so no snippet could name a path that survives. It now ships inside the app at
+> `Contents/MacOS/vibecat-hook`, signed with the app, and is mirrored on launch to
+> `~/Library/Application Support/VibeCat/bin/vibecat-hook`, which is the path a
+> snippet names. Two locations, because a path written into another CLI's config
+> file has to survive the app being moved, and only a path outside the bundle can.
+>
+> **`icon` is a path resolved on the *app* side, not a field on the wire.** The
+> hook parses events and the app draws them, and for a while only the hook had a
+> `SourceRegistry` — so `Session.icon` existed and was assigned from nowhere. The
+> resolution belongs where the drawing is: `AppModel` builds a registry through the
+> same factory the hook uses and resolves `cli → icon` at ingest. Adding an icon
+> field to `VibeEvent` would have worked and would have put a presentation detail on
+> a socket two executables speak.
+>
+> **The icon path is user input on a filesystem, which makes it a §2.3 hazard, not
+> just a picture.** Measured: the signed app, launched with `open`, drawing an icon
+> from `~/Downloads` — a TCC-protected directory — hung its **main thread inside
+> `open(2)`** indefinitely, because an `LSUIElement` app cannot present the prompt
+> TCC wants to show. §2.3's "every wait is bounded" applies to reading an icon file.
+> `SourceIconLoader` bounds it and caches the answer; a path that does not answer
+> in time draws the geometric mark instead, which is the same thing "no icon"
+> already did.
+>
+> **Not corrected, and worth saying so: "presets ship for Claude Code, Codex,
+> Copilot, Gemini" is still Later (§18), and the generic adapter is what makes them
+> cheap.** Measured while proving it: Codex's payload is expressible as generic
+> adapter *data* with no code at all (`hook_event_name` / `session_id` / `cwd`, the
+> same three keys Claude Code uses). What is *not* expressible is Claude Code's own
+> `PreToolUse` — its body needs a nested `tool_input` traversal with a preferred-key
+> order, and its "always" choice label embeds the tool name into a sentence. A
+> preset is therefore data plus, occasionally, a little code — not a wider config
+> language.
+
 ---
 
 ## 4. State model

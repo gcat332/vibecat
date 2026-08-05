@@ -60,24 +60,32 @@ public struct Session: Identifiable, Sendable, Equatable {
     /// geometric mark whenever it is `nil`, the same fallback
     /// `SourceIcon` itself uses for a path that turns out to be bad.
     ///
-    /// Always `nil` on every path that builds a `Session` today, and that
-    /// is a fact about the rest of the app, not a placeholder left half-done
-    /// here: `VibeEvent` carries no icon field (the wire only speaks the
-    /// shared `kind` vocabulary, never an adapter's own terms), and the
-    /// running app assembles no `SourceRegistry` of its own —
-    /// `SourceRegistry(adapters:)` appears once in `Sources/`, in
-    /// `VibeCatHook/main.swift` — see `CLIMark.displayName(cli:)`'s own doc
-    /// comment for the identical gap on the display-name side. So there is
-    /// nowhere upstream of this property, yet, that could resolve a real
-    /// path; the honest state is a field that exists and stays `nil`, not a
-    /// view that reaches sideways into a registry it could not be rendered
-    /// in a test without. Once the app side gains a registry, that
-    /// registry's `adapter(for: cli)?.icon` is what sets this — once, at
-    /// the point a `Session` is built or merged, never inside `SessionRow`.
+    /// **Set at ingest, from the app's own `SourceRegistry`.** Plan 7 Task 6:
+    /// `AppModel.init(sources:)` builds a registry through the same
+    /// `SourceRegistry.loadingCustomSources(builtIns:from:)` the hook uses, so
+    /// the two processes cannot disagree about which sources exist, and
+    /// `AppModel.applyAndNotify` passes `registry.adapter(for: event.cli)?
+    /// .icon` into `SessionStore.apply(_:now:icon:)`. That is one lookup, at
+    /// the one point a `Session` is built or merged — never inside
+    /// `SessionRow`, which could not then be rasterised by any test without a
+    /// registry to hand it.
     ///
-    /// `public var`, not `let`: nothing produces a value for it yet, so
-    /// tests set it directly, the same way `lastUserMessage` above is set
-    /// by hand for a switch with no real producer either.
+    /// **The resolution deliberately happens on the app side rather than on
+    /// the wire.** `VibeEvent` carries no icon field and must not gain one: the
+    /// icon is a display concern, the app is what displays, and putting a
+    /// presentation detail on a socket that four processes speak would make
+    /// every future change to how an icon is named a wire-protocol change. The
+    /// wire keeps speaking only the shared `kind` vocabulary.
+    ///
+    /// Still `nil` for every **built-in** source, and that is by design rather
+    /// than an omission: no adapter in `Adapters/` may set `icon`, because a
+    /// committed vendor logo is a trademark question MIT cannot settle (§3).
+    /// A real path comes from a *custom* source — a file on the user's own
+    /// disk, named in `custom-sources.json`.
+    ///
+    /// `public var`, not `let`: `SessionStore.apply` assigns it after
+    /// `init(event:now:)` has run, and tests set it directly to render a row
+    /// without a registry.
     public var icon: String?
     public var tasks: [TaskItem]
     public var agents: [AgentItem]

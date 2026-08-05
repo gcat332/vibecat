@@ -7,12 +7,36 @@ public struct SessionStore: Sendable, Equatable {
 
     public init() {}
 
-    public mutating func apply(_ event: VibeEvent, now: Date) {
+    /// `icon` is §3's *"swappable runtime asset"* for the source this event came
+    /// from, already resolved to a path by whoever holds a `SourceRegistry` —
+    /// `AppModel.applyAndNotify` on the app side. It arrives as a parameter
+    /// rather than being looked up here for two reasons: this type is a
+    /// `Sendable`, `Equatable` value and a registry is neither, and the lookup
+    /// is a *display* concern that must not be able to change what state the
+    /// store reports.
+    ///
+    /// Defaulted, so the ~60 existing call sites that have no registry to ask
+    /// keep compiling and keep getting `nil` — which is exactly the geometric
+    /// fallback `SourceIcon` draws for a source with no icon.
+    ///
+    /// Assigned on **create** and, when non-`nil`, on **merge**. The merge case
+    /// looks redundant — `cli` is half the `SessionKey`, so a session's source
+    /// never changes and the resolved icon cannot change with it — and it is
+    /// kept for the case that is not covered by that argument: a session
+    /// created before its source's definition was loaded (a custom source
+    /// added, then the first event of an already-open session arriving after)
+    /// would otherwise keep a `nil` icon for its whole life. `if let`, not an
+    /// unconditional assignment, follows `Session.merge`'s own rule that an
+    /// event omitting something leaves it alone.
+    public mutating func apply(_ event: VibeEvent, now: Date, icon: String? = nil) {
         let key = SessionKey(cli: event.cli, session: event.session)
         if let i = sessions.firstIndex(where: { $0.id == key }) {
             sessions[i].merge(event, now: now)
+            if let icon { sessions[i].icon = icon }
         } else {
-            sessions.append(Session(event: event, now: now))
+            var session = Session(event: event, now: now)
+            session.icon = icon
+            sessions.append(session)
         }
     }
 

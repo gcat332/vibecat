@@ -309,20 +309,48 @@ source** — that asymmetry is correct and worth a comment so nobody "fixes" it.
 **The claim this plan makes is "VibeCat works with a CLI nobody wrote code for."
 Task 6 tests that claim, and nothing else in the plan does.**
 
-- [ ] **Define a real second source as data** — not a fixture. Codex or Gemini if you
-      have one installed; otherwise a small script that emits plausible events, which
-      is exactly what §3's "anything that can run a command" means.
-- [ ] Generate its hook snippet with Task 4, install it, and drive it. Confirm events
-      reach the island, the row shows the right source, and **the hook exits `0`** —
-      §2.3 is this repo's one unbreakable invariant.
-- [ ] **Launch both the bare binary and the signed bundle.** Plan 6.2 shipped a
-      launch-path abort invisible to 509 green tests because no test runs `main.swift`.
-- [ ] Update §3's spec section with a dated correction if the shape you built differs
-      from the one it sketches — it lists `hookInstall` and `icon`, and you will have
-      learned what those actually need to be.
-- [ ] Update `plans/README.md`: what landed, what is still Later (the Codex, Copilot
-      and Gemini presets), and what 6.7 inherits.
-- [ ] Full suite three times, zero warnings in debug and release, commit.
+- [x] **Item 0, not in the original text and larger than the rest of the task:**
+      the mechanism was connected to nothing. `SourceRegistry(adapters:)` existed
+      once in `Sources/`, in the *hook* process; `VibeEvent` contained `icon` zero
+      times; `Session.icon` was assigned from nowhere. Closed on the **app** side —
+      `AppModel.init(sources:)` builds a registry through the same
+      `SourceRegistry.loadingCustomSources(builtIns:from:)` the hook uses, and
+      `applyAndNotify` resolves `cli → icon` into `SessionStore.apply(_:now:icon:)`.
+      Not on the wire: the icon is a display concern.
+- [x] **Item 1: `vibecat-hook` had no installed home.** `Scripts/build-app.sh` now
+      builds and bundles it at `Contents/MacOS/vibecat-hook`, signed inside-out with
+      the app; `HookBinary.installIfNeeded()` mirrors it on launch to
+      `~/Library/Application Support/VibeCat/bin/vibecat-hook`, the fixed path a
+      snippet names. Two locations because a snippet outlives the app's location.
+- [x] **Define a real second source as data** — Codex CLI 0.145.0, installed on this
+      machine. Its payload needs **no code at all**: `hook_event_name` /
+      `session_id` / `cwd`, the same three keys Claude Code uses, plus `model`.
+- [x] Generated its snippet with `HookSnippet`, installed it in Codex's own
+      `hooks.json` (in an isolated `CODEX_HOME`, so the owner's real config was
+      never touched), and drove it with `codex exec`. Events reached the island
+      (`cli=codex`, `state`, `model=gpt-5.5`), the row drew Codex's own `#5C74FF`
+      (312 px, against `#40D99C`'s 61 in the same corner), and **the hook exited
+      `0`** on every path including a deliberately missing binary.
+- [x] **Task 4's `/bin/sh -c` assumption settled**, and by a better reason than the
+      one given: Codex runs hook commands through **`$SHELL -c`** — measured
+      `/bin/zsh` 5.9, non-login. The outer interpreter is a property of the
+      *machine*, not the CLI.
+- [x] **Launched both the bare binary and the signed bundle.** Both start clean. The
+      bundle's inner binary run *directly from a shell* SIGABRTs under TCC (the
+      responsible-process substitution `build-app.sh` warns about) — recorded, not a
+      defect.
+- [x] **A §2.3 violation found by the hardware run and fixed:** reading an icon from
+      `~/Downloads` hung the **main thread** in `open(2)` indefinitely, because TCC
+      cannot prompt an `LSUIElement` app. `SourceIconLoader` bounds it at 50ms and
+      caches. No test could have found it, and the first attempt to write one (a
+      FIFO) could not fail — reported in the source rather than adjusted.
+- [x] §3 correction filed, dated 2026-08-06: `hookInstall` is not a protocol member
+      and could not usefully be one; `icon` resolves on the app side; the icon path
+      is a §2.3 hazard.
+- [x] `plans/README.md` updated: what landed, the seven carried findings, and what
+      6.7 inherits. Codex/Copilot/Gemini presets stay in §18's **Later**, with the
+      measurement of what a preset still needs by hand.
+- [x] Full suite three times, zero warnings in debug and release, committed.
 
 ---
 

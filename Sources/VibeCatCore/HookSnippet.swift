@@ -25,32 +25,65 @@ import Foundation
 ///   different environment than the one that granted permissions to the app —
 ///   so the snippet pins the socket explicitly with `VIBECAT_SOCKET=` rather
 ///   than trusting the two processes to re-derive the same default.
-/// - **There is currently no stable installed location for `vibecat-hook`.**
-///   `Scripts/build-app.sh` copies only the `vibecat` product into
-///   `VibeCat.app`; `vibecat-hook` is never bundled and lives wherever
-///   `swift build` put it (`.build/debug/vibecat-hook` or
-///   `.build/release/vibecat-hook`), which moves with the build configuration.
-///   So `binaryPath` is a required parameter here, supplied by whoever knows
-///   where their own copy lives (a person, or Plan 6.7's Settings UI) — this
-///   type does not guess a path nobody runs.
-/// - `~/.claude/settings.json` on this machine already wires an unrelated
-///   hook bridge the same way: `"command": "/bin/sh -c '[ -x \"$BIN\" ] &&
-///   \"$BIN\" ...; exit 0'"` — a guard that skips the binary if it is not
-///   there, followed by an unconditional `exit 0`. This snippet follows that
-///   precedent for the same reason: `vibecat-hook`'s own `main.swift` already
-///   calls `exit(0)` unconditionally, but that only protects a *running*
-///   binary. If the binary has not been built yet, moved, or lost its execute
-///   bit, the guard is what stops "command not found" from becoming a nonzero
-///   exit that could deny a tool call — §2.3 applied one layer outside the
-///   Swift process, where the Swift process cannot protect itself.
+/// - **`vibecat-hook` has an installed home as of Plan 7 Task 6, and this
+///   comment used to say it did not.** It is bundled at
+///   `VibeCat.app/Contents/MacOS/vibecat-hook` and mirrored on launch to
+///   `~/Library/Application Support/VibeCat/bin/vibecat-hook`; `HookBinary
+///   .resolvedPath()` is what a caller should pass as `binaryPath`, and that
+///   type's doc comment says why the mirror exists rather than the bundle path
+///   being used directly. `binaryPath` stays a **required parameter** rather
+///   than defaulting to it: this function is pure and testable precisely
+///   because it never consults the file system, and Plan 6.7's Integrations
+///   page needs to be able to show a snippet for a path a person chose.
+/// - `~/.claude/settings.json` on this machine wires an unrelated hook bridge
+///   the same way: `"command": "/bin/sh -c '[ -x \"$BIN\" ] && \"$BIN\" ...;
+///   exit 0'"` — a guard that skips the binary if it is not there, followed by
+///   an unconditional `exit 0`. This snippet follows that precedent for the
+///   same reason: `vibecat-hook`'s own `main.swift` already calls `exit(0)`
+///   unconditionally, but that only protects a *running* binary. If the binary
+///   has not been built yet, moved, or lost its execute bit, the guard is what
+///   stops "command not found" from becoming a nonzero exit that could deny a
+///   tool call — §2.3 applied one layer outside the Swift process, where the
+///   Swift process cannot protect itself.
 ///
 /// **Shell targeted: POSIX `sh`, explicitly, via `/bin/sh -c`.** Not whatever
-/// shell the CLI happens to invoke its own hook commands with — that is
-/// undocumented and, on this machine, `/bin/sh` is a build of bash 3.2 running
-/// in POSIX mode, the same interpreter `Scripts/build-app.sh` was bitten by
-/// (an unbraced `$APP…` read as part of the variable name). Wrapping in an
-/// explicit `/bin/sh -c` makes the escaping in this file the only escaping
-/// that matters, regardless of what shell actually launches that `sh`.
+/// shell the CLI happens to invoke its own hook commands with. That was
+/// originally a *guess*, resting only on the `~/.claude/settings.json`
+/// precedent above, and Task 6 settled it against a second, independent CLI:
+///
+/// **Measured, 2026-08-06, against Codex CLI 0.145.0 — a real second CLI, not a
+/// fixture.** A probe hook installed in Codex's own `hooks.json` recorded how it
+/// was invoked, and reported:
+///
+/// ```
+/// argv0=/bin/zsh          ZSH_VERSION=5.9      BASH_VERSION=unset
+/// dash=569X               SHELL=/bin/zsh
+/// selfcmd=/bin/zsh -c <the command string, verbatim>
+/// ```
+///
+/// So Codex hands the whole `"command"` string to **`$SHELL -c`** — the *user's*
+/// shell, whatever that is, here zsh 5.9 rather than `sh`. (Non-login and
+/// non-interactive: no `l` and no `i` in `$-`. The binary's own string table
+/// carries `SHELL` next to `-lc` in `hooks/src/engine/command_runner.rs`, which
+/// read as a login shell; the empirical run says `-c`, and the run wins. Recorded
+/// because reading a flag out of a string table is exactly the kind of inference
+/// this note exists to replace.)
+///
+/// That settles what this wrapper is for, and it is a stronger reason than the
+/// one originally given: the outer interpreter is **not a property of the CLI at
+/// all**, it is `$SHELL`, so the same `"command"` string is read by a different
+/// dialect on every machine. `zsh` and `bash` disagree on word splitting, on
+/// `[`'s edge cases and on empty-variable expansion. Wrapping in an explicit
+/// `/bin/sh -c` fixes the *inner* dialect to one this file can escape for
+/// correctly, whatever the outer one turns out to be. On this machine `/bin/sh`
+/// is a build of bash 3.2 in POSIX mode — the same interpreter
+/// `Scripts/build-app.sh` was bitten by (an unbraced `$APP…` read as part of the
+/// variable name) — and `quoted(_:)` below is written for that dialect
+/// specifically.
+///
+/// The generated snippet was then installed for real and driven: see the Task 6
+/// report. Codex ran it, `vibecat-hook` reached the island over the socket, and
+/// the hook exited `0`.
 ///
 /// **Two layers of quoting, and this type owns exactly one.** The string this
 /// function returns must itself be valid POSIX `sh` — that is `quoted(_:)`'s

@@ -96,9 +96,57 @@ import VibeCatTransport
     /// whatever `AlertPolicy` it is handed.
     private let preferences: PreferenceStoring
 
-    public init(socketPath: String, preferences: PreferenceStoring = InMemoryPreferenceStore()) {
+    /// **The app's own source registry, and the reason Plan 7's mechanism is
+    /// connected to anything at all.**
+    ///
+    /// Before this, `SourceRegistry(adapters:)` appeared exactly once in
+    /// `Sources/` — in `VibeCatHook/main.swift`, the *hook* process — so
+    /// `SourceAdapter.icon` (Task 1), `GenericAdapter` (Task 2),
+    /// `custom-sources.json` (Task 3) and `SessionRow`'s `SourceIcon` call
+    /// (Task 5) were a complete mechanism with no path from a real definition to
+    /// a real drawn row. `Session.icon` was declared and assigned from nowhere.
+    /// That is this project's third "built but never populated" — after
+    /// `Session.lastUserMessage` and Plan 6.4's three write-only preferences —
+    /// and this property is what closes it.
+    ///
+    /// **Why here and not on the wire.** An icon field on `VibeEvent` would
+    /// also have worked and is the wrong shape: the icon is a display concern,
+    /// this is the display side, and a wire change would put a presentation
+    /// detail on a socket shared by two executables and every test that speaks
+    /// to it. See `Session.icon`'s own doc comment.
+    ///
+    /// **Why the same factory the hook uses.** `SourceRegistry
+    /// .loadingCustomSources(builtIns:from:)` is called by both processes, from
+    /// the same `JSONFileCustomSourceStore` default, so an app that draws an
+    /// icon for a source and a hook that parses events for it cannot disagree
+    /// about which sources exist or which definition won a duplicate id.
+    ///
+    /// **Read once, in `init`.** A registry is not live: a definition added to
+    /// the JSON file mid-session is picked up on the next launch, exactly as
+    /// the hook picks it up on its next invocation. Re-reading the file on every
+    /// event would put a file read on `SocketServer`'s per-connection thread,
+    /// which is the thread §2.3 forbids blocking.
+    ///
+    /// `nonisolated let` because `applyAndNotify` — which runs on that
+    /// connection thread — is what reads it, and `SourceRegistry` is `Sendable`.
+    nonisolated private let sources: SourceRegistry
+
+    /// `sources:` defaults to an empty in-memory store, matching
+    /// `preferences:`' own precedent: ~30 test call sites predate the parameter
+    /// and have no custom sources to declare, and an empty store resolves every
+    /// id to the built-in presets alone. As with `preferences:`, that default
+    /// is *not* what protects against `main.swift` forgetting to pass the real
+    /// one — nothing can, since no test runs that file. What makes the omission
+    /// visible is `anIconFromACustomSourceReachesARenderedRow` in
+    /// `CustomSourceIconWiringTests`, which drives this initialiser with a real
+    /// `CustomSourceStoring` and rasterises the row at the end of it.
+    public init(socketPath: String,
+                preferences: PreferenceStoring = InMemoryPreferenceStore(),
+                sources: CustomSourceStoring = InMemoryCustomSourceStore()) {
         self.socketPath = socketPath
         self.preferences = preferences
+        self.sources = SourceRegistry.loadingCustomSources(
+            builtIns: [ClaudeCodeAdapter()], from: sources)
     }
 
     public var islandState: IslandState { IslandState(store: store) }
@@ -193,10 +241,17 @@ import VibeCatTransport
         // was building toward a stall (or already reported one) starts over.
         let key = SessionKey(cli: event.cli, session: event.session)
 
+        // §3's icon, resolved once per event on the thread the event arrived on,
+        // and handed to the store as a value. A dictionary lookup on a
+        // `Sendable` `let` — no I/O, nothing that can block the connection
+        // thread §2.3 forbids blocking. See `sources`' own doc comment for why
+        // the app holds a registry at all.
+        let icon = sources.adapter(for: event.cli)?.icon
+
         if Thread.isMainThread {
             MainActor.assumeIsolated {
                 let before = store          // SessionStore is a value type
-                store.apply(event, now: now)
+                store.apply(event, now: now, icon: icon)
                 stalledReported.remove(key)
                 onChange?()
                 if let cue = CueSelector.cue(for: event, before: before, after: store,
@@ -208,7 +263,7 @@ import VibeCatTransport
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let before = store
-                store.apply(event, now: now)
+                store.apply(event, now: now, icon: icon)
                 stalledReported.remove(key)
                 onChange?()
                 if let cue = CueSelector.cue(for: event, before: before, after: store,
