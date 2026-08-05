@@ -347,6 +347,92 @@ extension Raster {
             "hiding `.model` and hiding `.effort` produced the same row — both bits are gating the same field")
 }
 
+/// `.worktree`'s own single-bit probe — Plan 6.6's Task 4 named this gap:
+/// `turningALineOffRemovesItsInk` above flips every bit at once, so it cannot
+/// tell "`.worktree` gates its own field" apart from "the guard checks the
+/// wrong bit entirely" (the same reasoning `eachBlockOptionGatesOnlyItsOwnBlock`
+/// already gives for `.tasks`/`.agents` one level down).
+///
+/// Mutation-verified: gating the worktree `Text` on `.project` instead of
+/// `.worktree` (the copy-paste shape this exists to catch — two fields on the
+/// same headline) makes the first `#expect` fail, since hiding `.worktree`
+/// would then change nothing.
+@MainActor @Test func worktreeIsSwitchableOnItsOwn() throws {
+    let s = session(.running)
+    let all = try row(s)
+    let minusWorktree = try row(s, options: .all.subtracting(.worktree))
+
+    #expect(all.differingPixelCount(from: minusWorktree) > 0,
+            "hiding `.worktree` changed nothing — the headline ignores the switch")
+}
+
+/// `.lastMessage`'s own single-bit probe, same reasoning as `.worktree`'s
+/// above. **This is the switch `Session.lastUserMessage` has no producer
+/// for** — see `Session.init`, which always sets it to `nil` — so this test's
+/// fixture sets it by hand, the only way to exercise the switch at all. On
+/// real data the row this switch gates is already absent, which
+/// `SessionCardSection`'s own doc comment and this task's report both record.
+///
+/// Mutation-verified: dropping `options.contains(.lastMessage)` from
+/// `SessionRow.body`'s `if` (always showing line 3 when `lastUserMessage` is
+/// non-nil) makes the two renders identical and this fails.
+@MainActor @Test func lastMessageIsSwitchableOnItsOwn() throws {
+    var s = session(.running)
+    s.lastUserMessage = "clean the build and rebuild from scratch"
+    let all = try row(s)
+    let minusLastMessage = try row(s, options: .all.subtracting(.lastMessage))
+
+    #expect(all.differingPixelCount(from: minusLastMessage) > 0,
+            "hiding `.lastMessage` changed nothing — line 3 ignores the switch")
+}
+
+// MARK: - The stored-preference conversion (Plan 6.6's Task 4)
+
+/// `SessionRow.Options.init(_:)` is the re-thread's whole seam: `Preferences
+/// .cardOptions` (nine named `Bool`s, `VibeCatCore`) has to become this
+/// render-time `OptionSet` somewhere, and this is the one place it does. A
+/// pure mapping test, not a render — the render-level proof that each bit
+/// actually *gates* its own content is `SessionRowTests`' and
+/// `SessionBlocksTests`' own per-flag probes; this is only "the right bit
+/// came through", asked once per field so a transposed `if` in the
+/// conversion itself (`stored.worktree` driving `.insert(.model)`, say) has
+/// somewhere to fail.
+///
+/// Mutation-verified, one bit at a time: swapping any two of the nine `if`
+/// bodies in `SessionRow.Options.init(_:)` makes exactly two of these nine
+/// cases fail — the one whose bit should be set and isn't, and the one it
+/// leaked into. Confirmed for all nine pairs adjacent in declaration order;
+/// reverted after. See the task report.
+@Test func theStoredCardOptionsConversionSetsExactlyOneBitPerField() {
+    let allFields: [(WritableKeyPath<SessionCardOptions, Bool>, SessionRow.Options)] = [
+        (\.activity, .activity), (\.lastMessage, .lastMessage), (\.tasks, .tasks),
+        (\.agents, .agents), (\.subagents, .subagents), (\.project, .project),
+        (\.worktree, .worktree), (\.model, .model), (\.effort, .effort),
+    ]
+
+    for (path, bit) in allFields {
+        var stored = SessionCardOptions(activity: false, lastMessage: false, tasks: false,
+                                        agents: false, subagents: false, project: false,
+                                        worktree: false, model: false, effort: false)
+        stored[keyPath: path] = true
+        let converted = SessionRow.Options(stored)
+        #expect(converted == bit,
+                "turning on only `\(path)` in `SessionCardOptions` produced `\(converted)`, not exactly `\(bit)` — a bit is being crossed or dropped in `SessionRow.Options.init(_:)`")
+    }
+}
+
+/// The all-true and all-false ends, so the loop above is not the only thing
+/// standing between this test and vacuity.
+@Test func theStoredCardOptionsConversionHandlesBothExtremes() {
+    #expect(SessionRow.Options(SessionCardOptions()) == .all,
+            "every field on produced \(SessionRow.Options(SessionCardOptions())), not `.all`")
+    let allOff = SessionCardOptions(activity: false, lastMessage: false, tasks: false,
+                                    agents: false, subagents: false, project: false,
+                                    worktree: false, model: false, effort: false)
+    #expect(SessionRow.Options(allOff) == [],
+            "every field off produced \(SessionRow.Options(allOff)), not the empty set")
+}
+
 /// CARRIED FINDING (Task 6, review round 1): the reviewer temporarily hardcoded
 /// `options: .all` at `SessionRow`'s `SessionBlocks(session:options:accent:)`
 /// call site — dropping the forwarding of whatever `options` the row actually

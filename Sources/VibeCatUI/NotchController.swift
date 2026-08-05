@@ -199,6 +199,13 @@ import VibeCatCore
         // Assigned post-init for the same reason `rightFlank` is: existing
         // call sites depend on the constructor's `.tabby` default.
         self.model.coat = prefs.coat
+        // §11's nine session-card switches, same seam and same reasoning again.
+        // `SessionRow.Options(_:)` is the conversion that view's own doc comment
+        // (and `IslandModel.cardOptions`'s) name as living on this side of the
+        // `VibeCatCore`/`VibeCatUI` seam — this is where it actually runs for a
+        // real launch, which is what `aStoredCardOptionsReachesARenderedRow`
+        // (`LaunchWiringTests`) drives end to end.
+        self.model.cardOptions = SessionRow.Options(prefs.cardOptions)
         // Read once, here, rather than left at IslandModel's own `false`
         // default — a relaunch with sound already muted must show muted
         // immediately, not flip visibly once something else happens to

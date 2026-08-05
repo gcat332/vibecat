@@ -367,6 +367,36 @@ struct SessionRow: View {
     }
 }
 
+/// The re-thread `SessionListFace`'s own doc comment names as Plan 6.6's Task
+/// 4: `Preferences.cardOptions` is `SessionCardOptions`, nine named `Bool`s in
+/// `VibeCatCore` — `VibeCatCore` may never import `VibeCatUI`, so the stored
+/// preference cannot itself be a `SessionRow.Options`, and something on this
+/// side of the seam has to turn the nine `Bool`s into these bits. This is
+/// that conversion, and the only place it happens — `NotchController.init`
+/// calls it once, at launch, into `IslandModel.cardOptions`.
+///
+/// An extension, not a second initialiser inside `Options` itself: a struct's
+/// synthesized memberwise `init(rawValue:)` — the one `OptionSet` conformance
+/// needs — is suppressed the moment any initialiser is written inside its
+/// *primary declaration*, but not by one added in an extension. Measured, not
+/// assumed: written inside `Options` first, this broke the build with "type
+/// 'SessionRow.Options' does not conform to protocol 'OptionSet'" until it
+/// moved out here.
+extension SessionRow.Options {
+    init(_ stored: SessionCardOptions) {
+        self = []
+        if stored.activity    { insert(.activity) }
+        if stored.lastMessage { insert(.lastMessage) }
+        if stored.tasks       { insert(.tasks) }
+        if stored.agents      { insert(.agents) }
+        if stored.subagents   { insert(.subagents) }
+        if stored.project     { insert(.project) }
+        if stored.worktree    { insert(.worktree) }
+        if stored.model       { insert(.model) }
+        if stored.effort      { insert(.effort) }
+    }
+}
+
 /// A small bundle-id map for the origins §11's line 2 names by example. An
 /// unknown bundle id falls back to its last dot-component so a raw identifier
 /// never reaches the row — `com.example.SomeEditor` reads as "SomeEditor",

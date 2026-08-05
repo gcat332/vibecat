@@ -105,6 +105,63 @@ private func fixtureMetrics() -> ScreenMetrics {
     #expect(on.model.motion.followsSystem == true)
 }
 
+/// §11's nine session-card switches, Plan 6.6's Task 4 — and, per that task's
+/// own instruction, taken one step past a property read. `everyPreferenceField
+/// HasANamedProductionReader`'s guard only proves a *named* reader exists in
+/// its dictionary, never that it still reads (this is exactly the gap
+/// `aStoredFollowTheSystemChoiceReachesTheIslandAtLaunch` above found for
+/// `followsSystemReduceMotion` — removing that field's read left the whole
+/// suite green). So this goes one level further than that fix did.
+///
+/// **Renders `IslandView(model: c.model)` itself — not a bare `DrawerView`
+/// built by hand — because that is the one gap a bare `DrawerView` provably
+/// cannot see.** A first version of this test constructed `DrawerView(...,
+/// options: c.model.cardOptions, ...)` directly, the same shape
+/// `sessionRowForwardsItsOptionsToSessionBlocks` already uses one level down.
+/// It passed. Then, checking the claim by mutation rather than assuming it,
+/// `options: model.cardOptions` was deleted from `IslandView`'s own
+/// `DrawerView(...)` call site (the true production wiring, one hop further
+/// out than anything that test touched) — and the suite stayed green,
+/// **including that test**, because it never asked `IslandView` to build the
+/// `DrawerView` at all. That is a mutation that stayed green, reported per
+/// this plan's own rule rather than quietly fixed by tightening an assertion:
+/// the fix is this rewrite, going through `IslandView` itself, which is what
+/// actually catches it (confirmed: the same deletion now fails this version).
+///
+/// `rasteriseHosted`, not `rasterise`: `SessionListFace` wraps its rows in a
+/// `ScrollView`, which `ImageRenderer` paints fully transparent (see
+/// `Raster.swift`'s own note — confirmed there with a one-line repro), and
+/// `IslandGoldenTests`' own filmstrip test already established the recipe for
+/// rendering an open drawer through `IslandView` this same way.
+@MainActor @Test func aStoredCardOptionsReachesARenderedRow() throws {
+    var e = VibeEvent(id: "e", cli: "claude-code", kind: .running, session: "s",
+                      cwd: "/Users/dev/api")
+    e.worktree = "auth-hardening"
+    let session = Session(event: e, now: Date(timeIntervalSince1970: 1_000_000))
+
+    let allOn = controller(InMemoryPreferenceStore(Preferences(cardOptions: SessionCardOptions())))
+    let worktreeOff = controller(InMemoryPreferenceStore(
+        Preferences(cardOptions: SessionCardOptions(worktree: false))))
+
+    #expect(allOn.model.cardOptions.contains(.worktree),
+            "a stored `cardOptions` with worktree=true does not reach the island — §11's preference is write-only")
+    #expect(!worktreeOff.model.cardOptions.contains(.worktree))
+
+    @MainActor func render(_ c: NotchController) throws -> Raster {
+        c.model.sessions = [session]
+        c.model.drawerOpen = true
+        guard case .drawer = c.model.tier else {
+            throw RasterError.renderProducedNothing
+        }
+        let size = CGSize(width: c.model.panelFrames.panel.width,
+                          height: c.model.panelFrames.panel.height)
+        return try rasteriseHosted(IslandView(model: c.model), size: size)
+    }
+
+    #expect(try render(allOn).differingPixelCount(from: try render(worktreeOff)) > 0,
+            "a stored `cardOptions.worktree = false` rendered the same drawer as `true` through `IslandView` itself — the preference reaches `IslandModel.cardOptions` but the real call site does not draw from it, so the switch this plan ships would do nothing on a real launch")
+}
+
 /// The two above plus the mute glyph, in one controller, from one `load()`.
 ///
 /// Separate from them on purpose: those two would both pass if `init` read the
@@ -146,11 +203,10 @@ private func fixtureMetrics() -> ScreenMetrics {
 /// recorded because a future reader looking for "where is this read at launch"
 /// would otherwise conclude those two are unwired.
 ///
-/// `cardOptions` is the one entry below naming no reader at all, on purpose —
-/// see its own comment. That is the plan's own predicted case ("a field whose
-/// only reader arrives in Task 3 or 4") rather than an oversight: recording it
-/// honestly is what this guard is for, and claiming a reader that does not
-/// exist yet would defeat the point of it.
+/// `cardOptions` named no reader at all until Plan 6.6's Task 4 — see the
+/// entry below and `aStoredCardOptionsReachesARenderedRow`, which is the
+/// behavioural test this guard's own doc comment says a named-reader string
+/// alone can never be.
 @Test func everyPreferenceFieldHasANamedProductionReader() {
     let readers: [String: String] = [
         "soundEnabled": "NotchController.init → IslandModel.muted; SoundSettings(_:) → SoundPlayer",
@@ -167,9 +223,8 @@ private func fixtureMetrics() -> ScreenMetrics {
         "followsSystemReduceMotion": "NotchController.init → MotionPreference.current(followsSystem:) → .effective",
         "rightFlank": "NotchController.init → IslandModel.rightFlank",
         "coat": "NotchController.init → IslandModel.coat (IslandView already reads model.coat into ResolvedCat)",
-        "cardOptions": "NOT YET WIRED — Plan 6.6's Task 4 re-threads SessionListFace's `options` " +
-                        "parameter from this field; SessionRow.Options has no consumer of a stored " +
-                        "preference until then",
+        "cardOptions": "NotchController.init → IslandModel.cardOptions (SessionRow.Options(_:)) → " +
+                        "IslandView's DrawerView(options:) → SessionListFace → SessionRow — Plan 6.6's Task 4",
     ]
 
     let fields = Mirror(reflecting: Preferences()).children.map { $0.label ?? "?" }

@@ -96,3 +96,104 @@ import VibeCatCore
     model.setFollowsSystem(false)
     #expect(built?.effective == .full, "following is off, so the user's choice must stand")
 }
+
+// MARK: - The session card's eight switches
+
+/// **One case per switch would be eight near-identical tests; one case with
+/// eight independent models is the same coverage without the copy-paste this
+/// task's own brief warns about** — the identical shape
+/// `NotificationsPaneTests.eachAlertSwitchWritesItsOwnFieldAndNoNeighbours`
+/// already uses for `AlertPolicy`'s four `Bool`s.
+///
+/// Each block flips *one* switch away from `SessionCardOptions()`'s all-true
+/// default and asserts the **whole** struct against the expected value — so a
+/// setter pointed at a neighbour's field fails here twice: once for the field
+/// that should have changed and didn't, once for the field that shouldn't have
+/// and did. A test that only ever set every switch to the same value (all
+/// `false`, say) could not tell that apart — flipping *all eight* leaves every
+/// field `false` regardless of which setter wrote to which key, which is
+/// exactly the "nine booleans that are all false cannot detect a crossed key"
+/// trap this plan's own self-review names for Task 1's persistence test.
+///
+/// Mutation-verified, one at a time: pointing each setter below at a
+/// neighbour's `SessionCardOptions` field (`setShowProject` writing
+/// `$0.cardOptions.worktree`, and so on) makes exactly two of the eight blocks
+/// fail — the one whose own field stayed `true` and the one whose neighbour
+/// silently moved. Confirmed for all eight; reverted after. See the task
+/// report for the table.
+@Test @MainActor func eachSessionCardSwitchWritesItsOwnFieldAndNoNeighbours() {
+    let projectStore = InMemoryPreferenceStore()
+    DisplayPaneModel(store: projectStore).setShowProject(false)
+    #expect(projectStore.load().cardOptions == SessionCardOptions(project: false))
+
+    let worktreeStore = InMemoryPreferenceStore()
+    DisplayPaneModel(store: worktreeStore).setShowWorktree(false)
+    #expect(worktreeStore.load().cardOptions == SessionCardOptions(worktree: false))
+
+    let modelStore = InMemoryPreferenceStore()
+    DisplayPaneModel(store: modelStore).setShowModel(false)
+    #expect(modelStore.load().cardOptions == SessionCardOptions(model: false))
+
+    let effortStore = InMemoryPreferenceStore()
+    DisplayPaneModel(store: effortStore).setShowEffort(false)
+    #expect(effortStore.load().cardOptions == SessionCardOptions(effort: false))
+
+    let lastMessageStore = InMemoryPreferenceStore()
+    DisplayPaneModel(store: lastMessageStore).setShowLastMessage(false)
+    #expect(lastMessageStore.load().cardOptions == SessionCardOptions(lastMessage: false))
+
+    let tasksStore = InMemoryPreferenceStore()
+    DisplayPaneModel(store: tasksStore).setShowTasks(false)
+    #expect(tasksStore.load().cardOptions == SessionCardOptions(tasks: false))
+
+    let subagentsStore = InMemoryPreferenceStore()
+    DisplayPaneModel(store: subagentsStore).setShowSubagents(false)
+    #expect(subagentsStore.load().cardOptions == SessionCardOptions(subagents: false))
+
+    let activityStore = InMemoryPreferenceStore()
+    DisplayPaneModel(store: activityStore).setShowActivity(false)
+    #expect(activityStore.load().cardOptions == SessionCardOptions(activity: false))
+}
+
+/// The clobber hazard, same shape as `theFollowSwitchPersistsIndependentlyOf
+/// TheLevel` above: `save()` writes the whole `Preferences`, so each of these
+/// eight writers has to `load()` fresh rather than hold a snapshot, or the
+/// second switch flipped would silently revert the first.
+@Test @MainActor func flippingOneSessionCardSwitchLeavesTheOthersAloneInTheStore() {
+    let store = InMemoryPreferenceStore()
+    let model = DisplayPaneModel(store: store)
+
+    model.setShowWorktree(false)
+    model.setShowTasks(false)
+    model.setShowSubagents(false)
+
+    #expect(store.load().cardOptions
+            == SessionCardOptions(tasks: false, subagents: false, worktree: false),
+            "flipping three switches in sequence did not leave exactly those three fields changed — an earlier write was clobbered")
+}
+
+/// The model opens on whatever was stored, not on `SessionCardOptions()`'s own
+/// default — the same claim `theModelOpensOnWhateverWasStored` makes for the
+/// Motion group, checked here for the session card's own state.
+@Test @MainActor func theSessionCardModelOpensOnWhateverWasStored() {
+    let store = InMemoryPreferenceStore(
+        Preferences(cardOptions: SessionCardOptions(lastMessage: false, subagents: false)))
+    let model = DisplayPaneModel(store: store)
+    #expect(model.showLastMessageBinding.wrappedValue == false)
+    #expect(model.showSubagentsBinding.wrappedValue == false)
+    #expect(model.showProjectBinding.wrappedValue == true)
+}
+
+/// `SettingsWindowModel.pageBinding`'s recorded defect, checked here for the
+/// session card group: a `Binding` built from `@Bindable`'s straight-to-storage
+/// form updates the view and persists nothing. The eight setters above could
+/// all be correct while every switch on this row wrote to a dead end.
+@Test @MainActor func aSessionCardWriteGoesThroughTheBindingAndNotOnlyTheSetter() {
+    let store = InMemoryPreferenceStore()
+    let model = DisplayPaneModel(store: store)
+
+    model.showActivityBinding.wrappedValue = false
+    model.showProjectBinding.wrappedValue = false
+
+    #expect(store.load().cardOptions == SessionCardOptions(activity: false, project: false))
+}

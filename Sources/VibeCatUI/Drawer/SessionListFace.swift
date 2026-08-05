@@ -17,8 +17,19 @@ import VibeCatCore
 ///   to re-thread one parameter through here when it wires Settings up; that is
 ///   a deliberate one-line cost, recorded in plans/README.md, rather than a
 ///   parameter kept alive on the strength of a caller that does not exist.
+///
+/// **Re-threaded, Plan 6.6's Task 4.** `DrawerView` now forwards its own
+/// `options` here, which `IslandView` sets from `IslandModel.cardOptions` —
+/// itself read at launch from `Preferences.cardOptions` via
+/// `SessionRow.Options.init(_:)`. `aStoredCardOptionsReachesARenderedRow`
+/// (`LaunchWiringTests`) drives that whole path end to end and checks a
+/// rendered pixel, not just that the property changed.
 struct SessionListFace: View {
     let sessions: [Session]
+    /// Forwarded straight to every `SessionRow`. Defaulted to `.all` so the
+    /// existing call sites in this file's own tests, none of which cares about
+    /// a non-default switch set, keep compiling unchanged.
+    var options: SessionRow.Options = .all
 
     /// A running row's state field is an elapsed time, not a word (the mockup's
     /// `SESSIONS` gives one `state:'2m 14s'`), so the list needs a clock.
@@ -117,7 +128,7 @@ struct SessionListFace: View {
             // at once.
             VStack(alignment: .leading, spacing: 1) {
                 ForEach(sessions) { session in
-                    SessionRow(session: session, now: now)
+                    SessionRow(session: session, now: now, options: options)
                 }
             }
             .padding(.top, 2)

@@ -18,6 +18,11 @@ struct DrawerView: View {
     /// of which pass a real `question` and never touch this) keeps compiling
     /// unchanged.
     var sessions: [Session] = []
+    /// Forwarded straight to `SessionListFace`. Plan 6.6's Task 4 re-thread —
+    /// see that view's own doc comment. Defaulted to `.all` for the same
+    /// reason `sessions` is: every existing call site keeps compiling and
+    /// rendering exactly as it always has.
+    var options: SessionRow.Options = .all
     let accent: RGBA
     let width: CGFloat
     /// The bottom corner radius, `IslandGeometry.openBottomRadius` (20) in
@@ -135,7 +140,7 @@ struct DrawerView: View {
                             QuestionFace(question: question, accent: accentColor, onAnswer: onAnswer)
                                 .transition(.faceCrossfade)
                         } else {
-                            SessionListFace(sessions: sessions)
+                            SessionListFace(sessions: sessions, options: options)
                                 .transition(.faceCrossfade)
                         }
                     }

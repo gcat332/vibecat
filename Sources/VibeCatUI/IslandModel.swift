@@ -23,6 +23,25 @@ import VibeCatCore
     /// what the island draws on the next launch. There is still no UI —
     /// `LaunchWiringTests` is what keeps that read from quietly disappearing.
     public var rightFlank: RightFlank = .sessionCount
+    /// §11's nine session-card switches, as the render-time `OptionSet` the
+    /// drawer actually reads. Defaults to `.all`, mirroring `SessionRow
+    /// .Options`'s own default, so every existing call site (none of which
+    /// passes this) keeps drawing exactly as it always has.
+    ///
+    /// Since Plan 6.6's Task 4, the **launch** value comes off disk the same
+    /// way `rightFlank` and `coat` do: `NotchController.init` assigns
+    /// `SessionRow.Options(preferences.load().cardOptions)` here — see that
+    /// initialiser's own doc comment for why the conversion has to happen on
+    /// this side of the `VibeCatCore`/`VibeCatUI` seam.
+    ///
+    /// Not `public`, unlike its neighbours above: `SessionRow.Options` is
+    /// itself `internal` (Plan 5 kept it that way deliberately), so a `public`
+    /// property of that type does not compile — "property cannot be declared
+    /// public because its type uses an internal type", caught by the build
+    /// rather than assumed. Every reader (`NotchController`, `IslandView`) and
+    /// every test that touches this are in-module or `@testable import`, so
+    /// nothing outside `VibeCatUI` has a reason to reach this field anyway.
+    var cardOptions: SessionRow.Options = .all
     public var geometry: IslandGeometry
     public var aura = AuraTrigger()
     public var coat: Coat

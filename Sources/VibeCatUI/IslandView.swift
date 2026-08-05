@@ -179,6 +179,7 @@ public struct IslandView: View {
                 // own doc comment for why the drawer's width holds steady
                 // regardless of where the cursor drifts while it is open.
                 DrawerView(question: model.question, sessions: model.sessions,
+                           options: model.cardOptions,
                            accent: model.state.accent, width: model.drawerWidth,
                            // The same 20pt the drawer half of `IslandBody`'s
                            // silhouette draws, from the same
