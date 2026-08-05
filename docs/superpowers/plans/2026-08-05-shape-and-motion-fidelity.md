@@ -71,10 +71,15 @@ session list's line 2 truncating to `As…`. Its ink saturates at 420pt; it is g
   three right-flank values and it held. Do not lose it.
 - **The notch is a hole (§5.1).** The black shape may span the cutout; **content may
   not.** Widening the drawer must not put anything inside the cutout.
-- **A divergence from the prototype is either a fix or a written decision.** The
-  `15pt` bottom radius against the prototype's `9px` is the model case: it matches
-  measured hardware and the reason is written down. **This plan changes the *open*
-  radius to the prototype's `20px`; do not touch the collapsed one.**
+- **A divergence from the prototype is either a fix or a written decision.**
+  **Corrected 2026-08-05 by Task 6:** an earlier draft of this line called our `15pt`
+  bottom radius a written divergence from "the prototype's `9px`". There is no
+  divergence — `island-motion.html:83` is `border-radius: 0 0 15px 15px`, the same 15
+  we use, and the `9px` is `--fillet` (line 31), the concave weld at the bezel. Plan
+  4.5's register entry had already withdrawn that claim on 2026-08-03; this plan
+  repeated it anyway, which is how it reached two more documents.
+  **This plan changes the *open* radius to the prototype's `20px` and leaves the
+  collapsed one alone.**
 - **A test that cannot fail is not a test.** Across six plans: 6.4 shipped seven,
   6.5 caught three in its own new tests, 6.1's Task 3 found one that could not fail
   against the wiring beside it. **Name the production change that would break each
@@ -298,9 +303,10 @@ Two smaller prototype behaviours, both currently absent:
 
 1. **The bottom radius morphs `15pt → 20pt` when open** — prototype lines 162 and
    164, `border-radius: 0 0 20px 20px`, transitioned over `440ms` on **`--ease`**,
-   not on the spring (line 86). Ours is fixed at 15. **Keep 15 collapsed** — that
-   value matches measured hardware and its divergence from the prototype's 9px is a
-   written decision that must not be "corrected".
+   not on the spring (line 86). Ours is fixed at 15. **Keep 15 collapsed** — and note
+   that this is *agreement* with the prototype rather than a divergence from it:
+   `island-motion.html:83` is `border-radius: 0 0 15px 15px`. The `9px` this plan
+   twice attributed to the bottom radius is `--fillet`, the bezel weld.
 2. **The drawer's height runs `440ms + 30ms = 470ms`** (line 132,
    `calc(var(--t-shape) + 30ms)`), so the height deliberately trails the width by
    30ms. Ours shares one response. That lag is what makes the shape read as the

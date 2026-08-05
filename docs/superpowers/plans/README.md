@@ -15,7 +15,7 @@ plan files twice; it is cheaper to keep it written down.
 | 6.2 | Sound — five synthesised cues, the trigger rule, Do Not Disturb | §12 | **done** — [the plan](2026-08-03-sound.md), 7 tasks plus a whole-branch review and one fix round; 509 tests. Five written decisions, and four things still needing an ear (see the plan's own closing section) |
 | 6.4 | The Settings **shell** — persisted preferences, the drawer footer's mute and gear, the window the gear opens, its sidebar and the four panes' chrome · **mute wired end to end** | §14's layout, §6.4's footer | **done** — [the plan](2026-08-03-settings-shell.md), 6 tasks plus a whole-branch review and one fix round; 574 tests. **The first plan in this project's history to actually diff `settings.html`** |
 | 6.5 | The Notifications page — the four alert switches, the Sound section that gives Plan 6.2's engine its sheet, stall detection, and the system-notification fallback | §14's Notifications | **done** — [the plan](2026-08-04-notifications-page.md), 7 tasks; 647 tests. The browser diff found the page did not fit its own window |
-| **6.3** | The island's shape and its motion — a per-face width, opening that widens instead of narrowing, the prototype's own curves, and the list's overflow cue | §5–§6, §9.1 | **written** — [the plan](2026-08-05-shape-and-motion-fidelity.md), 6 tasks |
+| 6.3 | The island's shape and its motion — a per-face width, opening that widens instead of narrowing, the prototype's own curves, the bezel fillets, and the list's overflow cue | §5–§6, §9.1 | **done** — [the plan](2026-08-05-shape-and-motion-fidelity.md), 6 tasks; 744 tests. Found that the drawer had no width of its own and that opening the island made it narrower |
 | **6.6** | The Display page — 21 controls, and the one that re-threads `SessionRow.Options`, picks the list's overflow cue, settles §6.3's per-face width and ships the motion control | §14's Display, §9.3's UI | not written |
 | **6.7** | The General and Integrations pages | §14 | not written |
 | 6.1 | Keyboard answering, `Other…`, the three motion defects a motion switch exposes, the duplicate tier, and §6.2's choosable right flank | §10.1, §9.3, §6.2 | **done** — [the plan](2026-08-04-keyboard-and-switches.md), 6 tasks; 686 tests. Keyboard answering verified on hardware with a TextEdit witness, including all three key releases |
@@ -751,6 +751,67 @@ skipped.
   `getrusage`.
 - **`Soft`, `System`, `Blip` and `Buzz` still do not exist** and the pickers
   deliberately do not offer them. Plan 6.2's written decision 3, unchanged.
+
+## Plan 6.3's carried findings — shape and motion
+
+744 tests. Full account in the plan and
+`.superpowers/sdd/2026-08-05-shape-and-motion-fidelity/`.
+
+- **The drawer had no width of its own, and opening the island made it narrower.**
+  `frames(rightFlank:tier:)` let `tier` touch only the height, so the open width was a
+  function of how many digits were in the session tally: measured 273.1 / 273.1 /
+  281.2pt at 1, 3 and 12 sessions against the prototype's flat 560. And because a
+  click always happens while hovering, opening threw away the 150pt hover reveal —
+  measured 423 painted columns hovered-and-closed against 273 hovered-and-open. It
+  contracted by 150 where the mockup expands by 287. **That was the owner's whole
+  complaint, and it also silently caused the recorded `As…` truncation**, because the
+  row's ink saturates at 420pt and it was given 273.
+- **`--ease` was used 35 times in the prototype and zero times in our code**, with
+  four sites on `.easeOut`/`.easeInOut` instead — five, once `settings.html`'s
+  identical token was counted. It is now one constant beside the two springs, and the
+  38.1%-at-75ms hover gap turned out to *be* that curve: `.easeOut` differs from
+  `cubic-bezier(.22,.9,.28,1)` by 0.3814 at p=0.273, which at 280ms is 76ms.
+- **Hover had no overshoot at all**, so §9.1's central rule was not merely mismatched
+  on that gesture, it was absent. Hover is now three clocks — shape on the width
+  spring, the reveal's width on `--ease`/280ms, its opacity on `--ease`/160ms, the
+  last two measured at 0.0% from the prototype — and the shape reaches 108.4% against
+  the prototype's 108.0%. §9.1's *wiring* is now guarded too, by four separate
+  read-count facts rather than two, which catches a swap-both-sites mutation a single
+  counter could not.
+- **Two sites deliberately keep `.easeInOut`, with numbers.** CSS eases each keyframe
+  interval forwards while `autoreverses: true` mirrors the return leg, and `--ease` is
+  front-loaded enough that mirrored it is nearly anti-phase — worst full-cycle
+  deviation 0.638 against 0.903. Using `--ease` there would be **worse**.
+- **The bezel fillets are back, at the prototype's `9pt`**, on the owner's report from
+  real hardware. Both welds are drawn (the prototype's dormant suppression exists
+  because its right flank can be 0 and ours is floored at 15), and symmetry is pinned
+  row by row at scale 4 with each side *also* pinned separately, because a symmetric
+  absence is still symmetric. **9, not the 15/20 the owner asked for literally:** the
+  flush edge between weld and bottom corner measures 11.75 / 5.75 / **0.75**pt at
+  9 / 15 / 20, so at 20 the island has no straight side left and each end is one
+  continuous S — which is the hook the 2026-08-01 removal reacted to.
+- **The 440ms radius transit is not delivered, and the endpoints are.** Plan 5's
+  two-shape split means the bottom corner changes *owner* on open, and SwiftUI does
+  not interpolate an inserted view's `animatableData`; the height clamp makes keeping
+  the drawer half at zero height no help either. Ruled not worth re-unifying, since
+  that moves `.contentShape`'s tappable rect and the aura's traced alpha.
+- **The sheared fold got a 24pt bottom fade, and row snapping was ruled out on
+  measurement**: rows are non-uniform, so snapping aligns one fold and shears the
+  next. Confirmed the prototype has no cue at all, and that at one session its list
+  box shrinks to 65px and leaves the face empty — so our fixed 420pt with empty space
+  is right.
+- **Six more browser-diff differences, all open.** Collapsed flank order is
+  `[detail][tally]` not `[count][reveal]`; the prototype shows one number **per state
+  in per-state hues**, which §6.2 contradicts (Plan 6.6's to settle); `.flank` has an
+  80ms-delayed 150ms opacity fade we lack; `.face`'s 190ms crossfade covers the
+  *flank* faces where ours covers only the drawer's; drawer padding 18 against our 16;
+  the top inset is ~6pt off; and `.ask-q` is weight 400 against our semibold.
+- **Deferred on the owner's instruction: the `getrusage` re-measurement.** Dormant
+  cost is *expected* unchanged, not measured. Plan 6.1 measured motion `off` at 0.38%
+  of a core against `full`'s ~12%, and a wider, more animated island could undo that —
+  **so this is an open number, not a closed one.**
+- **One guarded-presence-only cue:** `SessionListFace.foldFade` can be changed 24 → 40
+  with all 744 tests still passing. The fade's existence is pinned; its depth is not.
 
 ## Plan 6.1's carried findings — keyboard and the switches
 
