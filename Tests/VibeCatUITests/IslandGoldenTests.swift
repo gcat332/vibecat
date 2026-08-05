@@ -100,6 +100,38 @@ struct IslandGoldenTests {
         return count
     }
 
+    /// Pixels near `colour` in the columns strictly right of the cutout and the
+    /// rows of the collapsed bar — `sessionCountPixels` generalised to any tone,
+    /// added by Plan 6.3 Task 6 so the open island's `--bone` label can be measured
+    /// in exactly the same window its accent mark is.
+    ///
+    /// `sessionCountPixels` stays as its own function rather than becoming a call
+    /// to this one: its doc comment is a record of *why* that window is the right
+    /// one for §5.4's count specifically (the cat and badge are accent too and sit
+    /// left of the cutout), and that reasoning is about the count, not about the
+    /// window.
+    @MainActor
+    static func rightOfCutoutPixels(_ raster: Raster, _ m: IslandModel, near colour: RGBA,
+                                    tolerance: Int = 6) -> Int {
+        let target = (Int((colour.r * 255).rounded()),
+                      Int((colour.g * 255).rounded()),
+                      Int((colour.b * 255).rounded()))
+        let notch = IslandGeometry(screen: mbp14).notch
+        let from = Int(notch.maxX - m.frames.panel.minX)
+        let bottom = min(raster.height, Int(notch.height.rounded(.up)))
+        var count = 0
+        for x in from..<raster.width {
+            for y in 0..<bottom {
+                let p = raster[x, y]
+                guard !p.isTransparent else { continue }
+                if abs(Int(p.r) - target.0) <= tolerance,
+                   abs(Int(p.g) - target.1) <= tolerance,
+                   abs(Int(p.b) - target.2) <= tolerance { count += 1 }
+            }
+        }
+        return count
+    }
+
     @MainActor
     static func silhouette(_ m: IslandModel, scale: CGFloat = 1) throws -> (first: Int, last: Int, count: Int) {
         let raster = try rasterise(IslandBody(model: m, now: Date(timeIntervalSince1970: 1_000_000)),
@@ -339,8 +371,16 @@ struct IslandGoldenTests {
                 "hovered — the gesture that actually happens: opening took the painted island from \(hoverClosed)pt to \(hoverOpen)pt. This is the reported defect: 423 → 273.")
         #expect(restOpen == hoverOpen,
                 "the open island painted \(hoverOpen)pt hovered against \(restOpen)pt not — the open width still depends on hover")
-        #expect(restOpen == Int(DrawerFace.sessionList.width),
-                "the open island painted \(restOpen)pt, not the face's own \(Int(DrawerFace.sessionList.width))pt")
+        // **Plus the two welds, since Plan 6.3 Task 6.** `IslandGeometry
+        // .filletRadius` of ink hangs off each top corner *outside* the body's own
+        // rect (`island-motion.html:94–100`), so the painted extent of the island
+        // is no longer the body's width — it is the body plus one weld per end.
+        // Written as the sum rather than retuned to 578: the claim is still "the
+        // open island is the face's own 560", and the weld is a named, derived
+        // addition to it rather than a number that happens to match.
+        let welded = Int(DrawerFace.sessionList.width + 2 * IslandGeometry.filletRadius)
+        #expect(restOpen == welded,
+                "the open island painted \(restOpen)pt, not the face's own \(Int(DrawerFace.sessionList.width))pt plus a \(Int(IslandGeometry.filletRadius))pt weld at each end (\(welded)pt)")
     }
 
     /// The other half of Task 2's rule at the pixel level: with a drawer open,
@@ -671,18 +711,38 @@ struct IslandGoldenTests {
     ///
     /// §5.4's session count is the thing that broke, because it was the only
     /// flexible child of the overrunning `HStack` and SwiftUI squeezes those
-    /// first. The assertion is equality against the same count with the drawer
-    /// *closed and not hovering* — the plainest state there is, and the one
-    /// §6.1's progressive tiers say an open drawer must agree with, since by
-    /// then the reveal has done its job and been dropped. Equality, not `> 0`:
-    /// a partially squeezed digit is still some accent pixels, and the observed
-    /// failure was a "3" rendering as a clipped "p".
+    /// first. Equality, not `> 0`: a partially squeezed digit is still some accent
+    /// pixels, and the observed failure was a "3" rendering as a clipped "p".
     ///
     /// Mutation-verified against the pre-fix behaviour — reverting
     /// `content(cell:)` to `model.hovering ? CollapsedLayout.hoverReveal : 0`
     /// gives open+hover **0** accent pixels right of the cutout against 13 for
     /// all three healthy states, and this test fails with that message.
-    @MainActor @Test func theSessionCountSurvivesAnOpenDrawerWhileHovering() throws {
+    ///
+    /// ## Restructured 2026-08-05, Plan 6.3 Task 6, and renamed with it
+    ///
+    /// This was `theSessionCountSurvivesAnOpenDrawerWhileHovering`, and it compared
+    /// all four states against **one** baseline: the count at rest. That premise is
+    /// gone, deliberately. `island-motion.html:474–476` gives an open island a
+    /// *label* in its right flank — "Claude Code", "4 sessions" — where a collapsed
+    /// one has §5.4's count, so the open renders no longer contain a count to
+    /// compare and the old assertion failed by design rather than by regression.
+    ///
+    /// **What it was actually protecting is untouched, and it is not the count.** It
+    /// is "nothing in the right flank gets squeezed by something laid out wider than
+    /// the frame it sits in", and the squeeze is caused by *hover*. So the
+    /// comparison is now within each tier — closed hovered against closed at rest,
+    /// open hovered against open at rest — which is a strictly narrower pairing than
+    /// before and still fails to the original F1 mutation, because that mutation's
+    /// symptom (0 pixels at open+hover) shows up against the open baseline exactly
+    /// as it did against the closed one.
+    ///
+    /// The open tier gets **two** witnesses rather than one, because its flank has
+    /// two parts and they are squeezed differently: the mark is a fixed-size
+    /// `CLIMarkView` (accent) and the label is the flexible `Text` (`--bone`), and
+    /// it is flexible children SwiftUI compresses first. A single accent count would
+    /// have watched the one part that cannot be squeezed.
+    @MainActor @Test func theRightFlanksContentIsNeverSqueezedByTheHoverReveal() throws {
         let event = VibeEvent(id: "q", cli: "claude-code", kind: .permission,
                               session: "s", cwd: "/tmp/proj", title: "Bash command", body: "pnpm install",
                               choices: [Choice(id: "allow", label: "Allow once"),
@@ -692,7 +752,12 @@ struct IslandGoldenTests {
         /// `revealed` populated in every case, drawer or not: an empty
         /// `RevealContent` lays out at zero width whatever the frame says, so
         /// leaving it nil would hide the very overrun this measures.
-        func count(hovering: Bool, open: Bool) throws -> Int {
+        ///
+        /// Two numbers: accent ink right of the cutout (the count when collapsed,
+        /// the mark when open) and `--bone` ink in the same columns (nothing when
+        /// collapsed — the reveal is `--bone` but it is correctly gated off; the
+        /// label when open).
+        @MainActor func ink(hovering: Bool, open: Bool) throws -> (accent: Int, bone: Int) {
             let m = Self.model(.waiting, count: 3, hovering: hovering)
             m.revealed = Session(event: VibeEvent(id: "e", cli: "claude-code", kind: .running,
                                                   session: "s2", cwd: "/Users/dev/api"),
@@ -702,27 +767,158 @@ struct IslandGoldenTests {
                 m.drawerOpen = true
                 guard case .drawer = m.tier else {
                     Issue.record("the fixture never reached the drawer tier — this test proves nothing")
-                    return -1
+                    return (-1, -1)
                 }
             }
             // A `.sessionCount` right flank is a precondition, not an
             // assumption: with `.nothing` or `.agentIcon` there is no count to
-            // squeeze and every comparison below is 0 == 0.
+            // squeeze and every collapsed comparison below is 0 == 0.
             guard case .sessionCount = m.layout.right else {
                 Issue.record("count=3 did not produce a session-count right flank — there is nothing for this test to measure")
-                return -1
+                return (-1, -1)
             }
             let raster = try rasterise(IslandBody(model: m, now: Date(timeIntervalSince1970: 1_000_030)))
-            return Self.sessionCountPixels(raster, m)
+            return (Self.sessionCountPixels(raster, m),
+                    Self.rightOfCutoutPixels(raster, m, near: boneColour))
         }
 
-        let plain = try count(hovering: false, open: false)
-        #expect(plain > 0,
-                "the session count painted no accent pixel right of the cutout even at rest — the baseline this test compares against is vacuous")
+        let closed = try ink(hovering: false, open: false)
+        #expect(closed.accent > 0,
+                "the session count painted no accent pixel right of the cutout even at rest — the collapsed baseline is vacuous")
+        #expect(try ink(hovering: true, open: false).accent == closed.accent,
+                "closed + hovered: §5.4's session count painted a different number of accent pixels than at rest — it is being squeezed by the reveal laid out wider than its own frame")
 
-        for (hovering, open) in [(true, false), (false, true), (true, true)] {
-            #expect(try count(hovering: hovering, open: open) == plain,
-                    "hover \(hovering) · drawer \(open ? "open" : "closed"): §5.4's session count painted a different number of accent pixels than at rest — the collapsed bar's content is being squeezed by something laid out wider than its own frame")
+        let openRest = try ink(hovering: false, open: true)
+        #expect(openRest.accent > 0,
+                "the open island painted no accent pixel right of the cutout — the mark of island-motion.html:474 never drew, so the open baseline is vacuous")
+        #expect(openRest.bone > 0,
+                "the open island painted no --bone pixel right of the cutout — the label of island-motion.html:474 never drew, and the label is the squeezable half")
+        let openHover = try ink(hovering: true, open: true)
+        #expect(openHover.accent == openRest.accent,
+                "open + hovered: the flank's mark painted \(openHover.accent) accent pixels against \(openRest.accent) unhovered — the open flank is being squeezed by the reveal")
+        #expect(openHover.bone == openRest.bone,
+                "open + hovered: the flank's label painted \(openHover.bone) --bone pixels against \(openRest.bone) unhovered — the label is the flexible child and it is the one that gets compressed first")
+    }
+    // MARK: - The closing artefact (Plan 6.3 Task 6)
+
+    /// **The five states the browser diff compares against, as real pixels.**
+    ///
+    ///     VIBECAT_ISLAND_STRIP=/tmp/island.png VIBECAT_GIF=/tmp/island.gif \
+    ///         swift test --no-parallel --filter islandTierStrip
+    ///
+    /// A filmstrip of `IslandView` itself — not `IslandShape`, not a stand-in —
+    /// through §6.1's three tiers plus the two hover variants, each rendered at the
+    /// state a person actually meets it in.
+    ///
+    /// **The GIF is state cuts, not motion, and saying so is the point.** This suite
+    /// cannot sample intermediate frames of a live SwiftUI animation (the limit
+    /// `theRadiusIsTheShapesAnimatableData` and `IslandBody.body`'s radius note both
+    /// record), so anything here that looked like motion would be a hand-driven
+    /// reconstruction pretending to be a render. The reconstruction exists and is
+    /// honest about being one: `MotionFidelityProbe.morphStrip` and `.hoverGIF`
+    /// drive the production springs over `IslandShape` directly.
+    ///
+    /// Asserts only that the frames differ from one another — a strip of five
+    /// identical pictures is a broken fixture, and that has happened in this suite
+    /// (see `rasterise`'s note on `ImageRenderer`'s recycled backing store).
+    @MainActor
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["VIBECAT_ISLAND_STRIP"] != nil
+                    || ProcessInfo.processInfo.environment["VIBECAT_GIF"] != nil))
+    func islandTierStrip() throws {
+        let tiers: [(String, IslandState, Int, Bool, Bool)] = [
+            ("rest · dormant", .dormant, 0, false, false),
+            ("hover · dormant", .dormant, 0, true, false),
+            ("rest · 3 waiting", .waiting, 3, false, false),
+            ("hover · 3 waiting", .waiting, 3, true, false),
+            ("open · session list", .waiting, 3, true, true),
+        ]
+        var frames: [Raster] = []
+        for (name, state, count, hovering, open) in tiers {
+            let m = Self.model(state, count: count, hovering: hovering)
+            // Near the wall clock, not the 1970 fixture the assertions use:
+            // `IslandView` builds its own `now` from `Date()`, so a 1970 session
+            // renders "20658d" in the reveal and the artefact stops looking like
+            // the product.
+            let now = Date()
+            m.revealed = Session(event: VibeEvent(id: "e", cli: "claude-code", kind: .running,
+                                                  session: "s", cwd: "/Users/dev/api"),
+                                 now: now.addingTimeInterval(-134))
+            m.sessions = (0..<4).map { i in
+                var e = VibeEvent(id: "s\(i)", cli: i == 3 ? "codex-cli" : "claude-code",
+                                  kind: i == 0 ? .permission : .running,
+                                  session: "s\(i)", cwd: "/Users/dev/project-\(i)")
+                e.model = "Opus 4.8"
+                e.title = "Asking to run"
+                e.body = "rm -rf build/"
+                return Session(event: e, now: now.addingTimeInterval(-Double(30 + i * 47)))
+            }
+            m.drawerOpen = open
+            if open {
+                guard case .drawer = m.tier else {
+                    Issue.record("\(name): never reached the drawer tier")
+                    return
+                }
+            }
+            // **`rasteriseHosted`, not `rasterise`, and that is the whole reason
+            // this tool is worth having.** The first version of this strip used
+            // `rasterise`, and its open-tier frame came out as an empty black panel
+            // with nothing but §6.4's footer in it — because `ImageRenderer` paints
+            // a `ScrollView`'s content fully transparent (`Raster.swift` has the
+            // repro) and §11's list is a `ScrollView`. So the one artefact meant to
+            // show a person the drawer showed them the drawer with its contents
+            // deleted. Every assertion in this file stays on `rasterise`; this
+            // preview goes through AppKit because it has to draw what is actually
+            // there.
+            let size = CGSize(width: m.panelFrames.panel.width,
+                              height: m.panelFrames.panel.height)
+            frames.append(try rasteriseHosted(IslandView(model: m), size: size))
+        }
+
+        // A strip has to be one raster, so every frame is padded to the tallest and
+        // widest before being laid side by side. The panel's own size changes with
+        // the tier, which is the whole reason this cannot be a plain HStack of views.
+        let w = frames.map(\.width).max()!, h = frames.map(\.height).max()!
+        let gutter = 16
+        let stripW = frames.count * w + (frames.count - 1) * gutter
+        var bytes = [UInt8](repeating: 0, count: stripW * h * 4)
+        for (i, f) in frames.enumerated() {
+            let dx = i * (w + gutter)
+            for y in 0..<f.height {
+                for x in 0..<f.width {
+                    let p = f[x, y]
+                    let o = (y * stripW + dx + x) * 4
+                    bytes[o] = p.r; bytes[o + 1] = p.g; bytes[o + 2] = p.b; bytes[o + 3] = p.a
+                }
+            }
+        }
+        let strip = Raster(width: stripW, height: h, bytes: bytes)
+
+        for i in 1..<frames.count {
+            #expect(frames[i].differingPixelCount(from: frames[i - 1]) > 0,
+                    "\(tiers[i].0) is pixel-identical to \(tiers[i - 1].0) — the fixture is not reaching the tier it names")
+        }
+
+        if let path = ProcessInfo.processInfo.environment["VIBECAT_ISLAND_STRIP"] {
+            print("  island filmstrip -> \(path)  \(strip.width)x\(strip.height)  [\(tiers.map(\.0).joined(separator: " | "))]")
+            #expect(strip.writePNG(to: path), "could not write \(path)")
+        }
+        if let path = ProcessInfo.processInfo.environment["VIBECAT_GIF"] {
+            // Every GIF frame has to be the same size, so each is padded to the
+            // largest — which is the open tier's panel.
+            let padded = frames.map { f -> Raster in
+                var b = [UInt8](repeating: 0, count: w * h * 4)
+                for y in 0..<f.height {
+                    for x in 0..<f.width {
+                        let p = f[x, y]
+                        let o = (y * w + x) * 4
+                        b[o] = p.r; b[o + 1] = p.g; b[o + 2] = p.b; b[o + 3] = p.a
+                    }
+                }
+                return Raster(width: w, height: h, bytes: b)
+            }
+            print("  island tier gif -> \(path)  \(w)x\(h)  (state cuts, not motion — see this test's doc comment)")
+            #expect(writeAnimatedGIF(padded, secondsPerFrame: 0.9, to: path),
+                    "could not write \(path)")
         }
     }
 }

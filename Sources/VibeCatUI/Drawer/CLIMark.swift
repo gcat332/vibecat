@@ -121,6 +121,37 @@ enum CLIMark: String, CaseIterable, Sendable {
     }
 }
 
+extension CLIMark {
+    /// **The CLI's own name in words**, for the open island's right flank —
+    /// `island-motion.html:474–476` puts a `.label` reading `Claude Code` beside the
+    /// mark on the `ask` and `askmulti` faces.
+    ///
+    /// **The authority on this string is `SourceAdapter.displayName`, and this is
+    /// not it.** `ClaudeCodeAdapter.displayName` is already "Claude Code", and §3's
+    /// rule is that a source is config: new CLI support fills the registry, it does
+    /// not add a branch. But the registry lives entirely on the *hook* side — the
+    /// app receives already-parsed `VibeEvent`s over the socket and holds no
+    /// adapters at all (`SourceRegistry(adapters:)` appears once in `Sources/`, in
+    /// `VibeCatHook/main.swift`) — so there is nothing here to ask.
+    ///
+    /// So this is a stand-in with two deliberate properties: it is keyed off
+    /// `CLIMark(cli:)`, which is already the UI's own cli→identity mapping and
+    /// already substring-matches versioned names, so a name and a mark can never
+    /// disagree about who a session belongs to; and `generic` **falls through to the
+    /// wire value itself** rather than inventing a word, so an unknown CLI shows
+    /// what it actually called itself. When the app side gains a registry — Plan
+    /// 6.6's Settings needs one to list sources — this becomes a one-line forward to
+    /// `displayName` and the three literals go away.
+    static func displayName(cli: String) -> String {
+        switch CLIMark(cli: cli) {
+        case .claude:  "Claude Code"
+        case .codex:   "Codex"
+        case .gemini:  "Gemini"
+        case .generic: cli
+        }
+    }
+}
+
 /// One mark, at the prototype's own `.mark{width:16px;height:16px}`.
 ///
 /// **Shape says who, hue says what state, both on the same mark.** `SessionRow`

@@ -394,6 +394,36 @@ enum IslandMotion {
     /// for more, and it never drags a user who chose `off` back into motion. This
     /// function re-derives none of that.
     ///
+    /// ### Restated for hover specifically, 2026-08-05 (Task 6)
+    ///
+    /// **CSS has one reduced-motion bit where §9.3 has three levels, and that bit
+    /// maps to our `off`, not to our `reduced`.** So there is no third state in the
+    /// prototype for `reduced` to be copied from, and *some* answer had to be
+    /// chosen; the one above (identical to `full`) is that answer, and hover is the
+    /// surface where it is most visible, because hover is the one gesture a person
+    /// makes dozens of times a minute and it drives three of these six clocks
+    /// (`widthSpring` on the shape, `--ease`/280ms on the reveal's width,
+    /// `--ease`/160ms on its opacity).
+    ///
+    /// It is written here rather than left as a silence because the alternative is
+    /// defensible and was considered: shortening `reduced`'s durations, on the
+    /// reading that "less motion" should mean "less time in motion". It is rejected
+    /// for two reasons. **A shortened transition is a different design, not a
+    /// reduced one** — 160ms of fade inside a 280ms widen is an *ordering* the
+    /// prototype states deliberately (`hoverFadeDuration`), and scaling both by a
+    /// factor keeps the ordering while scaling one breaks it, so "shorten" is
+    /// really "retune", at a level nobody has designed. And **`reduced` is already
+    /// reduced elsewhere**: `MotionPreference.resolve(_:)` halves the frame rate of
+    /// every *loop* — the cat, the badge, the aura — so a person on `reduced`
+    /// already sees materially less movement per second, and taking the
+    /// interpolation off their gestures as well would be reducing twice for one
+    /// request. Someone who wants the transitions gone has `off`, which removes
+    /// them entirely and keeps every destination.
+    ///
+    /// `onlyMotionOffSuppressesATransitionAndReducedIsUnchanged` is the assertion,
+    /// and it names hover's three clocks by their own production animations rather
+    /// than a stand-in curve.
+    ///
     /// ## Why the argument is still evaluated when it is about to be thrown away
     ///
     /// `gated(IslandMotion.widthSpring, by: …)` reads `widthSpring` — and therefore

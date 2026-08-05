@@ -20,6 +20,13 @@ private let r = IslandGeometry.bottomRadius    // 15
 /// concave-fillet version got wrong: measured on hardware, its left edge
 /// climbed 599.5 → 605.0 over six rows while the right sat dead straight at
 /// 847.5, so the dormant island was visibly lopsided against the cutout.
+///
+/// **The fillets came back on 2026-08-05 and this test did not change, which is
+/// the point.** The 2026-08-01 spelling put the weld *inside* `rect` and moved the
+/// island's own edge to `rect.minX + fillet`, which is what that measurement is of;
+/// the prototype's puts it outside, so the edge stays flush and this still holds
+/// with `filletRadius:` set. See `IslandShape`'s doc comment and
+/// `IslandFilletTests`.
 @Test func bothSidesAreStraightAndReachTheBoxEdges() {
     let path = IslandShape().path(in: box)
     for y in stride(from: 0.5, through: 16.0, by: 1.5) {
@@ -58,7 +65,12 @@ private let r = IslandGeometry.bottomRadius    // 15
     }
 }
 
-/// Square where it meets the screen edge, because the real cutout is.
+/// Square where it meets the screen edge — of the *body*, which is what this
+/// shape's own rect is. Production adds a concave weld **outside** each of these
+/// two corners (`IslandShape.filletRadius`, restored 2026-08-05), and that changes
+/// nothing here: the weld is ink beyond `rect`, so the corner at `rect.minX`
+/// remains a right angle and both of the points below stay inside the path. The
+/// welds have their own suite.
 @Test func theTopCornersAreSquare() {
     let path = IslandShape().path(in: box)
     #expect(path.contains(CGPoint(x: 0.5, y: 0.5)))
@@ -282,11 +294,15 @@ private struct MeasurementFailure: Error, CustomStringConvertible {
 /// So the numbers are pinned here, once, against their reasons rather than against
 /// each other:
 ///
-/// - **15 is a hardware measurement.** The real cutout's corner spans about 14pt,
-///   and ours has to sit *over* it rather than beside it. That is why it is not the
-///   prototype's `9px`, why `minimumRightFlank` derives from it, and why it is a
-///   written decision that must survive a fidelity pass rather than be corrected by
-///   one.
+/// - **15 is a hardware measurement, and it is also the prototype's own number.**
+///   The real cutout's corner spans about 14pt and ours has to sit *over* it rather
+///   than beside it, which is why `minimumRightFlank` derives from it.
+///   **Corrected 2026-08-05, Plan 6.3 Task 6:** this used to read "that is why it is
+///   not the prototype's `9px`", and four documents said the same. Read in a
+///   browser, `island-motion.html:83` is `border-radius:0 0 15px 15px` and the
+///   dormant island computes `0px 0px 15px 15px`. There is no divergence here at
+///   all; the `9px` is `--fillet` (line 31), the *top* weld, and
+///   `IslandGeometry.filletRadius` is where it now lives.
 /// - **20 is the prototype's, verbatim** — `island-motion.html:162` and `:164`,
 ///   `border-radius: 0 0 20px 20px` on `ask`, `askmulti` and `list` alike. There is
 ///   no cutout beside a 288pt drawer, so nothing in the argument that produced 15
@@ -299,7 +315,7 @@ private struct MeasurementFailure: Error, CustomStringConvertible {
 /// decision about its corner.
 @Test func theOpenAndCollapsedRadiiAreTheTwoPrototypeValues() {
     #expect(IslandGeometry.bottomRadius == 15,
-            "the collapsed bottom radius is \(IslandGeometry.bottomRadius)pt. 15 matches the measured hardware corner (~14pt) so our curve covers the machine's; the prototype's own 9px is a recorded divergence and this is not the pass that corrects it")
+            "the collapsed bottom radius is \(IslandGeometry.bottomRadius)pt. island-motion.html:83 is `border-radius:0 0 15px 15px` and the measured hardware corner is ~14pt, so the design and the hardware agree on 15 — this is not a divergence in either direction")
     #expect(IslandGeometry.openBottomRadius == 20,
             "the open bottom radius is \(IslandGeometry.openBottomRadius)pt against island-motion.html:162/:164's 20px")
     #expect(IslandGeometry.openBottomRadius > IslandGeometry.bottomRadius,

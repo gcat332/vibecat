@@ -702,4 +702,25 @@ private func ease(_ x: Double) -> Double { cssBezier(0.22, 0.9, 0.28, 1, atX: x)
                     "gated disagrees with MotionPreference.allowsMotion at chosen=\(chosen) system=\(system) — §9.3's precedence is being re-derived rather than reused")
         }
     }
+
+    // **Hover's own three clocks, by their production animations rather than a
+    // stand-in curve** (Plan 6.3 Task 6). Everything above uses `.linear(duration:
+    // 1)`, which proves the *gate* and says nothing about which animations are
+    // behind it — and hover is the surface where "reduced behaves as full" is most
+    // visible, because it is the gesture a person makes dozens of times a minute.
+    // CSS has one reduced-motion bit and it maps to our `off`, so `reduced` had no
+    // prototype answer to copy and the decision is `IslandMotion.gated`'s to
+    // record; this is what fails if someone later shortens these three at
+    // `reduced` without changing that record.
+    let reduced = MotionPreference(chosen: .reduced, systemWantsReduced: false)
+    let full = MotionPreference(chosen: .full, systemWantsReduced: false)
+    let off = MotionPreference(chosen: .off, systemWantsReduced: false)
+    for (name, animation) in [("the shape's width spring", IslandMotion.widthSpring),
+                              ("the reveal's 280ms width", IslandMotion.ease(duration: IslandMotion.hoverRevealDuration)),
+                              ("the reveal's 160ms fade", IslandMotion.ease(duration: IslandMotion.hoverFadeDuration))] {
+        #expect(IslandMotion.gated(animation, by: reduced) == IslandMotion.gated(animation, by: full),
+                "\(name) is not the same animation at reduced as at full — §9.3 gives reduced no third behaviour for a transition, and IslandMotion.gated's own doc comment is where a change to that has to be argued")
+        #expect(IslandMotion.gated(animation, by: off) == nil,
+                "\(name) survived motion off")
+    }
 }

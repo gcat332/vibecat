@@ -648,7 +648,9 @@ struct IslandBody: View {
     /// render, accent pixels to the right of the cutout: 13 closed+hover, 13
     /// open+no-hover, **0** open+hover. Through `NSHostingView` the digit came
     /// out as a clipped "p". Both call sites reading this one property is the
-    /// fix; `theSessionCountSurvivesAnOpenDrawerWhileHovering` is the test.
+    /// fix; `theRightFlanksContentIsNeverSqueezedByTheHoverReveal` is the test (renamed
+    /// from `theSessionCountSurvivesAnOpenDrawerWhileHovering` by Task 6, which
+    /// replaced the count with a label while open — see that test).
     /// **Plan 6.3 Task 2: the predicate is now `model.tier.takesHoverReveal`,
     /// not `drawerBelowNotch > 0`.** The two give the same answer today — a body
     /// is taller than the notch exactly when `IslandTier.extraHeight` is
@@ -744,11 +746,19 @@ struct IslandBody: View {
             // just shifted. It would also unpin the left edge §5.3 exists to
             // keep fixed.
             VStack(alignment: .leading, spacing: 0) {
-                IslandShape(roundsBottom: drawerBelow == 0, bottomRadius: bottomRadius)
+                // `filletRadius:` on **this** half and on its clip, and on
+                // nothing else in the tree. Plan 6.3 Task 6: the top corners weld
+                // to the bezel over `IslandGeometry.filletRadius`
+                // (`island-motion.html:94–100`), and this is the only shape that
+                // touches the bezel. The clip has to carry the same number or it
+                // masks the welds straight back off — see `IslandShape.filletRadius`.
+                IslandShape(roundsBottom: drawerBelow == 0, bottomRadius: bottomRadius,
+                            filletRadius: IslandGeometry.filletRadius)
                     .fill(Color(islandGroundColour))
                     .overlay(alignment: .topLeading) { content(cell: cell) }
                     .clipShape(IslandShape(roundsBottom: drawerBelow == 0,
-                                           bottomRadius: bottomRadius))
+                                           bottomRadius: bottomRadius,
+                                           filletRadius: IslandGeometry.filletRadius))
                     // **Where the radius transition is declared.** On this half and
                     // not the drawer's because this is the half that *persists*
                     // across the gesture — SwiftUI does not interpolate the
@@ -783,6 +793,51 @@ struct IslandBody: View {
                     // open, so re-unifying is now *possible* — but the split also
                     // pins `.contentShape`'s tappable rect and the aura's traced
                     // alpha, and that is a structural change, not a radius one.
+                    //
+                    // **Ruled on 2026-08-05 by Task 6, which was asked to decide it
+                    // rather than carry it again: the halves stay split, and the
+                    // 440ms transit stays unreachable.** Three reasons, in the order
+                    // that decided it.
+                    //
+                    // 1. **The height clamp is the mechanism, not the insertion**,
+                    //    and that kills the cheap version of the fix. The obvious
+                    //    move is to stop *inserting* the drawer half — keep it in the
+                    //    tree at height 0 so it persists across the gesture and its
+                    //    `animatableData` can interpolate. It would persist, and it
+                    //    would still not transit: `IslandShape.path` clamps the
+                    //    radius with `min(r0, rect.height, rect.width / 2)`, so a
+                    //    half 3pt tall cannot paint a 20pt corner whatever its
+                    //    `bottomRadius` says. The visible corner would still unroll
+                    //    on the height's clock. Only a shape that is already
+                    //    `notch.height` tall at t=0 — one shape, spanning both — has
+                    //    a corner free to run 15 → 20 on a bezier.
+                    // 2. **Unification would put the width and the height under one
+                    //    `.animation` chain, and Task 5's 30ms lag is exactly what is
+                    //    at stake.** One shape means one `.frame(width:height:)`, and
+                    //    both of its numbers change on the click, so keeping the
+                    //    width on `widthSpring` and the height on `heightSpring`
+                    //    would rest on SwiftUI resolving two nested
+                    //    `.animation(_:value:)` modifiers per enclosed frame modifier
+                    //    rather than per subtree. **That is reasoned, not measured**,
+                    //    and it cannot be measured here: this suite has no way to
+                    //    sample intermediate frames of a live SwiftUI animation (see
+                    //    `theRadiusIsTheShapesAnimatableData`, which records the same
+                    //    limit — one frame of a hard cut and one frame of a finished
+                    //    interpolation are the same picture). So the trade is a
+                    //    *verified* hard cut between two verified endpoints against an
+                    //    *unverifiable* interpolation that risks a lag no test in this
+                    //    repo could see disappear.
+                    // 3. The original two costs still stand, and Task 6 added a
+                    //    third: `.contentShape`'s tappable rect, the aura's traced
+                    //    alpha, and now the fillets — which belong to the half that
+                    //    touches the bezel and would have to stay conditional inside
+                    //    a unified path.
+                    //
+                    // What would change the ruling is not a better radius argument,
+                    // it is a harness that can sample a running animation's frames.
+                    // That is test infrastructure, and it is worth more than this
+                    // corner: it is the same instrument every `.animation` claim in
+                    // this file is currently asserted around rather than through.
                     .animation(radiusMorph, value: bottomRadius)
                     // `revealWidth`, not `hoverRevealWidth`: the reveal is
                     // dropped while a drawer is open (see that property for why),
@@ -902,7 +957,38 @@ struct IslandBody: View {
             // The dead zone. Never a view — just the width of the cutout.
             Color.clear.frame(width: model.geometry.notch.width)
 
-            rightFlank
+            // **While a face is open the right flank is a label, not a number**
+            // (Plan 6.3 Task 6; found by Task 1 and deferred to here).
+            // `island-motion.html:474–476` gives the `ask`, `askmulti` and `list`
+            // faces a `.face.r` holding a mark and a `.label` — "Claude Code",
+            // "4 sessions" — and `:115–118` right-aligns it
+            // (`.flank.r{justify-content:flex-end}`,
+            // `.flank .face.r{padding:0 15px 0 12px}`). Ours showed §5.4's session
+            // count in every tier.
+            //
+            // The `Spacer` is what right-aligns it, and it is inside the `if` on
+            // purpose: collapsed, the flanks are measured from their own content
+            // (§5.4) and this `HStack` is exactly as wide as their sum, so a
+            // spacer there would be 0pt at rest and would fight `RevealContent`
+            // for the 150pt reveal while hovering.
+            //
+            // **Three siblings rather than an if/else over the whole tail, and
+            // that is not a style choice.** `RevealContent` below has to stay in
+            // the tree at both tiers, for the reason its own comment gives at
+            // length — dropping the subview replaces its 280ms clip with an
+            // uninterpolated pop, and closing the drawer while hovering is exactly
+            // when the reveal has to animate back in. Wrapping it in an `else`
+            // also took `IslandBody`'s gated-clock count from 5 to 3 while a
+            // drawer was open, which
+            // `motionOffSuppressesEveryOneOfTheIslandsSixClocks` reported
+            // immediately. So the count is suppressed and the label added, and
+            // the reveal is untouched by either.
+            if model.tier.openFace != nil { Spacer(minLength: 0) }
+            if let face = model.tier.openFace {
+                openFlank(face: face)
+            } else {
+                rightFlank
+            }
 
             // §9.1/§5.2's hover reveal: the session's name and elapsed time,
             // filling the 150pt `CollapsedLayout.hoverReveal` already reserves
@@ -973,6 +1059,99 @@ struct IslandBody: View {
         .frame(height: model.geometry.notch.height)
     }
 
+    /// The right flank **while a drawer is open**: the mark, then the face's own
+    /// label, right-aligned against the island's edge.
+    ///
+    /// `island-motion.html:474–476` and `:115–118`. Measured off the running
+    /// prototype rather than read off the CSS, because three paddings nest here:
+    /// the mark is `16pt`, the label is `12.5px` `--bone` with `margin-left:9px`,
+    /// and the label's right edge sits **15pt** from the island's own right edge
+    /// (`.flank .face.r`'s `padding-right`, which wins over the flank's own 12px
+    /// because the face is `inset:0` inside it).
+    ///
+    /// The mark is tinted by the state accent, not by identity — §4.3's closing
+    /// sentence and `.mark{color:var(--accent)}`, the same rule `SessionRow`'s own
+    /// mark follows. Shape says who; hue says what state.
+    @ViewBuilder private func openFlank(face: DrawerFace) -> some View {
+        HStack(spacing: OpenFlankLayout.gap) {
+            CLIMarkView(mark: openMark(face: face), side: OpenFlankLayout.markSide,
+                        colour: accent)
+            Text(openLabel(face: face))
+                .font(.system(size: OpenFlankLayout.labelSize))
+                .foregroundStyle(Color(boneColour))
+                .lineLimit(1)
+                // §11's own rule, and for the same reason: what is being truncated
+                // is an identity, and the tail of a CLI's name is what
+                // distinguishes two versions of it.
+                .truncationMode(.middle)
+        }
+        .padding(.trailing, OpenFlankLayout.trailingPadding)
+    }
+
+    /// The prototype's own three numbers for the open flank, named for the same
+    /// reason `LeftFlankLayout`'s are: so a test can pin them against the mockup
+    /// rather than against a literal repeated at the call site.
+    enum OpenFlankLayout {
+        /// `.mark{width:16px}`.
+        static let markSide: CGFloat = 16
+        /// `.label{margin-left:9px}`.
+        static let gap: CGFloat = 9
+        /// `.flank .face.r{padding:0 15px 0 12px}`, measured as 15pt from the
+        /// island's right edge to the label's.
+        static let trailingPadding: CGFloat = 15
+        /// `.label{font-size:12.5px}`.
+        static let labelSize: CGFloat = 12.5
+    }
+
+    /// Which mark the open flank shows.
+    ///
+    /// A question's own CLI, and **`.generic` for the list** — which is the
+    /// prototype's own choice (`data-face="list" data-mark="generic"`) and not a
+    /// fallback: a list can hold sessions from several CLIs at once, so no single
+    /// mark is true of it, and its label is a count rather than an identity.
+    func openMark(face: DrawerFace) -> CLIMark {
+        guard face != .sessionList, let cli = model.question?.event.cli else { return .generic }
+        return CLIMark(cli: cli)
+    }
+
+    /// What the open flank says: the CLI's name for a question, the row count for
+    /// the list. `island-motion.html:474–476` — "Claude Code", "4 sessions".
+    ///
+    /// The singular is ours; the mockup has only its own four-session fixture. A
+    /// one-session list is reachable (§4.2 opens the list whenever no question is
+    /// pending), and "1 sessions" in the one place the island writes a sentence
+    /// would be the kind of detail that makes everything around it look unfinished.
+    func openLabel(face: DrawerFace) -> String {
+        guard face == .sessionList else {
+            return CLIMark.displayName(cli: model.question?.event.cli ?? "")
+        }
+        let n = model.sessions.count
+        return n == 1 ? "1 session" : "\(n) sessions"
+    }
+
+    /// The right flank's content **while collapsed** — §5.4's count, §6.2's icon,
+    /// or nothing.
+    ///
+    /// ## Two divergences found by Task 6's browser diff, both left standing
+    ///
+    /// Measured on the running prototype rather than read off its CSS, and both
+    /// belong to Plan 6.6, which owns the right flank's content picker:
+    ///
+    /// - **Order.** The prototype's collapsed flank is `[.detail][.tally]` — the
+    ///   revealed text sits to the **left** of the numbers, with
+    ///   `.detail{margin-right:9px}` separating them
+    ///   (`island-motion.html:130–131`). Ours is `[count][RevealContent]`. Not
+    ///   swapped here, because the order is only observable together with the item
+    ///   below, and swapping one of the two leaves the flank half-migrated: today
+    ///   our number would slide 150pt right on every hover, where the prototype's
+    ///   number stays put and the text opens beside it.
+    /// - **Content.** The prototype shows **one number per state, most urgent
+    ///   first**, each in its own state hue — measured on its `multi` state, the
+    ///   tally is `<b>1</b><b>2</b>` with `--accent: var(--waiting)` and
+    ///   `var(--running)` on the two. Ours shows a single session count, which is
+    ///   what §6.2 asks for ("session count (default), agent icon, or nothing").
+    ///   **This is a spec-against-prototype disagreement, not a defect**, and it is
+    ///   the one item in this file where the spec is the narrower of the two.
     @ViewBuilder private var rightFlank: some View {
         switch model.layout.right {
         case .nothing:

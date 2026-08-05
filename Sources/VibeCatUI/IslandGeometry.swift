@@ -175,13 +175,73 @@ public struct IslandGeometry: Sendable, Equatable {
     /// 12 padding + 18 cat + 4 gap + 14 badge + 10 padding. Constant so that
     /// the island's left edge — and therefore the cat — never moves.
     public static let leftFlank: CGFloat = 58
-    /// The **collapsed** bottom radius, and a deliberate divergence from the
-    /// prototype's `9px` (`island-motion.html:82`): it matches the measured
-    /// hardware corner (~14pt) so our curve sits over the machine's rather than
-    /// beside it. Written down in this repo more than once precisely so nobody
-    /// "corrects" it back — see `minimumRightFlank` just below, which derives from
-    /// it, and `plans/README.md`.
+    /// The **collapsed** bottom radius. It matches the measured hardware corner
+    /// (~14pt) so our curve sits over the machine's rather than beside it, and
+    /// `minimumRightFlank` just below derives from it.
+    ///
+    /// **Correction, 2026-08-05 (Plan 6.3 Task 6): this is not a divergence from
+    /// the prototype, and four documents say it is.** This comment used to open
+    /// "a deliberate divergence from the prototype's `9px`
+    /// (`island-motion.html:82`)", and `CLAUDE.md`, this plan's Global Constraints
+    /// and `theOpenAndCollapsedRadiiAreTheTwoPrototypeValues` all repeat it as the
+    /// model case of a divergence-as-written-decision. Read in a browser:
+    /// `island-motion.html:83` is `border-radius:0 0 15px 15px` and the computed
+    /// value on the dormant island is `0px 0px 15px 15px`. **The prototype's
+    /// collapsed corner is 15px, exactly ours.** The `9px` is `--fillet`
+    /// (`island-motion.html:31`) — the *top* weld, `filletRadius` below — and the
+    /// citation "line 82" points at `.island`'s own declaration block, which is
+    /// where the 15 is.
+    ///
+    /// The hardware measurement stands on its own and nothing about it changes;
+    /// what changes is that it agrees with the design instead of overriding it. The
+    /// misreading was not free: it is the most likely reason the fillets were
+    /// deleted rather than re-spelled in 2026-08-01, since a document that has
+    /// already told you `9px` is the bottom radius leaves nothing for a 9pt fillet
+    /// to be.
     public static let bottomRadius: CGFloat = 15
+
+    /// **`--fillet: 9px` (`island-motion.html:31`)** — the radius of the concave
+    /// weld at each *top* corner, where the island meets the bezel.
+    /// `IslandShape.fillets` draws it; that type's doc comment carries the
+    /// removed-then-restored history.
+    ///
+    /// ## Why 9 and not the owner's literal "the same radius as the bottom"
+    ///
+    /// The instruction that restored these asked for "the same radius as the
+    /// bottom", which is 15 collapsed and 20 open. The prototype says 9 and calls
+    /// it "a hint of a curve, not the scoop they were before". The two disagree by
+    /// 6pt, so it had to be measured rather than picked. Rendered and scanned at
+    /// scale 4 on the `mbp14` fixture (`theWeldIsAHintOfACurveAndNotAScoop`):
+    ///
+    /// | fillet | weld's own ink | of the 32pt bar it spans | flush edge left between weld and bottom corner |
+    /// |---|---|---|---|
+    /// | **9** | 17.47pt² | 28.1% | **11.75pt** |
+    /// | 15 | 48.31pt² | 46.9% | 5.75pt |
+    /// | 20 | 85.88pt² | 62.5% | **0.75pt — the two curves meet** |
+    ///
+    /// The collapsed island is only `notch.height` = 32pt tall, and that is the
+    /// whole of the argument. At 20 there is effectively no straight side left and
+    /// each end becomes one continuous S from bezel to bottom edge — which is not a
+    /// rounded corner, it is the hook the 2026-08-01 removal was reacting to; 15
+    /// halves the side. **9pt is the only one of the three that leaves the island
+    /// an edge**, and it paints a fifth of 20's ink. ("Flush edge" is rows whose
+    /// outermost ink is the body's own edge column and reads ~3.7pt longer than
+    /// `32 − fillet − radius` at every radius, because both curves leave the edge
+    /// tangentially; the three are therefore compared with each other. See
+    /// `IslandFilletTests.Measured.straightSide`.)
+    ///
+    /// Two smaller reasons, both structural rather than aesthetic:
+    ///
+    /// - The bottom radius **changes with the tier** (15 → 20 on open, on a 440ms
+    ///   bezier). A fillet defined as "the same as the bottom" would animate at the
+    ///   screen edge on every click. `--fillet` appears in no `transition` in the
+    ///   prototype; it is one constant for every state, and this is a `let` with no
+    ///   tier argument for that reason.
+    /// - There is nothing at the top for a radius argument to *match*. 15 is a
+    ///   measurement of the hardware corner our own bottom corner has to cover
+    ///   (see `bottomRadius`); the bezel above has no corner, so nothing carries
+    ///   that reasoning upward.
+    public static let filletRadius: CGFloat = 9
     /// **The bottom radius while a drawer is open** —
     /// `island-motion.html:162` and `:164`, where the `ask`, `askmulti` and `list`
     /// states all set `border-radius: 0 0 20px 20px`. Added by Plan 6.3 Task 5;

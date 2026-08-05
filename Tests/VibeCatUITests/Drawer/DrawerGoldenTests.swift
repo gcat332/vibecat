@@ -753,9 +753,19 @@ private func isNear(_ p: Raster.Pixel, _ colour: RGBA, tolerance: Int = 6) -> Bo
     // literal — so the expected left edge is computed explicitly and the
     // remaining tolerance covers only antialiasing at the border's own
     // 1pt stroke, not an unrelated bug hiding behind the same number.
-    let expectedLeft = collapsedPainted.first + Int(QuestionFace.leadingPadding)
+    // **`+ filletRadius`, since Plan 6.3 Task 6.** `paintedColumns` reports the
+    // ink, and the collapsed half now hangs a `IslandGeometry.filletRadius` weld
+    // off each top corner *outside* its own rect
+    // (`island-motion.html:94–100`), so its painted left edge is one weld further
+    // left than the body's. The drawer has no welds — it does not touch the bezel
+    // — so the two references have to be reconciled explicitly rather than by
+    // widening the tolerance to swallow 9pt, which is more than half of
+    // `QuestionFace.leadingPadding` and would let a genuinely unaligned drawer
+    // through.
+    let bodyLeft = collapsedPainted.first + Int(IslandGeometry.filletRadius)
+    let expectedLeft = bodyLeft + Int(QuestionFace.leadingPadding)
     #expect(abs(left - expectedLeft) <= 3,
-            "drawer's leftmost accent at \(left), expected \(expectedLeft) (collapsed body's own left edge \(collapsedPainted.first) + QuestionFace.leadingPadding \(QuestionFace.leadingPadding)) — the drawer has drifted sideways")
+            "drawer's leftmost accent at \(left), expected \(expectedLeft) (collapsed body's own left edge \(bodyLeft) — painted ink starts \(Int(IslandGeometry.filletRadius))pt further left at \(collapsedPainted.first), which is its weld — plus QuestionFace.leadingPadding \(QuestionFace.leadingPadding)) — the drawer has drifted sideways")
 
     #expect(Double(right - left) < model.frames.body.width,
             "accent spans \(right - left)pt — at or past the live body width \(model.frames.body.width); the drawer may be sized off the fixed panel's wider frame instead")

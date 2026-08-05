@@ -146,5 +146,66 @@ struct MotionCurveComparison {
                 "width overshoots only \(String(format: "%.1f", width / height))x height (\(pct(width)) against \(pct(height))) — the prototype's own beziers give 5.3x, and at this ratio the island reads as a resizing box rather than one body with mass")
     }
 
+    /// **Closing undershoots as far as opening overshoots, and never past the
+    /// island's own resting width.** Plan 6.3 Task 6.
+    ///
+    /// Task 2 measured the close and left it unasserted: the click that opens the
+    /// drawer always happens while hovering, so the width runs 423.1 → 560 on
+    /// `widthSpring` and back, and "the only backwards motion in the whole morph is
+    /// the settle from the overshoot peak" was recorded for the *expand* only. On the
+    /// **collapse** the same spring runs 560 → 423.1 and its overshoot points the
+    /// other way: past the target and back up, down to a measured 411.7pt.
+    ///
+    /// Two claims, and neither is a restatement of the overshoot test above:
+    ///
+    /// 1. **The undershoot exists**, which is what a critically damped width would
+    ///    lose. §9.1's "one body with mass" is a statement about momentum, and a
+    ///    body with momentum overruns in whichever direction it was going.
+    /// 2. **It stops well short of the resting width.** This is the one that could
+    ///    have been a real defect and was never checked: the collapse's target is the
+    ///    *hovered* 423.1pt (the pointer is still over the island — that is what
+    ///    `IslandBody.revealWidth`'s doc comment establishes at length), and if the
+    ///    undershoot reached the unhovered 273.1pt the island would visibly snap shut
+    ///    and reopen on every dismissal. 8.4% of a 136.9pt travel is nowhere near it,
+    ///    and this is what says so.
+    ///
+    /// Would fail if: `widthDamping` were raised toward critical damping (claim 1);
+    /// or dropped far enough for the undershoot to swallow the whole hover reveal
+    /// (claim 2, at roughly `dampingRatio` 0.28 and below).
+    @Test func closingUndershootsAsFarAsOpeningOvershootsAndNeverPastTheRestingWidth() {
+        // The three widths Task 1 and Task 2 measured on the `mbp14` fixture, at 3
+        // sessions: resting, hovered, and the face's own open width.
+        let resting = 273.1, hovered = 423.1
+        let open = Double(DrawerFace.sessionList.width)
+        let spring = Spring(response: IslandMotion.response,
+                            dampingRatio: IslandMotion.widthDamping)
+
+        func trajectory(from: Double, to: Double) -> (lowest: Double, highest: Double) {
+            var lowest = min(from, to), highest = max(from, to)
+            for step in 0...500 {
+                let w = from + (to - from) * spring.value(target: 1.0, time: Double(step) * 0.002)
+                lowest = min(lowest, w)
+                highest = max(highest, w)
+            }
+            return (lowest, highest)
+        }
+
+        let opening = trajectory(from: hovered, to: open)
+        let closing = trajectory(from: open, to: hovered)
+        let overshoot = opening.highest - open
+        let undershoot = hovered - closing.lowest
+
+        #expect(undershoot > 0,
+                "closing 560 → 423.1 never went below its target — §9.1's overshoot has one direction only, so the width is no longer behaving like a body with momentum")
+        #expect(abs(undershoot - overshoot) < 0.1,
+                "closing undershoots \(String(format: "%.2f", undershoot))pt where opening overshoots \(String(format: "%.2f", overshoot))pt — the same spring over the same travel should be symmetric, so one of the two directions is on a different curve")
+        #expect(closing.lowest > resting + 100,
+                "closing dips to \(String(format: "%.2f", closing.lowest))pt against a resting width of \(resting)pt — the island visibly snaps shut and reopens on every dismissal")
+        // And the expand's own direction, stated here so the pair reads as one
+        // property: opening never dips below where it started.
+        #expect(opening.lowest >= hovered - 0.001,
+                "opening dipped to \(String(format: "%.2f", opening.lowest))pt below its \(hovered)pt start — the island narrows before it widens, which is the defect Task 2 was dispatched to find")
+    }
+
     private func pct(_ v: Double) -> String { String(format: "%.1f%%", v * 100) }
 }

@@ -416,7 +416,7 @@ private func springPeak(damping: Double,
     // the *project name's own ink* rather than the frame it sits in, and the text is
     // leading-aligned so a wider frame does not move it. "A short string fits in
     // 150pt" cannot fail. F1's real symptom is the tally being squeezed, and
-    // `IslandGoldenTests`' `theSessionCountSurvivesAnOpenDrawerWhileHovering`
+    // `IslandGoldenTests`' `theRightFlanksContentIsNeverSqueezedByTheHoverReveal`
     // measures that.
     #expect(boneFirst > lastCutoutColumn,
             "the reveal's --bone ink spans columns \(boneFirst)…\(boneLast) and starts inside or left of the cutout (which ends at \(lastCutoutColumn)) — §5.1 forbids content in the hole and §5.2 puts the reveal in the right flank")
