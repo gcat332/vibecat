@@ -56,11 +56,15 @@ session list's line 2 truncating to `As…`. Its ink saturates at 420pt; it is g
   | `--t-hover` | `280ms` |
   | `--t-face` | `190ms` |
 
-- **§6.3's table is lossy and this plan corrects it.** The spec gives two drawer
-  heights; the prototype has **four** (lines 165–168): `ask` **288**, `ask` with
-  `Other` open **184**, `askmulti` **300**, `list` **420**. The 184 matters — the
-  prototype *shrinks* the drawer while a custom answer is being typed, which is
-  directly relevant to the footer overflow Plan 6.1's Task 5 had to contain.
+- **§6.3 was missing a *width* column, not heights. Corrected 2026-08-05 by Task 1.**
+  An earlier draft of this plan said the spec gave two heights where the prototype
+  had four. **That was wrong** — `DrawerFace` already carried all four (`question`
+  288, `questionWithReply` **184**, `questionMulti` 300, `sessionList` 420), and
+  `questionWithReply` is live at `QuestionModel.swift:43`. So the drawer *does*
+  already shrink while a custom answer is being typed. What §6.3 never said was how
+  wide any face is, and that silence was read as "whatever the collapsed island
+  happens to be". Left visible because Tasks 2–6 would otherwise chase a height bug
+  that does not exist.
 - **`LW = 58pt` is constant (§5.3)** and that is what pins the island's left edge so
   the cat never walks sideways. **Every width change in this plan must leave the
   cat's painted left edge where it was** — Plan 6.1's Task 5 rasterised this across
@@ -83,7 +87,7 @@ session list's line 2 truncating to `As…`. Its ink saturates at 420pt; it is g
   samples an animation's curve over time and is committed for this plan. The
   env-gated `VIBECAT_GIF` / `VIBECAT_FILMSTRIP` tools write real files — use them.
 - **Run the suite with `Scripts/test.sh`** (`swift test --no-parallel`; its header
-  says why). Current total is **686**, ~22s. Zero warnings in debug and `-c release`.
+  says why). Current total is **701** after Task 1, ~22s. Zero warnings in debug and `-c release`.
 - **Measure cost with `getrusage(RUSAGE_SELF)`. Never `ps %cpu`.** Plan 6.1 measured
   motion `off` at 0.38% of a core against `full`'s ~12%; a wider, more animated
   island must not undo that. **Re-measure both.**
@@ -314,10 +318,15 @@ that removes the sheared glyph rather than decorating it.
 - **`.agentIcon`'s empty rounded square.** Plan 6.1 left it selectable and blank;
   the marks exist in the prototype's `MARKS` and belong with whoever ships the
   picker.
-- **The `Other`-open **184pt** drawer height.** Recorded in §6.3's correction here
-  because it is part of the same table, but implementing the shrink is not this
-  plan's — it interacts with Plan 6.1's Task 5 footer containment and deserves its
-  own look.
+- **Re-centring the island when it expands.** The prototype does; **we deliberately
+  do not**, because §5.3 pins the left edge so the cat never walks sideways. Task 1
+  confirmed the cat holds across all four hover × open combinations, measured on the
+  cat's own face colours rather than the silhouette edge. **Task 2 must not "fix"
+  this** — it is the invariant, not a divergence.
+- **The right flank's content while expanded.** The prototype right-aligns it and
+  shows a label where we show a number (`island-motion.html:115–118, 474–476`). Found
+  by Task 1, out of its scope; belongs with Task 6's browser diff or a
+  `prototype-fidelity` pass.
 - **Plan 6.2's four audible checks.** Still open, still need a person's ears.
 
 ## Self-review
