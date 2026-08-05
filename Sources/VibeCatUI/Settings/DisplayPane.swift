@@ -18,8 +18,195 @@ struct DisplayPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            RightFlankSection(model: model)
+            CatSection(model: model)
             SessionCardSection(model: model)
             MotionSection(model: model)
+        }
+    }
+}
+
+/// `settings.html:409-417`'s `Right of the notch` group — §6.2's collapsed
+/// content picker, wired to `Preferences.rightFlank`. Plan 6.6's Task 5.
+///
+/// **One row of two, and the other is left out on purpose.** `Reveal names
+/// and timings` (`:412-413`) offers `On hover | Always | Never`, and only `On
+/// hover` has ever been built anywhere in this repo — `Always`/`Never` are two
+/// whole alternative hover-reveal behaviours, not a label this control could
+/// pick between. Per the shorter-menu rule (Plan 6.5's `Soft`/`System`/`Blip`,
+/// restated by Plan 6.1 after `.agentIcon` shipped selectable-and-blank): a
+/// menu item that silently does nothing is worse than a shorter menu, so the
+/// row is missing entirely rather than drawn with two dead thirds.
+struct RightFlankSection: View {
+    let model: DisplayPaneModel
+
+    var body: some View {
+        SettingsSectionHeading("Right of the notch", isNew: true)
+        SettingsGroup {
+            SettingsRow("Collapsed, show",
+                detail: "A brand mark tells you what you already know. A count tells you "
+                    + "how many sessions are open, and its colour tells you what they are doing.") {
+                SettingsSegmented(model.rightFlankBinding) { $0.label }
+            }
+        }
+    }
+}
+
+/// `settings.html:419-427`'s `The cat` group — §7.3's coat picker and the
+/// read-only state-colour reference. Plan 6.6's Task 5.
+///
+/// **Two rows of three, and the first is left out on purpose.** `Left of the
+/// notch` (`:420-422`) offers `Cat | Meter | Dot`, and only `Cat` has ever
+/// existed — `Meter` and `Dot` are two whole alternative left-flank renderers
+/// (this plan's own "Out of scope" section: Plan 6.8's), so shipping this row
+/// would offer two choices that draw nothing different from what is already
+/// on screen. The same shorter-menu rule `RightFlankSection` names for the row
+/// beside it.
+struct CatSection: View {
+    let model: DisplayPaneModel
+
+    var body: some View {
+        SettingsSectionHeading("The cat", isNew: true)
+        SettingsGroup {
+            SettingsRow("Coat") {
+                CoatPickerRow(coat: model.coatBinding)
+            }
+            SettingsRow("State colours",
+                detail: "Colour only ever means state. Which agent is speaking is carried by its icon.") {
+                StateSwatchesRow()
+            }
+        }
+    }
+}
+
+/// `settings.html:423`'s `#skins` — five JS-rendered swatches
+/// (`settings.html:588-590`), each a small cat wearing one coat with its own
+/// name beneath it, the selected one outlined.
+///
+/// Reuses `CatCanvas` rather than re-implementing the sprite: a preview that
+/// drew its own copy of the grid could drift from what the island actually
+/// paints, and the whole point of showing five cats here is that they are the
+/// same cat this picker changes.
+struct CoatPickerRow: View {
+    @Binding var coat: Coat
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(Coat.allCases, id: \.self) { option in
+                CoatSwatch(coat: option, isSelected: option == coat) {
+                    coat = option
+                }
+            }
+        }
+    }
+}
+
+private struct CoatSwatch: View {
+    let coat: Coat
+    let isSelected: Bool
+    let action: () -> Void
+
+    /// The preview's own cell size — large enough that a `tabby` bar and a
+    /// `plain` cheek read as different swatches at a glance, the same reason
+    /// `CatGridTests.everyPairOfCoatsIsTellableApart` exists at the grid level.
+    private static let cellSize: CGFloat = 2
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                // `settings.html:588`'s own preview colour
+                // (`catSVG('#EDEFF4', 1, COATS[k])`) — **not** an `IslandState`
+                // accent. This row previews *markings*, not mood, and tinting it
+                // by state would be exactly the contamination §4.3 exists to
+                // rule out: "a coat changes markings, never hue."
+                CatCanvas(cat: ResolvedCat(coat: coat, mood: .happy, phase: 0),
+                          palette: CatPalette(accent: CoatSwatchMetrics.previewColour),
+                          cellSize: Self.cellSize,
+                          motion: MotionPreference(chosen: .off, systemWantsReduced: false))
+                    .frame(width: CGFloat(CatGrid.width) * Self.cellSize,
+                           height: CGFloat(CatGrid.height) * Self.cellSize)
+                Text(coat.displayName)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color(SettingsPalette.haze))
+            }
+            // `settings.html:589`'s own inline override for exactly this button
+            // (`style="padding:7px 8px;min-width:0;gap:5px"`), not `.mode`'s base
+            // `padding:11px` (`:155`).
+            .padding(.vertical, 7)
+            .padding(.horizontal, 8)
+            // `.mode{background:#1F1F22;...border-radius:9px}` (`:155`) — the
+            // same `#1F1F22` `.seg`'s own container uses
+            // (`SettingsSegmentedMetrics.container`), reused rather than
+            // re-declared, and **not** `--card2`: a first pass drew this in
+            // `--card2` (`#323236`), which is a different token for a different
+            // control (`.sel`/`.btn`) and would have painted every swatch a shade
+            // lighter than the prototype's own picker.
+            .background(Color(SettingsSegmentedMetrics.container))
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .overlay {
+                // `.mode{border:2px solid transparent}`, `:157`
+                // `.mode[aria-pressed="true"]{border-color:var(--blue)}` — a
+                // `2px` blue border, not a background fill.
+                RoundedRectangle(cornerRadius: 9)
+                    .stroke(isSelected ? Color(SettingsPalette.systemBlue) : Color.clear, lineWidth: 2)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private enum CoatSwatchMetrics {
+    static let previewColour = RGBA(hex: "#EDEFF4")!
+}
+
+extension Coat {
+    /// `settings.html:596`'s `COATNAMES`.
+    var displayName: String {
+        switch self {
+        case .tabby:   "Tabby"
+        case .plain:   "Plain"
+        case .tuxedo:  "Tuxedo"
+        case .siamese: "Siamese"
+        case .patched: "Patched"
+        }
+    }
+}
+
+/// `settings.html:426`'s `#swatches` — four static squares
+/// (`settings.html:593-595`), unpickable.
+///
+/// **Deliberately read-only.** §4.3 is the constraint the row's own sub-label
+/// quotes: the four hues *mean* the four states, so a picker here would be
+/// offering to change what state colour *means*, not merely what it looks
+/// like — a new preference and a new invariant question ("does `waiting`
+/// still mean amber once it can be repainted?") this plan defers rather than
+/// invents an answer for. Showing the hues is honest; matching them to a
+/// picker is not.
+///
+/// **The one legitimate reach for `IslandState.accent` in this file.** The
+/// Global Constraint bars `Sources/VibeCatUI/Settings/` from the island's
+/// state colour because a settings switch is blue because it is on, never
+/// because some agent is blocked — but this row previews island state on
+/// purpose, the same exception `SettingsPill`'s `.granted`/`.denied` colours
+/// already use, and `theStateHuesInSettingsAreTheIslandsExactlyBecauseThey
+/// PreviewIt` (`SettingsPaletteTests.swift`) is what keeps this from drifting.
+struct StateSwatchesRow: View {
+    /// `.dormant` excluded — `settings.html`'s own `STATES` names four, not
+    /// five: "no sessions at all" is not a state a person picks a colour to
+    /// recognise.
+    private static let states: [IslandState] = [.idle, .running, .waiting, .failed]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(Self.states, id: \.self) { state in
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(state.accent))
+                    .frame(width: 22, height: 22)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    }
+            }
         }
     }
 }
@@ -130,6 +317,10 @@ struct MotionSection: View {
     /// §11's nine session-card switches — `SessionCardSection`'s own doc
     /// comment records why only eight of the nine fields here have a row.
     private(set) var cardOptions: SessionCardOptions
+    /// §6.2's collapsed content picker — `RightFlankSection`'s own row.
+    private(set) var rightFlank: RightFlank
+    /// §7.3's coat picker — `CatSection`'s own row.
+    private(set) var coat: Coat
 
     private let store: PreferenceStoring
     /// Called after a write lands, so the island can pick the new value up without
@@ -146,6 +337,8 @@ struct MotionSection: View {
         self.motion = loaded.motion
         self.followsSystemReduceMotion = loaded.followsSystemReduceMotion
         self.cardOptions = loaded.cardOptions
+        self.rightFlank = loaded.rightFlank
+        self.coat = loaded.coat
     }
 
     var motionBinding: Binding<MotionLevel> {
@@ -164,6 +357,26 @@ struct MotionSection: View {
     func setFollowsSystem(_ follows: Bool) {
         followsSystemReduceMotion = follows
         persist { $0.followsSystemReduceMotion = follows }
+    }
+
+    var rightFlankBinding: Binding<RightFlank> {
+        Binding(get: { self.rightFlank }, set: { self.setRightFlank($0) })
+    }
+
+    func setRightFlank(_ flank: RightFlank) {
+        guard flank != rightFlank else { return }
+        rightFlank = flank
+        persist { $0.rightFlank = flank }
+    }
+
+    var coatBinding: Binding<Coat> {
+        Binding(get: { self.coat }, set: { self.setCoat($0) })
+    }
+
+    func setCoat(_ coat: Coat) {
+        guard coat != self.coat else { return }
+        self.coat = coat
+        persist { $0.coat = coat }
     }
 
     // MARK: - The session card's eight switches
@@ -258,6 +471,17 @@ extension MotionLevel {
         case .full: "Full"
         case .reduced: "Reduced"
         case .off: "Off"
+        }
+    }
+}
+
+extension RightFlank {
+    /// The prototype's own labels, `settings.html:411`.
+    var label: String {
+        switch self {
+        case .sessionCount: "Count"
+        case .agentIcon:    "Agent icon"
+        case .nothing:      "Nothing"
         }
     }
 }

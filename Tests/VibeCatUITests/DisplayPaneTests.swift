@@ -197,3 +197,86 @@ import VibeCatCore
 
     #expect(store.load().cardOptions == SessionCardOptions(activity: false, project: false))
 }
+
+// MARK: - Task 5: the right flank and the coat
+
+@Test @MainActor func choosingARightFlankPersistsIt() {
+    let store = InMemoryPreferenceStore()
+    let model = DisplayPaneModel(store: store)
+
+    model.setRightFlank(.agentIcon)
+    #expect(store.load().rightFlank == .agentIcon, "the choice never reached the store")
+    #expect(model.rightFlank == .agentIcon)
+}
+
+@Test @MainActor func choosingACoatPersistsIt() {
+    let store = InMemoryPreferenceStore()
+    let model = DisplayPaneModel(store: store)
+
+    model.setCoat(.siamese)
+    #expect(store.load().coat == .siamese, "the choice never reached the store")
+    #expect(model.coat == .siamese)
+}
+
+/// The clobber hazard again, this time across all four of this task's and
+/// Task 3's writers in sequence — `save()` writes the whole `Preferences`, so
+/// a model holding a snapshot rather than `load()`-mutate-`save()`-ing fresh
+/// would drop whichever fields it did not just write.
+@Test @MainActor func rightFlankAndCoatWritesDoNotClobberEachOtherOrTheMotionGroup() {
+    let store = InMemoryPreferenceStore()
+    let model = DisplayPaneModel(store: store)
+
+    model.setMotion(.reduced)
+    model.setRightFlank(.nothing)
+    model.setCoat(.tuxedo)
+
+    let saved = store.load()
+    #expect(saved.motion == .reduced, "the coat/rightFlank writes clobbered the motion group")
+    #expect(saved.rightFlank == .nothing, "a later write clobbered the right flank")
+    #expect(saved.coat == .tuxedo, "the third write did not land")
+}
+
+/// Same claim `theModelOpensOnWhateverWasStored` makes for the Motion group,
+/// checked here for the right flank and the coat.
+@Test @MainActor func theRightFlankAndCoatModelsOpenOnWhateverWasStored() {
+    let store = InMemoryPreferenceStore(
+        Preferences(rightFlank: .agentIcon, coat: .patched))
+    let model = DisplayPaneModel(store: store)
+    #expect(model.rightFlank == .agentIcon)
+    #expect(model.coat == .patched)
+}
+
+/// `SettingsWindowModel.pageBinding`'s recorded defect, checked here the same
+/// way `aSessionCardWriteGoesThroughTheBindingAndNotOnlyTheSetter` checks it
+/// for the session card: a `Binding` built from `@Bindable`'s straight-to-
+/// storage form updates the view and persists nothing.
+@Test @MainActor func aRightFlankOrCoatWriteGoesThroughTheBindingAndNotOnlyTheSetter() {
+    let store = InMemoryPreferenceStore()
+    let model = DisplayPaneModel(store: store)
+
+    model.rightFlankBinding.wrappedValue = .nothing
+    model.coatBinding.wrappedValue = .plain
+
+    #expect(store.load().rightFlank == .nothing)
+    #expect(store.load().coat == .plain)
+}
+
+/// `RightFlank.label`'s three cases against `settings.html:411`'s own three
+/// button texts — pinned directly since `SettingsSegmentedTests` already
+/// covers `SettingsSegmented` generically and has no reason to know this
+/// particular enum's words.
+@Test func rightFlankLabelsMatchThePrototype() {
+    #expect(RightFlank.sessionCount.label == "Count")
+    #expect(RightFlank.agentIcon.label == "Agent icon")
+    #expect(RightFlank.nothing.label == "Nothing")
+}
+
+/// `Coat.displayName`'s five cases against `settings.html:596`'s own
+/// `COATNAMES`.
+@Test func coatDisplayNamesMatchThePrototype() {
+    #expect(Coat.tabby.displayName == "Tabby")
+    #expect(Coat.plain.displayName == "Plain")
+    #expect(Coat.tuxedo.displayName == "Tuxedo")
+    #expect(Coat.siamese.displayName == "Siamese")
+    #expect(Coat.patched.displayName == "Patched")
+}

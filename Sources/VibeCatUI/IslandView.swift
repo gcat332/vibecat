@@ -1158,8 +1158,7 @@ struct IslandBody: View {
         case .nothing:
             EmptyView()
         case .agentIcon:
-            RoundedRectangle(cornerRadius: 3)
-                .fill(accent)
+            CLIMarkView(mark: collapsedMark, side: CollapsedLayout.iconWidth, colour: accent)
                 .frame(width: CollapsedLayout.iconWidth, height: 14)
                 .padding(.horizontal, RightFlankLayout.iconPadding)
         case .sessionCount:
@@ -1179,5 +1178,31 @@ struct IslandBody: View {
                 EmptyView()
             }
         }
+    }
+
+    /// Which mark `.agentIcon` draws. Plan 6.6's Task 5, conflict 2.
+    ///
+    /// **Ruling: land the mark, not the empty rounded square this case used to
+    /// draw.** §6.2 offers the option and §4.3 requires shape to carry identity
+    /// — "which agent is speaking is carried by its icon shape" — and a blank
+    /// `RoundedRectangle` said nothing about which agent that was. Plan 6.1
+    /// shipped it selectable-and-blank and recorded that as a rule this plan must
+    /// not repeat: do not ship a picker for a placeholder.
+    ///
+    /// **Whose mark, when several sessions from different CLIs are open:** the
+    /// same rule `openMark(face:)` already answers for the open drawer's session
+    /// list, which can hold sessions from several CLIs at once and shows
+    /// `.generic` rather than picking one arbitrarily — "no single mark is true
+    /// of it." This reads `model.sessions` (§11's own list, assigned on every
+    /// render regardless of which right flank is chosen) rather than
+    /// `model.revealed`: `revealed` names one session — the most urgent — and
+    /// "how many distinct CLIs are actually open" is a question about the whole
+    /// set, not about whichever one is most urgent. One CLI open, however many
+    /// sessions, gets its own mark; more than one gets `.generic`, the same
+    /// answer the open flank already gives for exactly this ambiguity.
+    private var collapsedMark: CLIMark {
+        let clis = Set(model.sessions.map(\.cli))
+        guard clis.count == 1, let only = clis.first else { return .generic }
+        return CLIMark(cli: only)
     }
 }

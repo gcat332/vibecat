@@ -452,6 +452,181 @@ struct IslandGoldenTests {
                 "expected three distinct painted widths, one per RightFlank case, found \(widths) — some pair rendered identically")
     }
 
+    // MARK: - Task 5, conflict 2: `.agentIcon` paints a mark, not a blank square
+
+    /// A model with `rightFlank` set to `.agentIcon` and `sessions` holding one
+    /// fixture per `cli` given — `model.sessions`, not `model.revealed`, is
+    /// what `IslandBody.collapsedMark` reads, so the fixture has to populate
+    /// the list rather than the single "most urgent" session.
+    @MainActor
+    static func agentIconModel(sessionCLIs: [String]) -> IslandModel {
+        let m = Self.model(.running, count: sessionCLIs.count)
+        m.rightFlank = .agentIcon
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        m.sessions = sessionCLIs.enumerated().map { i, cli in
+            Session(event: VibeEvent(id: "e\(i)", cli: cli, kind: .running,
+                                     session: "s\(i)", cwd: "/tmp/p\(i)"),
+                    now: now)
+        }
+        return m
+    }
+
+    /// The right flank's own predicted box for `.agentIcon`, built from the
+    /// same constants `IslandBody.rightFlank` composes with rather than a
+    /// pixel offset copied out by hand: the dead zone ends at `leftFlank +
+    /// notch.width` (body-local), the icon's own leading padding
+    /// (`RightFlankLayout.iconPadding`) sits after that, and `bodyInPanel.x`
+    /// carries body-local into the raster's own coordinates (there is no top
+    /// margin, so `y` needs no equivalent shift — see `IslandFrames
+    /// .bodyInPanel`'s own doc comment).
+    @MainActor
+    static func agentIconBox(_ m: IslandModel) -> (x: Int, y: Int, width: Int, height: Int) {
+        let iconLeftInBody = IslandGeometry.leftFlank + m.geometry.notch.width
+            + IslandBody.RightFlankLayout.iconPadding
+        let x = m.frames.bodyInPanel.minX + iconLeftInBody
+        return (x: Int(x.rounded()), y: 0,
+               width: Int(CollapsedLayout.iconWidth), height: Int(m.geometry.notch.height))
+    }
+
+    /// **The regression this whole conflict is about.** Before this task,
+    /// `.agentIcon` drew a solid `RoundedRectangle` filled with the state
+    /// accent — every pixel inside its box that same one colour, because the
+    /// collapsed bar's own ground is opaque everywhere (`IslandShape` fills the
+    /// whole silhouette; there is no transparency to check inside it, unlike
+    /// outside in the aura margin). A real mark is geometry — six spokes, a
+    /// hexagon outline, a chevron — so it leaves **ground-coloured** gaps
+    /// between its strokes rather than covering the box in accent alone. A
+    /// render that paints the box in nothing but the accent colour is the old
+    /// placeholder back.
+    @MainActor @Test func theAgentIconFlankIsNotASolidBlock() throws {
+        let m = Self.agentIconModel(sessionCLIs: ["claude-code"])
+        let raster = try rasterise(IslandBody(model: m, now: Date(timeIntervalSince1970: 1_000_000)),
+                                   scale: 1)
+        let box = Self.agentIconBox(m)
+        let accent = m.state.accent
+        func near(_ p: Raster.Pixel, _ c: RGBA, tolerance: Int = 10) -> Bool {
+            abs(Int(p.r) - Int((c.r * 255).rounded())) <= tolerance
+                && abs(Int(p.g) - Int((c.g * 255).rounded())) <= tolerance
+                && abs(Int(p.b) - Int((c.b * 255).rounded())) <= tolerance
+        }
+        var sawAccent = false
+        var sawGround = false
+        for x in box.x..<(box.x + box.width) where x >= 0 && x < raster.width {
+            for y in box.y..<(box.y + box.height) where y >= 0 && y < raster.height {
+                let p = raster[x, y]
+                if near(p, accent) { sawAccent = true }
+                else if near(p, islandGroundColour) { sawGround = true }
+            }
+        }
+        #expect(sawAccent, "the agent-icon box painted no accent-coloured pixel at all — nothing was drawn")
+        #expect(sawGround,
+                "the agent-icon box painted solid accent with no ground-coloured gap — this is the empty RoundedRectangle placeholder, not a mark")
+    }
+
+    /// **One CLI open, however many sessions: its own mark.** Two sessions,
+    /// both `claude-code`, must paint the same mark a single `claude-code`
+    /// session would — this is what tells the render apart from one that
+    /// just picked the first session's CLI regardless of how many there are.
+    @MainActor @Test func aSingleCLIsAgentIconMatchesItsOwnSessionCount() throws {
+        func render(_ m: IslandModel) throws -> Raster {
+            try rasterise(IslandBody(model: m, now: Date(timeIntervalSince1970: 1_000_000)), scale: 1)
+        }
+        let one = Self.agentIconModel(sessionCLIs: ["claude-code"])
+        let two = Self.agentIconModel(sessionCLIs: ["claude-code", "claude-code"])
+        let rOne = try render(one)
+        let rTwo = try render(two)
+        let box = Self.agentIconBox(one)
+        #expect(box == Self.agentIconBox(two), "setup: the two fixtures do not share an icon box")
+        for x in box.x..<(box.x + box.width) where x >= 0 && x < rOne.width {
+            for y in box.y..<(box.y + box.height) where y >= 0 && y < rOne.height {
+                #expect(rOne[x, y] == rTwo[x, y],
+                        "a second claude-code session changed the mark at (\(x),\(y))")
+            }
+        }
+    }
+
+    /// **Whose mark, when several sessions from different CLIs are open — the
+    /// question Plan 6.6 named as the reason this is a decision.** The ruling,
+    /// pinned here: the same one `openMark(face:)` already gives the open
+    /// drawer's session list for the identical ambiguity. One CLI paints that
+    /// CLI's own mark; two different CLIs paint `.generic`, matching neither
+    /// input CLI's own mark rather than picking one of them arbitrarily.
+    @MainActor @Test func differentCLIsAgentIconMatchesGenericNotEitherInput() throws {
+        func render(_ m: IslandModel) throws -> Raster {
+            try rasterise(IslandBody(model: m, now: Date(timeIntervalSince1970: 1_000_000)), scale: 1)
+        }
+        let claude = Self.agentIconModel(sessionCLIs: ["claude-code"])
+        let codex = Self.agentIconModel(sessionCLIs: ["codex"])
+        let mixed = Self.agentIconModel(sessionCLIs: ["claude-code", "codex"])
+        let generic = Self.agentIconModel(sessionCLIs: ["some-unknown-cli"])
+
+        let rClaude = try render(claude)
+        let rCodex = try render(codex)
+        let rMixed = try render(mixed)
+        let rGeneric = try render(generic)
+
+        let box = Self.agentIconBox(mixed)
+        #expect(box == Self.agentIconBox(claude) && box == Self.agentIconBox(codex)
+                && box == Self.agentIconBox(generic), "setup: the four fixtures do not share an icon box")
+
+        func differs(_ a: Raster, _ b: Raster) -> Bool {
+            for x in box.x..<(box.x + box.width) where x >= 0 && x < a.width {
+                for y in box.y..<(box.y + box.height) where y >= 0 && y < a.height {
+                    if a[x, y] != b[x, y] { return true }
+                }
+            }
+            return false
+        }
+        #expect(!differs(rMixed, rGeneric),
+                "two different CLIs open at once did not paint the same mark as the generic fallback")
+        #expect(differs(rMixed, rClaude), "two different CLIs painted the same mark as a lone claude-code session")
+        #expect(differs(rMixed, rCodex), "two different CLIs painted the same mark as a lone codex session")
+    }
+
+    /// §5.3, at coat's own axis: a coat repaints fur, never geometry, so the
+    /// cat's painted left edge must hold across every value the same way it
+    /// already does across every right-flank choice above. Copies
+    /// `thePaintedLeftEdgeNeverMovesAcrossRightFlankChoices`'s method exactly,
+    /// on the axis this task adds a picker for.
+    @MainActor @Test func theCatsPaintedLeftEdgeDoesNotMoveAcrossCoats() throws {
+        let edges = try Coat.allCases.map { coat -> Int in
+            try Self.catLeftEdge(Self.model(.running, count: 3, coat: coat))
+        }
+        #expect(Set(edges).count == 1,
+                "the cat's painted left edge moved across coats: \(Array(zip(Coat.allCases, edges)))")
+    }
+
+    /// The coat picker's own reason to exist, checked at the render level
+    /// rather than only at `CatGrid`'s (`CatGridTests
+    /// .everyPairOfCoatsIsTellableApart`): the *painted island*, not just the
+    /// grid it is built from, must show a coat other than `tabby` differently.
+    /// Bounded to the cat's own box (`agentIconBox`'s sibling reasoning) so a
+    /// change anywhere else in the render cannot make this pass vacuously.
+    @MainActor @Test func eachCoatPaintsAVisiblyDifferentCatThanTabby() throws {
+        func render(_ coat: Coat) throws -> Raster {
+            try rasterise(IslandBody(model: Self.model(.running, count: 3, coat: coat),
+                                     now: Date(timeIntervalSince1970: 1_000_000)), scale: 1)
+        }
+        let tabby = try render(.tabby)
+        let margin = Int(IslandGeometry.auraMargin)
+        // The cat's own box in the collapsed bar: `LeftFlankLayout.leadingPadding`
+        // (12) through `+ catWidth` (18), the bar's own height — see
+        // `catLeftEdge`'s doc comment for why the facial tones prove the cat is
+        // in a column; this predicts the whole box it occupies instead.
+        let xRange = (margin + 12)..<(margin + 30)
+        let yRange = 0..<Int(IslandGeometry(screen: Self.mbp14).notch.height)
+        for coat in Coat.allCases where coat != .tabby {
+            let other = try render(coat)
+            var differs = false
+            outer: for x in xRange where x < min(tabby.width, other.width) {
+                for y in yRange where y < min(tabby.height, other.height) {
+                    if tabby[x, y] != other[x, y] { differs = true; break outer }
+                }
+            }
+            #expect(differs, "\(coat) painted identically to tabby inside the cat's own box")
+        }
+    }
+
     /// The reason the minimum right flank exists, checked where it has to be
     /// true: on a dormant island the painted silhouette must extend a full
     /// corner radius past the cutout, so our corner covers the hardware's
