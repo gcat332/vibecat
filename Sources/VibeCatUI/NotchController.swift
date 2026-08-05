@@ -546,9 +546,14 @@ import VibeCatCore
         // this is the one thing that grows it, and only when the tier it
         // needs to cover actually changed — compared against the panel's own
         // live frame rather than a cached "last tier", so this can't drift
-        // out of step with what the panel is actually showing. See
-        // IslandGeometry.maxCollapsedFrames's own comment on why the width
-        // ceiling stays fixed regardless.
+        // out of step with what the panel is actually showing.
+        //
+        // Plan 6.3 Task 1: this now grows the panel **sideways as well as down**,
+        // because the open tier has a width of its own (560pt against a widest
+        // collapsed 423.1pt). No code change was needed for that — `tier` was
+        // already threaded through — but the comment that used to end here said
+        // the width ceiling stayed fixed regardless, and it no longer does. See
+        // IslandGeometry.maxCollapsedFrames.
         if let geometry, let panel {
             let needed = geometry.maxCollapsedFrames(tier: model.tier)
             if panel.frame != needed.panel {
@@ -839,7 +844,7 @@ import VibeCatCore
     /// status* constraint, which is why the dismiss below releases it.
     @discardableResult
     func dismissOnEscape(charactersIgnoringModifiers: String?) -> Bool {
-        // Pattern match, not `== .drawer`: `IslandTier.drawer(height:)` carries
+        // Pattern match, not `== .drawer`: `IslandTier.drawer(face:)` carries
         // an associated value, the same reason `IslandView`'s own drawer gate
         // uses `if case .drawer = model.tier` rather than `==`.
         guard case .drawer = model.tier, KeyRouting.isEscape(charactersIgnoringModifiers) else { return false }

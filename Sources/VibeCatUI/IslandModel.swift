@@ -167,7 +167,7 @@ import VibeCatCore
     /// what this returned before.
     public var tier: IslandTier {
         guard drawerOpen else { return hovering ? .hover : .rest }
-        return .drawer(height: face.height)
+        return .drawer(face: face)
     }
 
     /// The collapsed content's own frame — the cat, the badge, the count.
@@ -181,12 +181,16 @@ import VibeCatCore
         geometry.frames(rightFlank: layout.rightFlankWidth, tier: tier)
     }
 
-    /// The real panel's own bounds. Tier-aware for height only — `rightFlank`
-    /// stays pinned to the theoretical widest regardless of tier, so opening
-    /// the drawer grows the panel downward and never sideways (see
-    /// `IslandGeometry.maxCollapsedFrames`'s own comment on why the width
-    /// ceiling is unconditional). `NotchController.reflow()` is what actually
-    /// resizes the live window to match this once tier changes.
+    /// The real panel's own bounds, at whatever tier is current.
+    ///
+    /// **Tier-aware in both dimensions since Plan 6.3 Task 1.** It was height-only
+    /// while the drawer had no width of its own; now that it has one
+    /// (`IslandGeometry.openWidth(face:)`, 560pt) a panel fixed at the collapsed
+    /// ceiling would clip the drawer's right-hand 137pt. `rightFlank` is still the
+    /// theoretical widest, which still fixes the panel across every *collapsed*
+    /// state — that is what the spike's p95 finding was about, and it is
+    /// unchanged. `NotchController.reflow()` is what actually resizes the live
+    /// window to match this, once per tier change.
     public var panelFrames: IslandFrames { geometry.maxCollapsedFrames(tier: tier) }
 
     /// The drawer's own width — deliberately independent of `hovering`,
@@ -207,16 +211,24 @@ import VibeCatCore
     /// than animating the snap with the island's own reveal timing — there is
     /// no content in the drawer that timing would ever need to reveal, so
     /// matching the *other* animation's duration would just be dressing up a
-    /// change that should not happen in the first place. Computed the same
-    /// way `IslandBody.restingWidth` is (same session count, `hovering:
-    /// false` always), rather than reusing that private-to-`IslandView`
-    /// property directly, so `IslandModel` stays the one place a non-view
-    /// caller (a future settings surface, a test) can ask "how wide is the
-    /// drawer" without constructing a view first.
-    public var drawerWidth: CGFloat {
-        let resting = CollapsedLayout(right: layout.right, hovering: false)
-        return geometry.frames(rightFlank: resting.rightFlankWidth, tier: .rest).body.width
-    }
+    /// change that should not happen in the first place.
+    ///
+    /// **Plan 6.3 Task 1: it no longer depends on the collapsed layout either.**
+    /// That reading kept hover out, which was half the rule, and left the other
+    /// half wrong: the width came from `CollapsedLayout(hovering: false)`, so the
+    /// drawer was as wide as the *collapsed* island — 273.1pt on the `mbp14`
+    /// fixture — and moved only when the session tally gained a digit. §11's rows
+    /// saturate at 420pt, so line 2 truncated to `As…` at every session count. It
+    /// now reads the face's own width through `IslandGeometry.openWidth(face:)`,
+    /// the one place that number and its floor are written down, and the property
+    /// stays what it was for: the place a non-view caller (a settings surface, a
+    /// test) can ask "how wide is the drawer" without constructing a view first.
+    ///
+    /// Keyed to `face`, not to `tier`, so it answers for the face that *would*
+    /// open as well as the one that has — `IslandView` reads it only inside its
+    /// own `if case .drawer` gate, but the probes and tests that ask before a
+    /// click get the same number rather than a collapsed one.
+    public var drawerWidth: CGFloat { geometry.openWidth(face: face) }
 
     public var mood: CatMood { CatMood(state: state) }
     public var badge: Badge { Badge(state: state) }

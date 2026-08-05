@@ -3,10 +3,24 @@ import CoreGraphics
 public enum IslandTier: Sendable, Equatable {
     case rest
     case hover
-    case drawer(height: CGFloat)
+    /// A drawer is open, showing this face.
+    ///
+    /// **Carries the face, not a bare height** (Plan 6.3 Task 1). It used to be
+    /// `.drawer(height: CGFloat)`, from when the face fixed only one of the
+    /// drawer's two dimensions. It now fixes both, and two associated values
+    /// would let a caller pair one face's height with another's width — a way to
+    /// be wrong that this spelling does not have. `DrawerFace` is the one place
+    /// either number is written down.
+    case drawer(face: DrawerFace)
 
     var extraHeight: CGFloat {
-        if case let .drawer(h) = self { h } else { 0 }
+        if case let .drawer(face) = self { face.height } else { 0 }
+    }
+
+    /// The face whose width this tier imposes on the island, or `nil` when the
+    /// tier imposes none and the collapsed flanks decide the width instead.
+    var openFace: DrawerFace? {
+        if case let .drawer(face) = self { face } else { nil }
     }
 }
 
@@ -27,6 +41,54 @@ public enum DrawerFace: Sendable, Equatable, CaseIterable {
         case .questionWithReply: 184
         case .questionMulti:     300
         case .sessionList:       420
+        }
+    }
+
+    /// How wide the island is while this face is open.
+    ///
+    /// **§6.3 fixes heights per face and is silent on width. The prototype is
+    /// not:** `island-motion.html:162–164` sets `width:560px` on `ask`,
+    /// `askmulti` and `list` alike, and `:166` (`ask[data-other="true"]`, our
+    /// `.questionWithReply`) changes only the height. So all four faces are the
+    /// same width today. It is a per-face property anyway — the way the height
+    /// already is — so a face that ever needs a different one has somewhere to
+    /// say it, rather than a constant that has to be un-made first.
+    ///
+    /// Until Plan 6.3 there was no such property, and the consequence was
+    /// measured: `IslandGeometry.frames` let `tier` reach only the *height*, so
+    /// the open island's width was `leftFlank + notch + rightFlank` — a function
+    /// of how many digits the session tally had and nothing else. 1 and 3
+    /// sessions produced byte-identical widths (273.1pt on the `mbp14` fixture)
+    /// and 12 gained 8.1pt only because the tally reached two digits. A session
+    /// row's ink saturates at **420pt**, so line 2 truncated to `As…` at every
+    /// count. See `plans/README.md`, "Carried out of the second mockup-fidelity
+    /// wave".
+    ///
+    /// ### Why 560 is literal rather than derived from the notch
+    ///
+    /// The prototype hardcodes a `186px` notch (`--notch-w`) and could therefore
+    /// have meant either `560` or `leftFlank + notch + 316`. Ours reads the real
+    /// cutout off `NSScreen`, so the two are different rules and one had to be
+    /// chosen.
+    ///
+    /// **Literal, because 560 is a measurement of the drawer's own content, not
+    /// of the hardware above it.** The mockup gives its rows `560 − 2×18 = 524pt`
+    /// against ink that saturates at 420; nothing in that arithmetic mentions a
+    /// cutout, and no face's content gets wider because a machine's camera
+    /// housing does. Deriving it would make the drawer wider on a 16-inch
+    /// MacBook for no reason a reader could name — and, the case that actually
+    /// decides it, **`58 + 0 + 316 = 374pt` on a notchless display**, which is
+    /// below the 420 at which a row saturates. That is precisely the defect this
+    /// property exists to remove, reintroduced on the one display where nothing
+    /// about the geometry asked for it.
+    ///
+    /// The floor in `IslandGeometry.openWidth(face:)` is the other half of the
+    /// rule, and it is what keeps "literal" from being a magic constant that
+    /// happens to look right on one machine: the black must cover the hole
+    /// before it obeys a design width. See that method.
+    public var width: CGFloat {
+        switch self {
+        case .question, .questionWithReply, .questionMulti, .sessionList: 560
         }
     }
 }
@@ -107,13 +169,66 @@ public struct IslandGeometry: Sendable, Equatable {
         }
     }
 
+    /// The narrowest the island may ever be drawn: the constant left flank, the
+    /// cutout it has to span, and one corner radius clear of it.
+    /// `minimumRightFlank`'s own doc comment is why the last term is not zero.
+    ///
+    /// Zero on a notchless display but for the corner, since `notch.width` is 0
+    /// there — which is correct, there being no hole to cover.
+    public var minimumWidth: CGFloat {
+        Self.leftFlank + notch.width + Self.minimumRightFlank
+    }
+
+    /// The island's width while `face`'s drawer is open — **the face's own flat
+    /// width, floored at `minimumWidth`.**
+    ///
+    /// Two rules rather than one constant, and the floor is the reason. §5.1's
+    /// "the notch is a hole" only works because our black spans the cutout and
+    /// our corner sits outside theirs; a design width narrower than
+    /// `leftFlank + notch + minimumRightFlank` would end the body inside the
+    /// cutout and put the hardware's own corner back on screen. So covering the
+    /// hole wins over the design number whenever they disagree. On every notch
+    /// that exists the two do not disagree — the floor is 258pt on the 14-inch
+    /// fixture (58 + 185 + 15) against a 560pt face — and it would take a cutout
+    /// wider than 487pt to bind. It is here because that is the *reason* 560 is
+    /// safe, and a reason a reader can check beats one they have to trust.
+    ///
+    /// **Deliberately not `max(face.width, collapsedWidth)`.** The open width
+    /// must not depend on hover (the prototype's own rule: `width:560px` is set
+    /// outright, and `.detail`'s reveal is a separate transition on a separate
+    /// clock), and a hovered right flank is exactly what a collapsed-width floor
+    /// would let leak in.
+    ///
+    /// See `DrawerFace.width` for why the face's number is literal rather than
+    /// derived from `notch.width`, and what that means on a notchless display.
+    public func openWidth(face: DrawerFace) -> CGFloat {
+        max(face.width, minimumWidth)
+    }
+
     public func frames(rightFlank: CGFloat, tier: IslandTier) -> IslandFrames {
         let right = max(0, rightFlank)
-        let width = Self.leftFlank + notch.width + right
+        // `tier` reaches the width as well as the height since Plan 6.3 Task 1.
+        // It used to reach only the height, which made the *open* island's width
+        // a function of the session tally's digit count — see `DrawerFace.width`
+        // for the measurement and for why the open number is a flat one.
+        let width = switch tier {
+        case .rest, .hover: Self.leftFlank + notch.width + right
+        case let .drawer(face): openWidth(face: face)
+        }
         let height = notch.height + tier.extraHeight
 
         // leftEdge = notch.minX − LW. The right flank cancels out of the
-        // centring shift entirely, which is why the cat holds still.
+        // centring shift entirely, which is why the cat holds still — and since
+        // the width no longer comes from the flanks at all while a drawer is
+        // open, that now covers the open tier too: 560pt of island grows entirely
+        // to the right and the cat does not move (§5.3).
+        //
+        // The fallback pill is the deliberate exception, and it is not a lapse in
+        // §5.3: that invariant exists so the cat keeps its place *relative to the
+        // cutout*, and a notchless display has no cutout to keep a place
+        // relative to. §5.1 says the fallback floats, so it stays centred and
+        // opens symmetrically about the screen centre — pinned by
+        // `theFallbackPillStaysCentredWhenTheDrawerOpens`.
         let left = isFallbackPill ? screen.frame.midX - width / 2
                                   : notch.minX - Self.leftFlank
         let body = CGRect(x: left, y: screen.frame.maxY - height,
@@ -140,9 +255,21 @@ public struct IslandGeometry: Sendable, Equatable {
     /// collapsed content — measured, animating the silhouette inside a fixed
     /// window has a p95 of 10.34ms against 15.16ms for moving the window
     /// itself, and a far shorter tail. `rightFlank` is always the theoretical
-    /// widest here, regardless of `tier`, which is what keeps that guarantee:
-    /// nothing about opening the drawer should make the panel resize
-    /// sideways too.
+    /// widest here, regardless of `tier`, which is what keeps that guarantee for
+    /// every collapsed state.
+    ///
+    /// **It no longer holds across the open tier, and that is Plan 6.3 Task 1's
+    /// doing rather than an oversight.** This comment used to end "nothing about
+    /// opening the drawer should make the panel resize sideways too", which was
+    /// true only while the drawer had no width of its own: the open island is now
+    /// `openWidth(face:)` — 560pt — against a widest collapsed body of 423.1pt on
+    /// the `mbp14` fixture, so a panel fixed at the collapsed ceiling would clip
+    /// 137pt off the right of every drawer. Passing `tier` straight through to
+    /// `frames` is what grows it, and `NotchController.reflow()` re-applies the
+    /// frame once per tier change — the same mechanism, and the same once-per-tier
+    /// cost, that the height has always used. The spike's finding is untouched:
+    /// what it measured was resizing the window *per frame of content*, not once
+    /// on a gesture.
     ///
     /// Widening this to cover the drawer stopped being optional the moment
     /// the island could be clicked: an oversized transparent window

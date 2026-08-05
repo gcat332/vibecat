@@ -140,9 +140,11 @@ struct MotionFidelityProbe {
           .island   border-radius 15px → 20px   440ms  cubic-bezier(.22,.9,.28,1)
           .drawer   height        0 → 420px    470ms  cubic-bezier(.34,1.22,.5,1)   [calc(--t-shape + 30ms)]
           .face     opacity/translateY(4px)/blur(3px)  190ms  --ease  [--t-face]
-        ours
-          silhouette width        \(f(collapsed)) → \(f(openW))pt   — NO CHANGE, nothing to animate
-          silhouette x-offset     fixed (left edge pinned by IslandGeometry.frames)
+        ours (width column re-measured after Plan 6.3 Task 1 gave the drawer a width)
+          silhouette width        \(f(collapsed)) → \(f(openW))pt   — the travel exists now;
+                                  which curve carries it is Tasks 2–5, not this line
+          silhouette x-offset     fixed (left edge pinned by IslandGeometry.frames) —
+                                  the prototype recentres instead, §5.3 says we do not
           bottom radius           15pt, constant (IslandShape)
           drawer height           0 → 420pt   spring(response .42, damping .80)
           face crossfade          190ms / 5pt rise / 3pt blur (FaceCrossfade) — matches
@@ -176,7 +178,9 @@ struct MotionFidelityProbe {
           prototype lands exactly at 470ms; ours within 0.5% at \(settle.isNaN ? "never <2s" : "\(Int(settle))ms")
 
           WIDTH: the prototype travels 287pt over 440ms on an overshooting curve.
-          Ours travels 0pt. There is no curve to compare.
+          Ours travelled 0pt when this probe was written. Since Plan 6.3 Task 1 it
+          travels \(f(openW - collapsed))pt — 423.1 → 560 from the hovered start a click
+          actually happens in. Whether a curve is keyed to it is Task 2's question.
         """)
     }
 
@@ -218,8 +222,12 @@ struct MotionFidelityProbe {
 
           DrawerFace.sessionList.height = \(f(DrawerFace.sessionList.height))pt for every count
           (§6.3). Prototype: .island[data-state="list"] .drawer{height:420px} — same.
-          Width is where they part: ours is a function of how many DIGITS the tally
-          has, so 1 and 3 sessions are byte-identical and only n>=10 moves it 8pt.
+          Width used to be where they part: it was a function of how many DIGITS the
+          tally had, so 1 and 3 sessions were byte-identical (273.1) and only n>=10
+          moved it 8pt. Plan 6.3 Task 1 made it DrawerFace.width — flat, and the
+          `drawerWidth`/`painted cols` columns above should now read 560 at every
+          count. The `collapsed`/`hovered` columns are the closed island and still
+          move with the tally, correctly.
         """)
     }
 

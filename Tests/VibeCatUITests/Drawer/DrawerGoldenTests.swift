@@ -334,20 +334,28 @@ private func tightestPackingSingleSelect() -> VibeEvent {
 }
 
 /// §6.4's reservation, checked at the width `IslandView` actually passes —
-/// one real session, not hovering, on the same `mbp14` fixture every
-/// geometry test in this suite already fixes on (273.1pt, computed through
-/// the real `IslandGeometry`/`IslandModel` pipeline rather than a literal
-/// that could drift from it as either changes).
+/// computed through the real `IslandGeometry`/`IslandModel` pipeline rather than a
+/// literal that could drift from it as either changes.
 ///
-/// Measured: this holds with only 6pt of margin, not a comfortable buffer —
-/// worth a reviewer's attention (see the task report) — but not currently
-/// broken.
+/// **`model.drawerWidth`, not `model.frames.body.width` with the drawer closed,
+/// since Plan 6.3 Task 1.** This read the *collapsed* width (273.1pt on the
+/// `mbp14` fixture) and called it the production width, which it was only because
+/// `drawerWidth` was derived from the collapsed layout — the defect §6.3's
+/// 2026-08-05 correction records. The open drawer is 560pt, and this is the test
+/// whose name claims to check the real one.
+///
+/// The narrow case is not lost with it: `theDrawerStaysClearOfTheFooterAtThe
+/// NarrowestRealisticWidth` below renders the same tightest-packing question at
+/// 258pt, narrower than the 273.1 this used to use, and it is where the 6pt of
+/// margin measured during Plan 6.4 is still pinned.
 @MainActor @Test func theDrawerStaysClearOfTheFooterAtTheRealisticProductionWidth() throws {
     let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
                             motion: MotionPreference(chosen: .full, systemWantsReduced: false))
     model.state = .waiting
     model.sessionCount = 1
-    let width = model.frames.body.width
+    model.question = QuestionModel(event: tightestPackingSingleSelect())
+    model.drawerOpen = true
+    let width = model.drawerWidth
 
     let m = QuestionModel(event: tightestPackingSingleSelect())
     let raster = try rasterise(DrawerView(question: m, accent: IslandState.waiting.accent, width: width))
@@ -934,7 +942,16 @@ private func isNear(_ p: Raster.Pixel, _ colour: RGBA, tolerance: Int = 6) -> Bo
             "setup: drawerWidth itself moved when hovering changed, which is exactly what this test exists to catch")
 
     let drawerTop = Int(model.geometry.notch.height.rounded(.up))
-    let drawerRight = Int(drawerWidth.rounded(.down))
+    // Clamped to the raster, and stated as a failure rather than left to
+    // `Raster`'s own subscript precondition. Found while mutation-checking Plan
+    // 6.3 Task 1: a mutant that widened `drawerWidth` without widening the panel
+    // made this scan run past the render's right edge and **trap**, which aborts
+    // the whole serial suite at that point — so the mutation's real effect
+    // elsewhere could not be read at all. A test that crashes tells you less than
+    // one that fails.
+    #expect(drawerWidth <= CGFloat(atRest.width),
+            "setup: the drawer is \(drawerWidth)pt wide inside a \(atRest.width)pt render — the panel is not covering the drawer, so the scan below would run off the edge")
+    let drawerRight = min(atRest.width, Int(drawerWidth.rounded(.down)))
     var differing = 0
     for y in drawerTop..<atRest.height {
         for x in 0..<drawerRight where atRest[x, y] != hovered[x, y] {

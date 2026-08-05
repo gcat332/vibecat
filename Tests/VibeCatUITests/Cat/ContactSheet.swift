@@ -293,15 +293,27 @@ struct ContactSheetTool {
     /// way to see "Subagents hidden collapses to a count rather than vanishing"
     /// is a `SessionRow` rendered directly. Both in one image, the same way the
     /// contact sheet above puts its four drawer scenarios side by side.
+    /// The width production actually gives the list, read off the face rather
+    /// than restated.
+    ///
+    /// **Was a hardcoded `388`, and that number is why this fixture showed line 2
+    /// truncated to `As…`.** 388 was itself a guess at the mockup's panel; the
+    /// running app was narrower still (273.1pt), and a row's ink saturates at
+    /// 420pt. Plan 6.3 Task 1 gave the drawer a width of its own —
+    /// `DrawerFace.sessionList.width`, the prototype's flat 560 — so the shot is
+    /// now taken at the size a person actually sees, and reading it from the face
+    /// means it cannot drift from production again.
+    static var listShotWidth: CGFloat { DrawerFace.sessionList.width }
+
     @MainActor
     static func sessionListComposition() -> some View {
         let sessions = sessionListFixture()
         return HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("§11 · the assembled list, real 420pt face")
+                Text("§11 · the assembled list, real 420pt face at the real \(Int(listShotWidth))pt width")
                     .font(.system(size: 9)).foregroundStyle(Color(hazeColour))
                 DrawerView(question: nil, sessions: sessions,
-                           accent: IslandState.waiting.accent, width: 388)
+                           accent: IslandState.waiting.accent, width: listShotWidth)
             }
             VStack(alignment: .leading, spacing: 12) {
                 // All four of `MARKS`, at the 16pt the row draws them, because
@@ -325,7 +337,7 @@ struct ContactSheetTool {
                     .font(.system(size: 9)).foregroundStyle(Color(hazeColour))
                 SessionRow(session: sessions[0], now: listShotNow,
                            options: .all.subtracting(.subagents))
-                    .frame(width: 388)
+                    .frame(width: listShotWidth)
                     .background(Color(islandGroundColour))
                 // The two skins the list itself cannot show: an offscreen render
                 // has no pointer and no focus system, so `highlight` is the only
@@ -340,7 +352,7 @@ struct ContactSheetTool {
                     SessionRow(session: sessions[3], now: listShotNow, highlight: .focused)
                     SessionRow(session: sessions[3], now: listShotNow)
                 }
-                .frame(width: 388)
+                .frame(width: listShotWidth)
                 .background(Color(islandGroundColour))
             }
         }
@@ -354,10 +366,15 @@ struct ContactSheetTool {
         // Sized to hold both panels: the drawer's own 420pt face plus this
         // composition's label and padding. `rasteriseHosted` needs an explicit
         // size — a hosting view has no `sizeThatFits` step here, and this is a
-        // fixture, so a measured-once number with the reason written down beats
-        // machinery.
+        // fixture, so a number with the reason written down beats machinery.
+        //
+        // Derived from `listShotWidth` rather than measured again, so raising the
+        // face's width does not silently crop the shot: two columns at the real
+        // width, the 16pt gap between them, and 12pt of padding either side. It
+        // was a flat `828` while both columns were hardcoded to 388.
+        let width = Self.listShotWidth * 2 + 16 + 24
         let raster = try rasteriseHosted(Self.sessionListComposition(),
-                                         size: CGSize(width: 828, height: 460))
+                                         size: CGSize(width: width, height: 460))
         #expect(raster.writePNG(to: path), "could not write \(path)")
         #expect(raster.opaquePixelCount > 0,
                 "the composition rendered nothing at all — if this is 0, `rasteriseHosted` has stopped working and the PNG is not worth opening")

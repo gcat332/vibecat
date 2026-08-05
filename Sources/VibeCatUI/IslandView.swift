@@ -223,7 +223,7 @@ public struct IslandView: View {
         #if DEBUG
         Self.drawerHeightReadCount += 1
         #endif
-        if case let .drawer(height) = model.tier { return height }
+        if case let .drawer(face) = model.tier { return face.height }
         return 0
     }
 
@@ -537,12 +537,26 @@ struct IslandBody: View {
     /// resulting view tree for the *correct* `.animation` wiring would need
     /// a snapshot/view-inspection dependency this project doesn't take —
     /// so a read count is the narrower, honest thing this can actually show.
+    /// **Tier-aware since Plan 6.3 Task 1, and that is what makes the open island
+    /// one body rather than two.** `tier: .rest` was hardcoded here, so with a
+    /// drawer open the collapsed bar above the notch line stayed at its collapsed
+    /// 273.1pt while the drawer below it took the face's own 560 — a 287pt step
+    /// across exactly the line §9.1 says the island must read as continuous.
+    /// Passing `model.tier` gives both halves the same number. It changes nothing
+    /// while the drawer is closed: `.rest` and `.hover` both fall to
+    /// `leftFlank + notch + rightFlank` in `IslandGeometry.frames`, which is what
+    /// the hardcoded `.rest` always computed.
+    ///
+    /// Still hover-independent, which is the property the split above depends on:
+    /// `.rest` and `.hover` differ in name only as far as width goes, and the open
+    /// width does not consult the flanks at all.
     var restingWidth: CGFloat {
         #if DEBUG
         Self.restingWidthReadCount += 1
         #endif
         let resting = CollapsedLayout(right: model.layout.right, hovering: false)
-        return model.geometry.frames(rightFlank: resting.rightFlankWidth, tier: .rest).body.width
+        return model.geometry.frames(rightFlank: resting.rightFlankWidth,
+                                     tier: model.tier).body.width
     }
 
     #if DEBUG
@@ -596,7 +610,10 @@ struct IslandBody: View {
     /// §6.1's tiers are progressive — Rest, then Hover, then Click — so once
     /// the drawer is open the reveal has already done its job. Dropping it
     /// makes the collapsed bar and the drawer exactly the same width
-    /// (`restingWidth` and `drawerWidth` are both 273.1 on the mbp14 fixture):
+    /// (`restingWidth` and `drawerWidth` are both `DrawerFace.width`'s 560 on the
+    /// mbp14 fixture, since Plan 6.3 Task 1 gave the open tier a width and
+    /// `restingWidth` began reading it; both were 273.1 before that, for the same
+    /// reason — they agree, whatever the number is):
     /// one column, which is what §9.1's "one body with mass" asks for and what
     /// the prototype does with its single element. Without it, an open drawer
     /// showed a collapsed bar `hoverReveal` points wider than itself — a step

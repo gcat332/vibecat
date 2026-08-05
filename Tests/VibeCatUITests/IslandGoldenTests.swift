@@ -178,6 +178,110 @@ struct IslandGoldenTests {
                 "the island's painted left edge moved between states: \(edges)")
     }
 
+    /// The leftmost column holding a pixel that only the cat's face can have
+    /// painted, in the collapsed bar's own rows.
+    ///
+    /// **`Tone.innerEar` and `.nose`, not the silhouette's first painted column,
+    /// and the two are different claims.** `paintedColumns` finds the *ground's*
+    /// left edge, which `IslandGeometry.frames` pins by construction; it would
+    /// hold unchanged while the bar's content re-centred inside a wider frame (an
+    /// `HStack` gaining a `Spacer`, `.leading` becoming `.center`) and the cat
+    /// walked sideways underneath it. These two tones are the only colours in the
+    /// palette that no accent derives — they are the same pink in every state,
+    /// precisely so a nose reads as a nose at any hue — and nothing else on the
+    /// island draws in them, which is the fact `everyStateRendersAVisibleIsland`
+    /// already leans on. So a column holding one is a column the cat is in.
+    ///
+    /// Row-limited to the bar (`0..<notch.height`): the drawer below is ground and
+    /// content, none of it a cat, and scanning it would only widen what could
+    /// accidentally be matched.
+    @MainActor
+    static func catLeftEdge(_ m: IslandModel) throws -> Int {
+        let raster = try rasterise(IslandBody(model: m, now: Date(timeIntervalSince1970: 1_000_000)),
+                                   scale: 1)
+        let palette = CatPalette(accent: m.state.accent)
+        let facial: [RGBA] = [palette[Tone.innerEar], palette[Tone.nose]]
+        let tones: [(Int, Int, Int)] = facial.map { c in
+            let r = Int((c.r * 255).rounded())
+            let g = Int((c.g * 255).rounded())
+            let b = Int((c.b * 255).rounded())
+            return (r, g, b)
+        }
+        let bottom = min(raster.height, Int(m.geometry.notch.height.rounded(.up)))
+        for x in 0..<raster.width {
+            for y in 0..<bottom {
+                let p = raster[x, y]
+                guard !p.isTransparent else { continue }
+                for t in tones where abs(Int(p.r) - t.0) <= 6 && abs(Int(p.g) - t.1) <= 6
+                                     && abs(Int(p.b) - t.2) <= 6 {
+                    return x
+                }
+            }
+        }
+        throw CatNotFound()
+    }
+
+    struct CatNotFound: Error, CustomStringConvertible {
+        var description: String { "no innerEar or nose pixel in the collapsed bar — the cat did not draw, so its left edge cannot be measured" }
+    }
+
+    /// **§5.3, at the tier Plan 6.3 Task 1 could have broken it at.** The island
+    /// went from 273.1pt collapsed to 560pt open on this fixture, and every one of
+    /// those 287 points has to appear on the *right*. A wider drawer that moves the
+    /// cat is a defect, not a side effect — CLAUDE.md names this failure mode by
+    /// name, and Plan 6.1's Task 5 rasterised it across three right-flank values
+    /// before there was an open width to check it against.
+    ///
+    /// Four renders, one input varying at a time: hover off/on × drawer
+    /// closed/open. Hover is in the grid because `model.hovering` stays *true* for
+    /// the whole life of an open drawer (`IslandBody.revealWidth`'s own comment),
+    /// so hovered-and-open is the ordinary production state, not an edge.
+    ///
+    /// Anchored on the cat rather than the ground — see `catLeftEdge` for why that
+    /// distinction is the whole test.
+    ///
+    /// Would fail if: `IslandGeometry.frames` absorbed the open width into the left
+    /// flank instead of the right (the Step 3 mutation — verified, this reddens and
+    /// nothing else in the suite does), or `IslandBody`'s `VStack` alignment or
+    /// `content(cell:)`'s packing changed so the bar's content centred in the wider
+    /// frame.
+    @MainActor @Test func openingTheDrawerDoesNotMoveTheCatsPaintedLeftEdge() throws {
+        var edges: [(hovering: Bool, open: Bool, x: Int)] = []
+        for hovering in [false, true] {
+            for open in [false, true] {
+                // .idle, not .waiting: a continuous mood takes IslandView's
+                // TimelineView branch and reads the wall clock, which has made
+                // multi-render comparisons in this suite flake. `IslandBody`
+                // takes `now` as a parameter, so this render is pinned anyway —
+                // held to the same choice the drawer suite makes for the same
+                // reason.
+                let m = Self.model(.idle, count: 3, hovering: hovering)
+                m.drawerOpen = open
+                if open {
+                    guard case .drawer = m.tier else {
+                        Issue.record("hovering=\(hovering): the fixture never reached the drawer tier")
+                        continue
+                    }
+                }
+                edges.append((hovering, open, try Self.catLeftEdge(m)))
+            }
+        }
+        #expect(Set(edges.map(\.x)).count == 1,
+                "the cat's painted left edge moved across hover/drawer states: \(edges)")
+
+        // …and the island really did get wider in the same renders, so the
+        // invariant above is not holding because nothing changed. Without this a
+        // `DrawerFace.width` of 273.1 would satisfy every assertion here.
+        let closed = try Self.silhouette(Self.model(.idle, count: 3))
+        let openModel = Self.model(.idle, count: 3)
+        openModel.drawerOpen = true
+        let open = try Self.silhouette(openModel)
+        #expect(open.count > closed.count,
+                "setup: the painted island is \(open.count)pt open against \(closed.count)pt closed — it did not widen, so the left-edge check above proves nothing")
+        #expect(open.first == closed.first,
+                "the painted ground's own left edge moved from \(closed.first) to \(open.first)")
+    }
+
     /// §6.2: "configurable: session count (default), agent icon, or nothing."
     /// Design §5.3's `LW = 58pt` invariant, re-checked against the one axis
     /// that changes here — the right flank's own *content*, not merely its
@@ -361,6 +465,18 @@ struct IslandGoldenTests {
                                        + IslandGeometry.auraMargin).rounded(.up))
             #expect(raster.height == expectedHeight,
                     "\(state) count=\(count): rendered \(raster.height)pt tall, expected \(expectedHeight) — the panel did not actually grow to cover the open drawer")
+
+            // Plan 6.3 Task 1: the same guard on the other axis, and it is
+            // needed for the identical reason. The open island is now 560pt wide
+            // where it used to be 273.1, and the scan below runs over the
+            // cutout's *own* columns — a panel that failed to widen would leave
+            // every assertion here green while checking a narrower island than
+            // production draws. `expectedWidth` is derived from the face, not
+            // restated, so it moves with `DrawerFace.width`.
+            let expectedWidth = Int((m.question!.face.width
+                                      + IslandGeometry.auraMargin * 2).rounded(.up))
+            #expect(raster.width == expectedWidth,
+                    "\(state) count=\(count): rendered \(raster.width)pt wide, expected \(expectedWidth) — the panel did not grow sideways to cover the open drawer")
 
             let from = Int(notch.minX - m.frames.panel.minX)
             let to = Int(notch.maxX - m.frames.panel.minX)

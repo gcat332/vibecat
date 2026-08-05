@@ -101,7 +101,7 @@ private let externalDisplay = ScreenMetrics(
 
 @Test func theDrawerGrowsDownwardAndKeepsItsTopAtTheScreenEdge() {
     let g = IslandGeometry(screen: mbp14)
-    let f = g.frames(rightFlank: 35, tier: .drawer(height: 288))
+    let f = g.frames(rightFlank: 35, tier: .drawer(face: .question))
     #expect(f.body.height == (32 + 288 as CGFloat))
     #expect(f.body.maxY == 982)
     #expect(f.body.minX == (663 - 58 as CGFloat))   // still pinned
@@ -195,4 +195,136 @@ private let externalDisplay = ScreenMetrics(
 /// §6.3's table: "Session list — 420pt, rows scroll."
 @Test func theSessionListFaceIsTheHeightTheDesignGivesIt() {
     #expect(DrawerFace.sessionList.height == 420)
+}
+
+// MARK: - Plan 6.3 Task 1: the drawer's own width
+
+/// The prototype's own number, for every face: `island-motion.html:162–164` sets
+/// `width:560px` on `ask`, `askmulti` and `list`, and `:166`
+/// (`ask[data-other="true"]`) changes only the height.
+///
+/// Over `allCases`, not three literals: a face added later gets asked the
+/// question rather than quietly defaulting.
+///
+/// Would fail if: `DrawerFace.width` returned anything but 560 for any face.
+@Test func everyDrawerFaceIsThePrototypesFlat560() {
+    for face in DrawerFace.allCases {
+        #expect(face.width == 560,
+                "\(face) is \(face.width)pt wide against the prototype's flat 560 (island-motion.html:162–164)")
+    }
+}
+
+/// **The defect this task exists to fix.** `frames` let `tier` reach only the
+/// height, so the open island was `leftFlank + notch + rightFlank` — narrower
+/// than the drawer's content needs, and moving only when the session tally
+/// gained a digit.
+///
+/// Compared against the collapsed frame rather than restated as 560, so the claim
+/// is "opening widens it" rather than "the constant is the constant" — the second
+/// of which `everyDrawerFaceIsThePrototypesFlat560` already covers, and which
+/// would go on passing with `tier` disconnected from the width entirely.
+///
+/// Would fail if: `frames`'s `switch tier` lost its `.drawer` arm and fell back
+/// to the flank sum (the Step 2 mutation — verified, this reddens).
+@Test func openingTheDrawerWidensTheBody() {
+    let g = IslandGeometry(screen: mbp14)
+    let collapsed = g.frames(rightFlank: 35, tier: .rest).body
+    let open = g.frames(rightFlank: 35, tier: .drawer(face: .sessionList)).body
+    #expect(open.width > collapsed.width,
+            "open \(open.width)pt against collapsed \(collapsed.width)pt — the drawer still has no width of its own")
+    #expect(open.width == DrawerFace.sessionList.width,
+            "open width \(open.width)pt is not the face's own \(DrawerFace.sessionList.width)")
+}
+
+/// It is a **face** width, not a content width: the right flank does not reach it
+/// at all, so no session count and no hover reveal can move it.
+///
+/// `rightFlank: 5000` is the point — not a plausible value, but the one that
+/// separates "ignores the flank" from "happens to be bigger than today's flank".
+/// A `max(face.width, collapsedWidth)` spelling would return 5058 here and fail;
+/// that spelling is what the floor in `openWidth(face:)` deliberately is not.
+///
+/// Would fail if: `openWidth` floored against the collapsed width instead of
+/// `minimumWidth`, or the `.drawer` arm added `right` back in.
+@Test func theOpenWidthIgnoresTheRightFlankEntirely() {
+    let g = IslandGeometry(screen: mbp14)
+    let widths: [CGFloat] = [0, 35, 180.1, 5000]
+    let open = widths.map { g.frames(rightFlank: $0, tier: .drawer(face: .question)).body.width }
+    #expect(Set(open).count == 1,
+            "the open width moved with the right flank: \(open)")
+    #expect(open[0] == DrawerFace.question.width)
+}
+
+/// §5.1's floor, at the only geometry that can make it bind: a cutout wide enough
+/// that the design's 560 would end the body *inside* the hole, putting the
+/// hardware's own corner back on screen.
+///
+/// 600pt is not a Mac — that is why it is here. `openWidth`'s floor is the reason
+/// a flat 560 is safe rather than lucky, and a rule whose failing case is never
+/// constructed is a rule nobody has checked. The assertion is the same one
+/// `theBodyAlwaysClearsTheCutoutByACornerRadius` makes of every collapsed state,
+/// so the open tier is held to §5.1 by the same standard.
+///
+/// Would fail if: `openWidth(face:)` returned `face.width` unfloored.
+@Test func anAbsurdlyWideCutoutTakesTheFloorRatherThanTheDesignWidth() {
+    let huge = ScreenMetrics(
+        frame: CGRect(x: 0, y: 0, width: 3000, height: 1000),
+        visibleFrame: CGRect(x: 0, y: 0, width: 3000, height: 968),
+        safeAreaTop: 32,
+        auxLeft: CGRect(x: 0, y: 968, width: 1200, height: 32),
+        auxRight: CGRect(x: 1800, y: 968, width: 1200, height: 32))
+    let g = IslandGeometry(screen: huge)
+    #expect(g.notch.width == 600, "setup: the fixture's cutout is not 600pt wide")
+
+    let open = g.frames(rightFlank: 0, tier: .drawer(face: .sessionList)).body
+    #expect(open.width == g.minimumWidth,
+            "open width \(open.width)pt took the design's \(DrawerFace.sessionList.width) over the \(g.minimumWidth)pt floor")
+    #expect(open.maxX >= g.notch.maxX + IslandGeometry.bottomRadius,
+            "the open body ends \(open.maxX - g.notch.maxX)pt past a \(g.notch.width)pt cutout, inside our own \(IslandGeometry.bottomRadius)pt corner — the hardware's corner shows through")
+}
+
+/// §5.1's fallback, stated rather than left to be discovered.
+///
+/// The open width is the same 560 on a notchless display — the number describes
+/// the drawer's content, not the hardware (see `DrawerFace.width`) — and the pill
+/// stays centred, so it opens symmetrically about the screen centre. **§5.3's
+/// left-edge pin does not apply here and this test says so on purpose:** that
+/// invariant exists so the cat keeps its place relative to the cutout, and there
+/// is no cutout. Asserting `minX` held would be asserting the wrong rule.
+///
+/// Would fail if: `frames` centred only the collapsed pill, or `openWidth` were
+/// derived as `leftFlank + notch + 316` — which gives 374pt here, below the 420pt
+/// at which a session row's ink saturates, reintroducing this task's own defect
+/// on exactly the display that never had a geometric reason for it.
+@Test func theFallbackPillStaysCentredWhenTheDrawerOpens() {
+    let g = IslandGeometry(screen: externalDisplay)
+    #expect(g.isFallbackPill)
+    let open = g.frames(rightFlank: 40, tier: .drawer(face: .sessionList)).body
+    #expect(open.width == 560,
+            "the notchless pill opens to \(open.width)pt — a notch-derived width would give 374 here")
+    #expect(open.midX == externalDisplay.frame.midX,
+            "the open pill is centred at \(open.midX) against a screen centre of \(externalDisplay.frame.midX)")
+}
+
+/// The panel has to cover the drawer it is showing, and until this task it did
+/// not: fixed at the widest *collapsed* body (423.1pt on this fixture), it would
+/// have clipped 137pt off the right of a 560pt drawer.
+///
+/// Stated as "the panel holds the body" rather than as a number, so it survives
+/// either number being retuned.
+///
+/// Would fail if: `maxCollapsedFrames` stopped passing `tier` through to `frames`
+/// (which is all that grows it), or `IslandModel.panelFrames` went back to
+/// `.rest`.
+@Test func theFixedPanelGrowsSidewaysToHoldTheOpenDrawer() {
+    let g = IslandGeometry(screen: mbp14)
+    let collapsed = g.maxCollapsedFrames()
+    let open = g.maxCollapsedFrames(tier: .drawer(face: .sessionList))
+    #expect(open.body.width == DrawerFace.sessionList.width)
+    #expect(open.panel.width >= open.body.width + IslandGeometry.auraMargin * 2,
+            "the panel is \(open.panel.width)pt around a \(open.body.width)pt body — the drawer's right edge is clipped")
+    #expect(open.panel.width > collapsed.panel.width,
+            "the panel did not grow sideways for the open drawer at all")
+    #expect(open.panel.minX == collapsed.panel.minX,
+            "growing the panel moved its left edge, which unpins §5.3")
 }

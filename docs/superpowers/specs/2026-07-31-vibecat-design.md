@@ -293,17 +293,66 @@ or **nothing**. The count is the default because a brand mark tells you what you
 already know, while a count tells you how many sessions are open and its colour
 tells you what they are doing.
 
-### 6.3 Drawer heights
+### 6.3 Drawer heights and widths
 
-| Face | Height |
-|---|---|
-| Question | `288pt` |
-| Question, reply field open | `184pt` |
-| Question, multi-select | `300pt` |
-| Session list | `420pt`, rows scroll |
+| Face | Height | Width |
+|---|---|---|
+| Question | `288pt` | `560pt` |
+| Question, reply field open | `184pt` | `560pt` |
+| Question, multi-select | `300pt` | `560pt` |
+| Session list | `420pt`, rows scroll | `560pt` |
 
 The drawer follows its content — opening the reply field shrinks it back rather
 than leaving dead space.
+
+> **Corrected 2026-08-05, after Plan 6.2 shipped.** This section gave heights only,
+> and the silence was read as "the width is whatever the collapsed island is".
+> `IslandGeometry.frames` let the tier reach the height and nothing else, so the
+> **open** island was `leftFlank + notch + rightFlank` — a function of how many
+> digits the session tally happened to have. Measured on the `mbp14` fixture: 1 and
+> 3 sessions gave byte-identical widths of `273.1pt`, and 12 sessions gained `8.1pt`
+> only because the tally reached two digits. A session row's ink saturates at
+> `420pt`, so §11's line 2 truncated to `As…` at every session count — a defect
+> carried in `plans/README.md` for two waves while its cause sat here as an
+> omission.
+>
+> The prototype was never silent: `island-motion.html:162–164` sets `width:560px` on
+> `ask`, `askmulti` and `list` alike, and `:166` (`ask[data-other="true"]`) changes
+> only the height. So the width column above is the prototype's, and it is flat.
+>
+> **`560pt` is literal, not derived from the cutout.** The prototype hardcodes a
+> `186px` notch, so its `560` could have meant either the number or
+> `LW + notch + 316`; ours reads the real cutout off `NSScreen`, which makes those
+> two different rules. It is a measurement of the drawer's own content — the mockup
+> gives its rows `560 − 2×18 = 524pt` against ink that saturates at `420` — and no
+> face's content gets wider because a machine's camera housing does. Deriving it
+> would give `58 + 0 + 316 = 374pt` on a **notchless display**, below the width at
+> which a row saturates, reintroducing this very defect on the one display that
+> never had a geometric reason for it.
+>
+> **Two rules, because one would be a magic constant.** The design width is floored
+> at `leftFlank + notch + minimumRightFlank`: §5.1's "the notch is a hole" holds
+> only because our black spans the cutout and our corner sits outside theirs, so
+> covering the hole wins whenever the two disagree. On every notch that exists they
+> do not — the floor is `258pt` on a 14-inch MacBook — and it would take a cutout
+> wider than `487pt` to bind. It is written down because it is the *reason* a flat
+> `560` is safe rather than lucky. See `IslandGeometry.openWidth(face:)`.
+>
+> **On a notchless display** the open width is the same `560pt` and §5.1's fallback
+> pill stays centred, so it opens symmetrically about the screen centre. §5.3's
+> pinned left edge is not violated there: that invariant exists so the cat keeps its
+> place relative to the cutout, and there is no cutout. On a notched display the
+> left edge is pinned as ever and all `287pt` of the expansion appear on the right.
+>
+> **On the `184pt` row: it was already here, and already implemented.** Plan 6.3's
+> brief expected to find two rows in this table and to have to add the two the
+> prototype has; all four heights were in fact already present and correct, and
+> `DrawerFace.questionWithReply` is genuinely reached — `QuestionModel.face` returns
+> it while `isWritingOther`. So the height correction that plan carried had already
+> been made by an earlier one, and the only thing missing from this section was the
+> width. Recorded rather than quietly dropped, because a plan whose premise about
+> the spec is stale is worth knowing about; the width column above is the whole of
+> this correction.
 
 ### 6.4 Panel footer
 

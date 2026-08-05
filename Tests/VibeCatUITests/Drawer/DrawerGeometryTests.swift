@@ -28,7 +28,7 @@ private let mbp14 = ScreenMetrics(
 @Test func openingTheDrawerDoesNotMoveTheLeftEdge() {
     let g = IslandGeometry(screen: mbp14)
     let collapsed = g.frames(rightFlank: 35, tier: .rest)
-    let open = g.frames(rightFlank: 35, tier: .drawer(height: DrawerFace.question.height))
+    let open = g.frames(rightFlank: 35, tier: .drawer(face: .question))
     #expect(open.body.minX == collapsed.body.minX)
     #expect(open.panel.minX == collapsed.panel.minX)
 }
@@ -51,7 +51,7 @@ private let mbp14 = ScreenMetrics(
 /// (to 0, against an expected 288).
 @Test func theDrawerHangsBelowTheNotchLine() {
     let g = IslandGeometry(screen: mbp14)
-    let open = g.frames(rightFlank: 35, tier: .drawer(height: 288))
+    let open = g.frames(rightFlank: 35, tier: .drawer(face: .question))
     #expect(g.notch.minY - open.body.minY == 288)
     #expect(open.body.height == g.notch.height + 288)
 }
@@ -74,7 +74,7 @@ private let mbp14 = ScreenMetrics(
 @Test func thePanelGrowsToHoldTheDrawer() {
     let g = IslandGeometry(screen: mbp14)
     let collapsed = g.frames(rightFlank: 35, tier: .rest)
-    let open = g.frames(rightFlank: 35, tier: .drawer(height: 288))
+    let open = g.frames(rightFlank: 35, tier: .drawer(face: .question))
     #expect(open.panel.height - collapsed.panel.height == 288,
             "the panel did not grow by the drawer's own requested height")
     #expect(open.panel.maxY == open.body.maxY)                       // no top margin
@@ -130,7 +130,7 @@ private let mbp14 = ScreenMetrics(
 @MainActor @Test func nothingIsDrawnInsideTheCutoutWithTheDrawerOpen() throws {
     let ground = Raster.Pixel(islandGroundColour)   // derived, never restated — see Raster.Pixel(_:)
     let g = IslandGeometry(screen: mbp14)
-    let open = g.frames(rightFlank: 35, tier: .drawer(height: DrawerFace.question.height))
+    let open = g.frames(rightFlank: 35, tier: .drawer(face: .question))
     let origin = open.bodyInPanel.origin
 
     let scene = ZStack(alignment: .topLeading) {

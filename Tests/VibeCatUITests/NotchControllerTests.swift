@@ -572,6 +572,19 @@ private let externalDisplay = ScreenMetrics(
 /// resize-comparison in `reflow()` to never call `panel.apply(_:)` at all
 /// and finding the whole suite still green. This is the test that actually
 /// exercises the panel.
+/// **Updated by Plan 6.3 Task 1, and the update is the point.** This test used to
+/// assert `panel.frame.width == collapsedFrame.width` — "the drawer should only
+/// ever grow it downward". That was true only while the drawer had no width of its
+/// own, and it is the one golden in the suite that pinned the old behaviour, so it
+/// is where the change had to be argued rather than absorbed. §6.3 (corrected
+/// 2026-08-05) gives the open island a flat 560pt; a panel held at the collapsed
+/// ceiling would clip 137pt off the right of every drawer.
+///
+/// Safe to change because the invariant the old line was standing in for is not
+/// "the width never moves" — it is §5.3's *left edge*, which has its own assertion
+/// below and is unchanged. The equality is replaced by the stronger claim rather
+/// than deleted: the panel grows sideways *by exactly the face's own width*, so a
+/// panel that grew by some other amount now fails where before it passed.
 @MainActor @Test func thePanelGrowsWhenTheDrawerOpensAndShrinksWhenItCloses() throws {
     let c = makeController()
     let panel = try #require(c.panelForTesting)
@@ -582,8 +595,11 @@ private let externalDisplay = ScreenMetrics(
     #expect(c.model.tier != .rest, "the drawer never opened, so this test proves nothing")
     #expect(panel.frame.height > collapsedFrame.height,
             "the live panel did not grow to cover the open drawer")
-    #expect(panel.frame.width == collapsedFrame.width,
-            "the panel resized sideways — the drawer should only ever grow it downward")
+    let face = try #require(c.model.question?.face)
+    #expect(panel.frame.width == face.width + IslandGeometry.auraMargin * 2,
+            "the live panel is \(panel.frame.width)pt wide around a \(face.width)pt drawer — it did not grow sideways to cover it")
+    #expect(panel.frame.width > collapsedFrame.width,
+            "the panel width did not move at all when the drawer opened")
     #expect(panel.frame.minX == collapsedFrame.minX,
             "the left edge moved — design §5.3's one fixed invariant")
 

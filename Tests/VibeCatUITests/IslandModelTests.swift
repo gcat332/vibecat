@@ -160,12 +160,65 @@ private let mbp14 = ScreenMetrics(
     #expect(m.drawerWidth == atRest,
             "drawerWidth moved from \(atRest) to \(m.drawerWidth)pt when only hovering changed")
 
-    // Independently derived — the same arithmetic IslandGeometry.frames uses
-    // for body.width, composed with a hovering: false CollapsedLayout built
-    // directly here — rather than read back off m.drawerWidth itself, which
-    // is exactly the value under test.
-    let expected = IslandGeometry.leftFlank + m.geometry.notch.width
-                 + CollapsedLayout(right: m.layout.right, hovering: false).rightFlankWidth
-    #expect(m.drawerWidth == expected,
-            "drawerWidth is \(m.drawerWidth), expected \(expected) — a hovering: false right-flank width, at the current session count")
+    // Independently derived — the prototype's own literal for the face that is
+    // showing, not read back off `m.drawerWidth`, which is the value under test.
+    //
+    // Plan 6.3 Task 1 replaced what stood here: `leftFlank + notch.width +
+    // CollapsedLayout(hovering: false).rightFlankWidth`, which was the collapsed
+    // island's width and is exactly the defect (§6.3 corrected 2026-08-05). It
+    // passed for the whole of Plan 5 while the drawer was 287pt too narrow to
+    // draw its own second line, because it restated the implementation's rule
+    // instead of the design's number.
+    #expect(m.drawerWidth == m.face.width,
+            "drawerWidth is \(m.drawerWidth), expected the open face's own \(m.face.width)")
+    #expect(m.drawerWidth == 560,
+            "drawerWidth is \(m.drawerWidth) against the prototype's flat 560 (island-motion.html:162–164)")
+}
+
+/// **A face width, not a content width.** The measurement that opened Plan 6.3:
+/// 1 and 3 sessions gave byte-identical open widths (273.1pt) and 12 gained 8.1pt
+/// only because the tally reached two digits — so the drawer's width was a
+/// function of digit count and nothing else.
+///
+/// 1 / 3 / 12 are the investigation's own counts, kept so the numbers in the plan
+/// and the numbers here are the same numbers. 999 is added because it is the
+/// clamp `CollapsedLayout.maxDisplayedSessions` enforces, and the widest the
+/// collapsed flank can ever be.
+///
+/// Would fail if: `drawerWidth` went back to a `CollapsedLayout`-derived width,
+/// or `DrawerFace.width` were made to consult a count.
+@MainActor @Test func theOpenWidthIsTheSameAtEverySessionCount() {
+    let widths = [1, 3, 12, 999].map { count -> CGFloat in
+        let m = model(.waiting, count: count)
+        m.drawerOpen = true
+        return m.drawerWidth
+    }
+    #expect(Set(widths).count == 1,
+            "the open width moved with the session count: \(widths) at 1 / 3 / 12 / 999")
+    #expect(widths[0] == 560)
+}
+
+/// The tier is the one place the drawer's two dimensions come from, and it reaches
+/// both of `frames`'s outputs.
+///
+/// Asserted through `model.frames` rather than `geometry.frames` directly, because
+/// the model is what the view reads and `IslandModel.tier` is what assembles the
+/// face — a `.drawer` arm that worked in the geometry but was never reached from
+/// the model would leave the island exactly as broken as before.
+///
+/// Would fail if: `IslandModel.tier` returned `.rest`/`.hover` with `drawerOpen`
+/// set, or `frames` stopped passing `tier` on.
+@MainActor @Test func theModelsOwnFramesCarryBothOfTheOpenFacesDimensions() {
+    let m = model(.waiting, count: 3)
+    let closed = m.frames.body
+    m.drawerOpen = true
+    let open = m.frames.body
+
+    #expect(m.face == .sessionList, "setup: no question, so the face should be the list")
+    #expect(open.width == DrawerFace.sessionList.width,
+            "the model's open body is \(open.width)pt, not the face's \(DrawerFace.sessionList.width)")
+    #expect(open.height == closed.height + DrawerFace.sessionList.height,
+            "the model's open body grew by \(open.height - closed.height)pt, not the face's \(DrawerFace.sessionList.height)")
+    #expect(open.minX == closed.minX,
+            "opening moved the left edge from \(closed.minX) to \(open.minX) — §5.3")
 }
