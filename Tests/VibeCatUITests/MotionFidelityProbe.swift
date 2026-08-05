@@ -64,7 +64,14 @@ struct MotionFidelityProbe {
           .detail        opacity    160ms  cubic-bezier(.22,.9,.28,1)
         ours (IslandView.swift:725)
           silhouette .frame width + RevealContent .frame width + .opacity
-                                  280ms  .easeOut          — one modifier, all three
+                                  280ms  cubic-bezier(.22,.9,.28,1)  — one modifier,
+                                  all three. Was `.easeOut` until Plan 6.3 Task 3;
+                                  the curve is now the prototype's own `--ease`
+                                  (`IslandMotion.ease`), so the columns below
+                                  comparing `.easeOut` against it are a record of
+                                  what was fixed, not of live code. What Task 4
+                                  still owns: the prototype runs opacity over
+                                  160ms against the width's 280.
         """)
 
         // SwiftUI's `.easeOut`, sampled rather than assumed. `UnitCurve.easeOut`

@@ -59,7 +59,10 @@ struct QuestionFace: View {
                     rows.transition(.faceCrossfade)
                 }
             }
-            .animation(.easeInOut(duration: FaceCrossfade.duration), value: question.isWritingOther)
+            // `IslandMotion.ease`, not `.easeInOut`: island-motion.html:173 is
+            // `transition:opacity var(--t-face) var(--ease),transform …,filter …`.
+            .animation(IslandMotion.ease(duration: FaceCrossfade.duration),
+                       value: question.isWritingOther)
         }
         .padding(.horizontal, Self.leadingPadding)
         .padding(.top, 16)

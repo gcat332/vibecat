@@ -66,7 +66,19 @@ private struct SettingsSwitchStyle: ToggleStyle {
                     .padding(.leading, Self.knobInset)
                     .offset(x: isOn ? Self.knobTravel : 0)
             }
-            .animation(.easeInOut(duration: 0.18), value: isOn)
+            // `settings.html:89-90`: `transition:background 160ms var(--ease)` on
+            // the track and `transition:transform 180ms var(--ease)` on the knob.
+            // One modifier covers both, at the longer of the two durations — the
+            // 20ms difference is below what a single `.animation(value:)` can
+            // express and is not worth a second modifier.
+            //
+            // `IslandMotion.ease` although this is not the island:
+            // `settings.html:27` declares `--ease: cubic-bezier(.22,.9,.28,1)`
+            // *verbatim* the same as `island-motion.html:24`. The design has one
+            // such curve, so the code gets one constant; two would be a divergence
+            // waiting to happen. This site is the one Plan 6.3 Task 3's
+            // investigation missed — it counted only island-motion.html's.
+            .animation(IslandMotion.ease(duration: 0.18), value: isOn)
             .contentShape(Rectangle())
             .onTapGesture { configuration.isOn.toggle() }
             .focusable()

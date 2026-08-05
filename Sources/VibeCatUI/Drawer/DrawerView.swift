@@ -127,7 +127,12 @@ struct DrawerView: View {
                                 .transition(.faceCrossfade)
                         }
                     }
-                    .animation(.easeInOut(duration: FaceCrossfade.duration), value: question == nil)
+                    // `IslandMotion.ease`, not `.easeInOut` — the same
+                    // island-motion.html:173 `var(--ease)` `QuestionFace`'s own
+                    // sub-face swap uses. §9.1's face crossfade is one figure;
+                    // two curves for the two levels of it would not be.
+                    .animation(IslandMotion.ease(duration: FaceCrossfade.duration),
+                               value: question == nil)
                     // The reservation itself, now claimed by `PanelBar`.
                     // Task 4: `muted`/`onToggleMute`/`onOpenSettings` above are
                     // forwarded straight through rather than hardcoded — see

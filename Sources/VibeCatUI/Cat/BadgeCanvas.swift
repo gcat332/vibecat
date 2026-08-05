@@ -98,6 +98,16 @@ public struct BadgeCanvas: View {
                     // transform keeps something ticking every display frame
                     // whether or not SwiftUI redraws, so the animation has to
                     // stop existing rather than merely slow down.
+                    //
+                    // `.easeInOut` and **not** `IslandMotion.ease`, although the
+                    // prototype's badge keyframes (`island-motion.html:250`, 258,
+                    // 263, 266, 279) all say `var(--ease)`. Same measured reason as
+                    // `CatCanvas`'s own transform, which see: CSS eases each
+                    // keyframe interval forwards, `autoreverses: true` mirrors the
+                    // return leg, and for a curve as front-loaded as `--ease` the
+                    // mirror is nearly anti-phase — worst deviation over a full
+                    // cycle 0.903 against `.easeInOut`'s 0.638. A deliberate,
+                    // measured divergence, not an unconverted site.
                     .animation(moves ? .easeInOut(duration: pulse.period / 2)
                         .repeatForever(autoreverses: true)
                         .delay(part.delay) : nil, value: pulsing)

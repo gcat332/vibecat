@@ -205,7 +205,7 @@ import VibeCatCore
     /// (measured before this fix: 423.1pt while hovering, 273.1pt while not,
     /// on the identical open question), while the collapsed silhouette above
     /// it eased the identical width change over 280ms
-    /// (`IslandBody.hoverRevealWidth`'s own `.easeOut(duration: 0.28)`).
+    /// (`IslandBody.hoverRevealWidth`'s own `IslandMotion.ease(duration: 0.28)`).
     ///
     /// Decision: the drawer's width does not depend on hover at all, rather
     /// than animating the snap with the island's own reveal timing — there is

@@ -94,9 +94,34 @@ public struct CatCanvas: View {
         //
         // Half the period, reversing: the prototype's keyframes are
         // `0%,100%{rest} 50%{extreme}`, which is exactly an autoreversing
-        // animation of half the cycle. `--ease` is `cubic-bezier(.22,.9,.28,1)`,
-        // which `.easeInOut` approximates; matching the bezier exactly is the
-        // open motion-curve item and is not settled by guessing here.
+        // animation of half the cycle.
+        //
+        // **`.easeInOut` stays, and Plan 6.3 Task 3 measured why** (this comment
+        // used to say `.easeInOut` "approximates" `--ease` and that matching the
+        // bezier exactly was an open item — the first half was unmeasured and the
+        // second half has now been settled the other way). CSS applies
+        // `animation-timing-function` to *each keyframe interval*, so
+        // `animation:drowse 3s var(--ease) infinite` runs `--ease` **forwards**
+        // over 0%→50% and forwards again over 50%→100%. SwiftUI's
+        // `.repeatForever(autoreverses: true)` runs the curve forwards out and
+        // **mirrored** back. `--ease` is steeply front-loaded — 95% of its travel
+        // by half its interval — so mirrored it sits near the extreme exactly
+        // where CSS has already left it. Sampled over a full cycle at 1000 points
+        // against the CSS figure (`theLoopingKeyframeCurvesAreADeliberate
+        // Divergence`, IslandMotionTests.swift):
+        //
+        //     easeInOut  worst 0.638  rms 0.393     ← ours
+        //     --ease     worst 0.903  rms 0.493     ← the "fix"
+        //     easeOut    worst 0.702  rms 0.389
+        //     linear     worst 0.525  rms 0.361
+        //
+        // So routing this through `IslandMotion.ease` would make the *worst*
+        // deviation 42% larger. No autoreversing curve reproduces the CSS figure
+        // because the mechanism differs, not the parameters; reproducing it needs
+        // a non-reversing full-period animation over both keyframe intervals
+        // (`KeyframeAnimator`), which is a real option and is deliberately not
+        // taken here — the repeating transforms are what keep an idle machine at
+        // 0.35% of a core, and a keyframe animator re-evaluates.
         .offset(x: moving ? (pulse?.sway ?? 0) : 0,
                 y: moving ? (pulse?.rise ?? 0) : 0)
         .animation(pulse.map {

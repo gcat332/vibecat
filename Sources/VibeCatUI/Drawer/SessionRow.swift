@@ -182,8 +182,11 @@ struct SessionRow: View {
         // is open, or it silently swallows everything the person types).
         .focusable()
         .focused($keyboardFocus)
-        // `transition:background 130ms var(--ease)`.
-        .animation(.easeOut(duration: 0.13), value: isHovered)
+        // `transition:background 130ms var(--ease)` (island-motion.html:346).
+        // `var(--ease)` is `cubic-bezier(.22,.9,.28,1)`, which is
+        // `IslandMotion.ease` and is not `.easeOut` — this line read `.easeOut`
+        // until Plan 6.3 Task 3.
+        .animation(IslandMotion.ease(duration: 0.13), value: isHovered)
         .onHover { inside in
             // Guarded so the cursor stack stays balanced: SwiftUI can deliver the
             // same edge twice, and two pushes with one pop leaves a pointing hand

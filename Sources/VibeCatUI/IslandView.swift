@@ -188,8 +188,7 @@ public struct IslandView: View {
                     .padding(.top, model.geometry.notch.height)
             }
         }
-        .animation(.spring(response: IslandMotion.response,
-                           dampingFraction: IslandMotion.heightDamping), value: drawerHeight)
+        .animation(IslandMotion.heightSpring, value: drawerHeight)
     }
 
     /// 0 with the drawer closed, else the open face's own height — the one
@@ -733,9 +732,13 @@ struct IslandBody: View {
                 // reads as one body with mass rather than a resizing box. The
                 // panel itself never moves (Task 9's whole point) — only this
                 // silhouette, inside it, animates.
-                .animation(.spring(response: IslandMotion.response,
-                                   dampingFraction: IslandMotion.widthDamping),
-                           value: restingWidth)
+                // `IslandMotion.widthSpring`, not an inline
+                // `.spring(response:dampingFraction:)`: the assembled-here
+                // version is what let Plan 6.3 Task 2's mutation — this site
+                // reading `heightDamping` — pass the whole suite. The named
+                // accessor is counted, so it cannot silently become the other
+                // half of §9.1. See `IslandMotion.widthSpringReadCount`.
+                .animation(IslandMotion.widthSpring, value: restingWidth)
                 // Design §9.1's OTHER named animation: hover reveal, 280ms,
                 // max-width 0 → 150pt — a distinct transition from the width
                 // spring above, not the same curve wearing a second hat.
@@ -748,7 +751,15 @@ struct IslandBody: View {
                 // 0.28))` wrapped around the `hovering` mutation instead would
                 // be overridden by the spring above, because both would then
                 // be keyed to the same changing `body.width`.
-                .animation(.easeOut(duration: 0.28), value: hoverRevealWidth)
+                //
+                // `IslandMotion.ease`, not `.easeOut`: the prototype's line 125
+                // is `transition:max-width var(--t-hover) var(--ease),opacity
+                // 160ms var(--ease),margin var(--t-hover) var(--ease)` — that is
+                // `cubic-bezier(.22,.9,.28,1)`, and `.easeOut` is off it by 38.1
+                // percentage points at the worst interior point. 280ms is
+                // `--t-hover`; Task 4 owns the fact that the prototype's opacity
+                // runs 160ms against the width's 280.
+                .animation(IslandMotion.ease(duration: 0.28), value: hoverRevealWidth)
                 // Fix round 1: the click that opens the drawer. Scoped to
                 // the stack's own rect via `.contentShape` — that is
                 // `restingWidth + revealWidth` wide by `body.height` tall,
@@ -811,8 +822,8 @@ struct IslandBody: View {
             //
             // Kept as a zero *width* rather than an `if` that drops the subview:
             // the drawer-closed hover reveal has to keep behaving exactly as it
-            // did, and the outer `.animation(.easeOut(duration: 0.28), value:
-            // hoverRevealWidth)` animates this frame's width from inside the
+            // did, and the outer `.animation(IslandMotion.ease(duration: 0.28),
+            // value: hoverRevealWidth)` animates this frame's width from inside the
             // enclosing shape's subtree. An `if` would replace that 280ms clip
             // with an uninterpolated pop. Width 0 + `.clipped()` is already
             // measured to paint nothing at all — the drawer-open, not-hovering
