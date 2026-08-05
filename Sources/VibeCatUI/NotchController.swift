@@ -36,6 +36,9 @@ import VibeCatCore
     /// that doesn't pass one (every existing test), so nothing outside
     /// main.swift ever touches the user's real `UserDefaults` just by
     /// constructing a controller.
+    ///
+    /// Since Plan 6.1 Task 6 it is also the source of the two preferences §9.3
+    /// and §6.2 describe — `motion` and `rightFlank` — read in `init` below.
     private let preferences: PreferenceStoring
     private var panel: NotchPanel?
     private var hover: HoverMonitor?
@@ -56,7 +59,7 @@ import VibeCatCore
     /// bad deal the plan already rejected. A local monitor only ever sees a
     /// `keyDown` AppKit was already going to hand this app — which, for a
     /// `.nonactivatingPanel`, means only while the panel holds key status; see
-    /// `takeKeyStatusIfShowingAQuestion()` for the one window in which it does.
+    /// `takeKeyStatusIfADrawerIsOpen()` for the one window in which it does.
     ///
     /// **Named `escapeMonitor` until Plan 6.1 Task 4**, when the key-input spike
     /// (`docs/superpowers/spikes/2026-08-03-notch-panel-key-input.md`) settled
@@ -77,9 +80,11 @@ import VibeCatCore
     /// `.nonactivatingPanel` is **exclusive** and `frontmostApplication` does
     /// not change, so a panel left key at rest silently swallows everything the
     /// person types into a terminal that still shows every sign of having
-    /// focus. Key status is therefore held for the narrowest window that can
-    /// still honour §10.1 — see `takeKeyStatusIfShowingAQuestion()` — and given
-    /// back at each of the three ways a question ends.
+    /// focus. Key status is therefore held only while a drawer is actually on
+    /// screen — see `takeKeyStatusIfADrawerIsOpen()`, and Plan 6.1 Task 6's own
+    /// decision block there for why that is wider than Task 4 left it — and
+    /// given back at each of the three ways a question ends, plus each of the
+    /// two ways a drawer closes without one.
     private(set) var holdsKeyStatus = false
     private let sampler = BackdropSampler()
     private var backdropSample: Task<Void, Never>?
@@ -160,12 +165,37 @@ import VibeCatCore
         self.metrics = metrics
         self.preferences = preferences
         let geometry = IslandGeometry(screen: metrics() ?? .zeroFallback)
-        self.model = IslandModel(geometry: geometry, motion: MotionPreference.current())
+        // One `load()`, not three. `Preferences` is a value read whole (see
+        // `UserDefaultsPreferenceStore.load()`), so three reads could in
+        // principle straddle a concurrent `save(_:)` and start the island from
+        // two different plists.
+        let prefs = preferences.load()
+        // **`chosen: prefs.motion`, not the parameter's `.full` default.** This
+        // is the launch seam for §9.3, and it is the whole reason `chosen`
+        // exists: `MotionPreference.current()` reads the *system's* Reduce
+        // Motion switch, and the user's own level is the other half of §9.3's
+        // rule ("the system asking for less beats a user asking for more; it
+        // never drags a user who chose `off` back into motion"). Dropped, the
+        // preference would be persisted by `save(_:)`, read by `load()`, and
+        // then thrown away here — which is Plan 6.4's "persisted but never
+        // read" defect (three fields, six task reviews) and Plan 6.5's fourth
+        // instance of it, in the one place no test can watch, because
+        // `main.swift` cannot be `@testable import`ed. The mapping therefore
+        // lives *here* rather than in `main.swift`, exactly as
+        // `SoundSettings(_:)` does for the sound half, so that
+        // `LaunchWiringTests` can drive it with an `InMemoryPreferenceStore`.
+        self.model = IslandModel(geometry: geometry,
+                                 motion: MotionPreference.current(chosen: prefs.motion))
+        // §6.2's flank, same seam and same reasoning. Assigned after `init`
+        // rather than passed in: `IslandModel.rightFlank` has a default that
+        // ~40 test call sites depend on, and adding a parameter here would not
+        // make this line any more likely to be written.
+        self.model.rightFlank = prefs.rightFlank
         // Read once, here, rather than left at IslandModel's own `false`
         // default — a relaunch with sound already muted must show muted
         // immediately, not flip visibly once something else happens to
         // touch `model.muted` first.
-        self.model.muted = !preferences.load().soundEnabled
+        self.model.muted = !prefs.soundEnabled
     }
 
     public convenience init(model: AppModel, preferences: PreferenceStoring = InMemoryPreferenceStore()) {
@@ -322,9 +352,10 @@ import VibeCatCore
         // take key status, because at this point there is nothing to answer and
         // a key panel swallows every keystroke the person aims at their terminal
         // (the spike's own hazard; see `holdsKeyStatus`). Key is taken only while
-        // an open drawer is showing a question — `takeKeyStatusIfShowingAQuestion`
-        // — and that call does use `makeKeyAndOrderFront`, which the spike
-        // measured as *not* activating this app.
+        // a drawer the person clicked open is on screen —
+        // `takeKeyStatusIfADrawerIsOpen` — and that call does use
+        // `makeKeyAndOrderFront`, which the spike measured as *not* activating
+        // this app.
         panel.orderFrontRegardless()
 
         // present() may run again without an intervening dismiss() (there is
@@ -529,23 +560,37 @@ import VibeCatCore
         // that becomes key and *then* resizes is the same end state, but this
         // way the window the person's keystrokes are being routed to is never
         // momentarily the collapsed one. Idempotent — see its own guard.
-        takeKeyStatusIfShowingAQuestion()
+        takeKeyStatusIfADrawerIsOpen()
     }
 
-    /// Takes key status when — and only when — the drawer is actually showing a
-    /// question, which is the narrowest window in which §10.1's number keys can
-    /// mean anything: the digit a person presses is the one printed on a badge
-    /// they can see, and a badge only exists inside an open drawer.
+    /// Takes key status when — and only when — a drawer is actually on screen.
     ///
-    /// **This is narrower than the plan's own wording** ("take key on open"),
-    /// deliberately, and the narrowing follows the plan's own reason rather than
-    /// bending it. The spike's hazard is that a key panel swallows keystrokes
-    /// while the terminal still looks focused; a question that has *arrived* but
-    /// whose drawer nobody has opened is exactly that state — nothing on screen
-    /// says this app is receiving anything, and there is no badge to press.
-    /// Taking key on arrival would also make a digit typed into a terminal
-    /// answer a question whose choices are not on screen, which is the worst
-    /// available outcome for a `rm -rf` prompt.
+    /// **Widened in Plan 6.1 Task 6, from "an open drawer showing a question" to
+    /// "an open drawer", and the widening is a decision rather than a
+    /// simplification.** Task 4 gated on the question for a reason it measured: a
+    /// question that has arrived but whose drawer nobody opened shows no badge,
+    /// so a digit typed into a terminal would answer something invisible. That
+    /// reason is untouched — this still requires `.drawer`, which requires
+    /// `drawerOpen`, which only `click()` ever sets. What it changes is the
+    /// *other* drawer: §11's session list is a drawer with no question, so it
+    /// never took key, so **Escape — the only keyboard exit this app has — was
+    /// never delivered to it at all** (Task 4's report, concern 2). A 420pt panel
+    /// under the notch that could only be dismissed by clicking it again.
+    ///
+    /// The spike's constraint still binds, and this is where it is honoured: it
+    /// forbids a panel holding key **at rest**, because then the person sees no
+    /// sign that anything but their terminal is receiving keystrokes. An open
+    /// drawer is the opposite of at rest — it is a black panel the person opened
+    /// themselves with a deliberate click, and it is what they are looking at.
+    /// The cost is real and worth stating: while it is open, delivery is
+    /// exclusive, so typing into a terminal that still looks focused is
+    /// swallowed. That cost buys the dismissal, it is bounded by the drawer being
+    /// visibly open, and both of the ways to close it (Escape now, a second click
+    /// as before) release key.
+    ///
+    /// A digit with no question is inert — `answerOnNumberKey` already guards on
+    /// `model.question` — so widening this cannot answer anything: the session
+    /// list has no rows to pick and no `Reply` to make.
     ///
     /// Called from `reflow()`, which every path that can open a drawer already
     /// funnels through (`click()`, `setQuestion(_:)`, `setHovering(_:)`), so
@@ -553,6 +598,11 @@ import VibeCatCore
     /// *takes*; the releases are explicit at each ending below, because each
     /// ending must be separately breakable — a single shared release would let a
     /// missing one hide behind another.
+    ///
+    /// The gate is `case .drawer = model.tier`, not `model.drawerOpen`, matching
+    /// `dismissOnEscape` and `answerOnNumberKey` — one reading of "a drawer is on
+    /// screen" shared by the taker and both handlers, rather than three that
+    /// could drift.
     ///
     /// `makeKeyAndOrderFront(nil)`, not `makeKey()`: it is the exact call the
     /// spike measured as taking key without changing `frontmostApplication`, and
@@ -562,8 +612,8 @@ import VibeCatCore
     /// own "never makeKeyAndOrderFront" comment as it stood before Plan 6.1: that
     /// comment was written while the hardware question was open, and the answer
     /// is that becoming key does *not* activate this app (Path A).
-    private func takeKeyStatusIfShowingAQuestion() {
-        guard !holdsKeyStatus, model.question != nil, model.drawerOpen, let panel else { return }
+    private func takeKeyStatusIfADrawerIsOpen() {
+        guard !holdsKeyStatus, case .drawer = model.tier, let panel else { return }
         holdsKeyStatus = true
         panel.makeKeyAndOrderFront(nil)
     }
@@ -701,10 +751,15 @@ import VibeCatCore
     /// `.toggle()`, not an unconditional `= true` (final whole-branch
     /// review, finding 4): Escape is otherwise the only way to back out of
     /// an opened drawer, and Escape's own delivery depends on the panel
-    /// becoming key — Task 9's still-open hardware question. Without a
-    /// second click closing it, a person who opens the drawer and changes
-    /// their mind has no way to collapse it if that delivery never happens,
-    /// short of answering or waiting out the lapse. This only flips the
+    /// becoming key — Task 9's then-open hardware question, settled by the
+    /// key-input spike and confirmed for *both* drawer faces in Plan 6.1 Task 6.
+    /// Without a second click closing it, a person who opens the drawer and
+    /// changes their mind has no way to collapse it if that delivery never
+    /// happens, short of answering or waiting out the lapse. Kept as a toggle
+    /// even now that Escape does arrive: two independent exits from a panel that
+    /// holds key exclusively is the right number, not redundancy.
+    ///
+    /// This only flips the
     /// *drawer's* own visibility, deliberately — it does not touch
     /// `appModel`'s pending question at all, unlike `dismissOnEscape`'s
     /// deliberate, fail-open dismiss below: a second click closing the
@@ -716,6 +771,8 @@ import VibeCatCore
     /// above), so the *question* has not ended — but the badges are off screen,
     /// and holding key past that is precisely the spike's hazard with nothing
     /// gained. `reflow()` will take it again if the drawer is clicked back open.
+    /// Since Task 6 this is also how a clicked-shut **session list** gives key
+    /// back, which is why the release is unconditional on there being a question.
     func click() {
         model.drawerOpen.toggle()
         if !model.drawerOpen { releaseKeyStatus() }
@@ -756,12 +813,14 @@ import VibeCatCore
     /// monitor's own `NSEvent?` return (`nil` swallows it, the event itself
     /// lets it fall through) — see `present()`'s own installation of it.
     ///
-    /// Dismissing calls `appModel.dismissQuestion()` rather than touching
-    /// `model` directly: that is the exact fail-open path a lapsed question
-    /// already takes (see `setQuestion`'s own `lapseCheck`), already covered
-    /// by Task 1/3's fail-open guarantees, and it reaches back into `model`
-    /// through the same `onQuestion` wiring `setQuestion(_:)` already is —
-    /// one path, not a second copy of "close the drawer" logic.
+    /// Dismissing a *question* calls `appModel.dismissQuestion()` rather than
+    /// touching `model` directly: that is the exact fail-open path a lapsed
+    /// question already takes (see `setQuestion`'s own `lapseCheck`), already
+    /// covered by Task 1/3's fail-open guarantees, and it reaches back into
+    /// `model` through the same `onQuestion` wiring `setQuestion(_:)` already is —
+    /// one path, not a second copy of "close the drawer" logic. Dismissing §11's
+    /// **session list** cannot go that way, because there is no question to
+    /// dismiss; see the body.
     ///
     /// Escape only, still — a digit is `answerOnNumberKey` below, not this. The
     /// two are separate functions rather than one switch because they carry
@@ -784,9 +843,39 @@ import VibeCatCore
         // an associated value, the same reason `IslandView`'s own drawer gate
         // uses `if case .drawer = model.tier` rather than `==`.
         guard case .drawer = model.tier, KeyRouting.isEscape(charactersIgnoringModifiers) else { return false }
+        // **This one line closes both faces of the drawer, including §11's
+        // session list, which has no question to dismiss at all** — and that is
+        // worth spelling out because Plan 6.1 Task 6 started by adding an explicit
+        // `model.drawerOpen = false` here for the list, on the assumption that a
+        // question-less Escape had to be a second, separate mechanism. It does
+        // not, and the added block was dead code: deleting it again failed no
+        // test, checked directly.
+        //
+        // Why one line suffices: `dismissQuestion()` is `pending?.lapse()` — a
+        // no-op with nothing pending — followed by `clearQuestion()`, which fires
+        // `onQuestion?(nil)` **unconditionally**, whether or not a question was
+        // there. `present()` wires that to `setQuestion(_:)`, which resets
+        // `model.drawerOpen` on a `nil` and reflows. So the list closes through
+        // exactly the path a question takes, with no branch here.
+        //
+        // That makes this method depend on `clearQuestion` notifying even when it
+        // changed nothing — the opposite of the guarded-write rule the rest of
+        // this file follows, and an obvious future "optimisation" (`guard pending
+        // != nil`) would silently make Escape stop closing the list. The coupling
+        // is deliberate rather than accidental, and it is pinned:
+        // `theSessionListTakesKeyStatusSoEscapeCanCloseIt` fails on that mutation.
+        // A local `drawerOpen = false` here would have hidden the dependency
+        // instead of naming it, and been untestable padding besides.
+        //
+        // What Task 6 actually had to change was one thing, not two: nothing made
+        // the panel key without a question, so a real Escape was never delivered
+        // to the list at all. See `takeKeyStatusIfADrawerIsOpen`.
         appModel.dismissQuestion()
         // The second of the three endings — see the lapse `Task`'s own comment
-        // on why this is not folded into `setQuestion(nil)`.
+        // on why this is not folded into `setQuestion(nil)`. Since Task 6 it is
+        // also the release for a closed session list, which is not one of the
+        // three: no question ended, but the drawer is gone, so holding key past
+        // this would be the spike's hazard with nothing on screen to justify it.
         releaseKeyStatus()
         return true
     }

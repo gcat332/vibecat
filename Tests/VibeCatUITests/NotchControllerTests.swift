@@ -1243,16 +1243,17 @@ private final class ReplyBox: @unchecked Sendable {
     #expect(question.selected.isEmpty, "a digit picked a row nobody could see")
 }
 
-/// The spike's hazard, and the narrowest window that still honours §10.1: key
-/// status is taken only once an open drawer is actually showing a question.
+/// The spike's hazard, and the narrowest window that still lets a keystroke mean
+/// anything: key status is taken only once a drawer the person clicked open is
+/// actually on screen.
 ///
-/// The middle assertion is the narrowing itself, and it is deliberate — the
-/// plan says "take key on open", and a question that has arrived but whose
-/// drawer nobody opened is exactly the state the spike warns about: delivery is
-/// exclusive, `frontmostApplication` never changes, so the terminal looks
-/// focused while its keystrokes vanish — with no badge on screen to press in
-/// exchange. See `takeKeyStatusIfShowingAQuestion`'s own doc comment.
-@MainActor @Test func keyStatusIsTakenOnlyWhileAnOpenDrawerShowsAQuestion() {
+/// The middle assertion is the narrowing that matters and it is unchanged by Task
+/// 6's widening — the plan said "take key on open", and a question that has
+/// arrived but whose drawer nobody opened is exactly the state the spike warns
+/// about: delivery is exclusive, `frontmostApplication` never changes, so the
+/// terminal looks focused while its keystrokes vanish — with no badge on screen to
+/// press in exchange. See `takeKeyStatusIfADrawerIsOpen`'s own doc comment.
+@MainActor @Test func keyStatusIsTakenOnlyWhileAClickedOpenDrawerIsOnScreen() {
     let c = makeController()
     #expect(c.holdsKeyStatus == false, "an island at rest must never hold key status")
 
@@ -1264,10 +1265,20 @@ private final class ReplyBox: @unchecked Sendable {
     #expect(c.holdsKeyStatus, "an open drawer showing a question cannot receive a keystroke without key status")
 }
 
-/// A drawer opened on §11's session list — no question at all — must not take
-/// key status: there is nothing to answer and nothing to type, and holding it
-/// would swallow the person's typing for the whole time the list is up.
-@MainActor @Test func theSessionListTakesNoKeyStatus() {
+/// **Reversed in Plan 6.1 Task 6, deliberately.** This test used to be
+/// `theSessionListTakesNoKeyStatus` and asserted the opposite, on the reasoning
+/// that the list has nothing to answer so key status buys nothing. Task 4's own
+/// report named the consequence as Task 6 territory: with no key status the local
+/// monitor never sees a `keyDown` at all, so **Escape could not close the session
+/// list on hardware** — leaving a 420pt panel whose only exit was clicking the
+/// island again.
+///
+/// So the list does take key now, and the two assertions below are the whole
+/// bargain: it takes key *and* Escape closes it. If a future change decides the
+/// swallowed-keystroke cost is not worth the dismissal, both of these must be
+/// reversed together — a version of this file with the first assertion flipped and
+/// the second still passing is not reachable.
+@MainActor @Test func theSessionListTakesKeyStatusSoEscapeCanCloseIt() {
     let (c, appModel) = controller { mbp14 }
     c.refreshGeometry()
     c.present()
@@ -1277,7 +1288,40 @@ private final class ReplyBox: @unchecked Sendable {
     #expect(c.model.face == .sessionList, "setup: this must be the session list, not a question")
     #expect(c.model.tier != .rest, "setup: the drawer never opened")
 
-    #expect(c.holdsKeyStatus == false, "the session list took key status it has no use for")
+    #expect(c.holdsKeyStatus,
+            "the session list holds no key status, so a real Escape is never delivered to it")
+
+    #expect(c.handleKeyDown(charactersIgnoringModifiers: "\u{1b}"),
+            "Escape must report the keystroke as handled while the list is open")
+    #expect(c.model.tier == .rest, "Escape did not close the session list")
+    #expect(c.holdsKeyStatus == false,
+            "a closed session list left the panel key — everything typed next is swallowed")
+    c.dismiss()
+}
+
+/// The other half of the widening: a digit is inert with no question. §10.2's rule
+/// is that a badge means the click is the answer, and the session list has no
+/// badges — so `answerOnNumberKey` reports the keystroke unhandled and nothing at
+/// all happens to any session.
+///
+/// **What this cannot claim:** that the digit reaches the terminal. It does not.
+/// While the panel is key, delivery is exclusive (the spike), so an unconsumed
+/// digit falls through to the panel's own responder chain, which does nothing with
+/// it. "Inert" here means it changes no state and answers nothing — not that it
+/// gets out.
+@MainActor @Test func aDigitDoesNothingWhileTheSessionListIsOpen() {
+    let (c, appModel) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+    _ = appModel.ingest(VibeEvent(id: "e1", cli: "claude-code", kind: .running,
+                                  session: "s", cwd: "/tmp/proj"))
+    c.click()
+    #expect(c.model.face == .sessionList, "setup: this must be the session list, not a question")
+
+    #expect(c.handleKeyDown(charactersIgnoringModifiers: "1") == false,
+            "a digit was consumed by a drawer with no rows to pick")
+    #expect(c.model.tier != .rest, "a digit closed the session list")
+    #expect(c.model.sessions.count == 1, "a digit changed the session list")
     c.dismiss()
 }
 

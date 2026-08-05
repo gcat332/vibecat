@@ -61,6 +61,19 @@ BackdropSampler.requestAccessIfAskedTo()
 // `quietDuringDoNotDisturb`, `selectedPage`, three times, six task reviews)
 // recurring a fourth time, invisible to every test because none of them run
 // this file.
+//
+// Plan 6.1 Task 6: this one store is now also where §9.3's `motion` and §6.2's
+// `rightFlank` come from. **There is deliberately no extra line here for them.**
+// The alternative — reading `preferences.load()` in this file and pushing the two
+// values into `controller.model` after construction — would put the mapping in the
+// one file no test can `@testable import`, which is precisely how Plan 6.4 shipped
+// three preferences persisted and read by nothing. `NotchController.init` does the
+// mapping instead, off the store handed to it on the line below, so
+// `LaunchWiringTests` can drive the same code path with an
+// `InMemoryPreferenceStore` and fail if either read is ever dropped. What this file
+// still owns, and what no test can check, is the *argument*: omit `preferences:`
+// below and the controller silently builds its own empty `InMemoryPreferenceStore`,
+// taking motion, the right flank and the mute glyph down with it.
 let preferences = UserDefaultsPreferenceStore()
 let model = AppModel(socketPath: SocketPath.default, preferences: preferences)
 let controller = NotchController(model: model, preferences: preferences)

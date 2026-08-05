@@ -15,11 +15,13 @@ import VibeCatCore
     /// §6.2's choosable right flank: "session count (default), agent icon, or
     /// nothing." Mirrors `Preferences.rightFlank`'s default so a model built
     /// with no preference wired in yet (every existing call site) renders
-    /// exactly as it always has. There is no UI for this yet — Plan 6.6's
-    /// Display page owns the picker — and no launch-time wiring either, that
-    /// is Plan 6.1's Task 6; this is what makes the preference *reachable*,
-    /// not what makes it read from disk. A test (or, later, main.swift) sets
-    /// it directly.
+    /// exactly as it always has.
+    ///
+    /// Since Plan 6.1's Task 6 the **launch** value comes off disk:
+    /// `NotchController.init` assigns `preferences.load().rightFlank` here, so a
+    /// hand-edited plist (or Plan 6.6's Display picker, when it exists) changes
+    /// what the island draws on the next launch. There is still no UI —
+    /// `LaunchWiringTests` is what keeps that read from quietly disappearing.
     public var rightFlank: RightFlank = .sessionCount
     public var geometry: IslandGeometry
     public var aura = AuraTrigger()

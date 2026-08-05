@@ -233,7 +233,13 @@ struct MotionBypassTests {
     ///
     /// Asserted on the rule directly as well as through the render above,
     /// because the render can only show that *something* stopped moving.
-    @Test func aStillProfileWithALiveCycleIsStillFrozenByMotionOff() {
+    /// `@MainActor` because the last two assertions call `IslandBody.phase`, which
+    /// is main-actor isolated — four `#ActorIsolatedCall` warnings through macro
+    /// expansion otherwise, the repo's only remaining build warning when Plan 6.1
+    /// Task 6 closed the plan (visible on a clean build only; an incremental one
+    /// caches it away). Nothing else about the test changes: it makes no
+    /// assertion about which actor it runs on.
+    @MainActor @Test func aStillProfileWithALiveCycleIsStillFrozenByMotionOff() {
         let bang = Badge.bang.motion
         #expect(bang.isContinuous == false)
         #expect(bang.cycle > 0, "bang no longer has a cycle to be frozen at the wrong point of")
