@@ -92,10 +92,16 @@ public struct SettingsPage: Sendable, Equatable, Identifiable {
         // `NotificationsPane` in the note's place. This is the disappearance the
         // `String?` return type was chosen for — see this method's own doc
         // comment, which predicted exactly this case.
-        case "display":
-            "This page's controls are Plan 6.6's — the notch preview, the flanks, the "
-                + "cat's coat, the panel sizes, the session card and the motion control. "
-                + "Plan 6.4 built the window, the sidebar and this heading."
+        //
+        // `"display"` is now absent for the identical reason: Plan 6.6 shipped
+        // the flanks, the cat's coat, the state swatches, the session card's
+        // switches, its live preview and the motion group, so `SettingsPaneView`
+        // draws `DisplayPane` here instead. What that page does *not* ship —
+        // Clean/Detailed, `Meter`/`Dot`, the panel-size sliders, the notch-tuning
+        // offsets, the multi-display picker, editable state colours, and the two
+        // un-built reveal modes — is `DisplayPane`'s own doc comment's "Out of
+        // scope" list, not a note on this page: those are a future plan's, not a
+        // schedule this string could still announce truthfully.
         default:
             nil
         }

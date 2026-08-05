@@ -269,6 +269,12 @@ struct SessionCardSection: View {
             SettingsRow("Show Agent Activity Detail") {
                 SettingsSwitch(isOn: model.showActivityBinding)
             }
+            // `settings.html:490+`'s `.cardpreview` — the live preview, Task 6.
+            // `SessionRow.Options(model.cardOptions)` is the same conversion
+            // `IslandModel.cardOptions` is built from at launch (see that
+            // extension's own doc comment), so this preview and the drawer read
+            // the switches through the identical mapping.
+            SessionCardPreview(options: SessionRow.Options(model.cardOptions))
         }
     }
 }

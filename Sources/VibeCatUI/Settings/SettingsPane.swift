@@ -44,6 +44,11 @@ struct SettingsPaneView: View {
     /// has now recorded five times. Requiring it means the compiler asks the
     /// question at every call site, including the one no test can run.
     let notifications: NotificationsPaneModel
+    /// The Display page's controls, Plan 6.6. Same reasoning as `notifications`
+    /// above, restated because it is the second time this file has had to hold a
+    /// page's model non-optionally rather than let a forgotten call site compile
+    /// its way to an empty pane.
+    let display: DisplayPaneModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -64,10 +69,10 @@ struct SettingsPaneView: View {
             }
             .padding(.bottom, 18)
 
-            // One page has controls; the other three still say which plan owns
-            // theirs. `SettingsPageKey.notifications`, not a literal — the same
-            // key decides `ownerNote(for:)`'s silence, and two literals is how
-            // one of them stops matching.
+            // Two pages have controls now; the other two still say which plan
+            // owns theirs. `SettingsPageKey.notifications`/`.display`, not
+            // literals — the same keys decide `ownerNote(for:)`'s silence, and a
+            // literal in both places is how one of them stops matching.
             if page.key == SettingsPageKey.notifications {
                 // **The first page in this window that does not fit, and it has
                 // to scroll — measured, not assumed.** The three groups render
@@ -90,6 +95,18 @@ struct SettingsPaneView: View {
                 // the chip tests that measure it here.
                 ScrollView {
                     NotificationsPane(model: notifications)
+                }
+            } else if page.key == SettingsPageKey.display {
+                // The same shape as the `notifications` branch above, and for the
+                // identical reason: four groups plus the live preview render
+                // taller than the 552pt content area, so this page gets the
+                // scroller too rather than an overflowed, centred `VStack` losing
+                // its own heading a second time. See `DisplayPaneTests` for the
+                // rendered rows, driven directly against `DisplayPane` rather than
+                // through this `ScrollView` for the same `ImageRenderer` reason
+                // the comment above gives.
+                ScrollView {
+                    DisplayPane(model: display)
                 }
             } else if let note = SettingsPage.ownerNote(for: page.key) {
                 ownerNote(note)
@@ -176,6 +193,8 @@ struct SettingsShell: View {
     /// Handed straight to `SettingsPaneView` — see that type's own note on why
     /// this is not an optional.
     let notifications: NotificationsPaneModel
+    /// Same reasoning as `notifications`, for the Display page.
+    let display: DisplayPaneModel
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -187,7 +206,7 @@ struct SettingsShell: View {
             // draw a page. See `SettingsPage.page(for:)` on why the fallback is
             // not inside that lookup.
             SettingsPaneView(page: SettingsPage.page(for: selection) ?? SettingsPage.all[0],
-                             notifications: notifications)
+                             notifications: notifications, display: display)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // `.win{background:var(--bg)}` — the ground the panes sit on. The

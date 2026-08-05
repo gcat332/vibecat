@@ -29,6 +29,11 @@ import VibeCatCore
     /// fresh one on every invalidation, so every switch on that page would
     /// forget what it was mid-edit and every `Play` would re-seed the engine.
     let notifications: NotificationsPaneModel
+    /// The Display page's own model, Plan 6.6. Same reasoning as `notifications`:
+    /// built once here rather than inside `body`, so a switch flipped mid-edit —
+    /// this page has more writers than any other — survives whatever else on the
+    /// window invalidated the view.
+    let display: DisplayPaneModel
 
     /// What to do with a page the user has just moved to. A closure rather than a
     /// `PreferenceStoring`, because this type has no other business with the store
@@ -36,9 +41,10 @@ import VibeCatCore
     private let persist: (String) -> Void
 
     init(selectedPage: String, notifications: NotificationsPaneModel,
-         persist: @escaping (String) -> Void = { _ in }) {
+         display: DisplayPaneModel, persist: @escaping (String) -> Void = { _ in }) {
         self.selectedPage = selectedPage
         self.notifications = notifications
+        self.display = display
         self.persist = persist
     }
 
@@ -90,7 +96,8 @@ struct SettingsRootView: View {
         // `model.pageBinding`, not `@Bindable`'s `$model.selectedPage` — see that
         // property's own doc comment. The read direction is identical; the write
         // direction is what changed, and it is the direction that was missing.
-        SettingsShell(selection: model.pageBinding, notifications: model.notifications)
+        SettingsShell(selection: model.pageBinding, notifications: model.notifications,
+                     display: model.display)
     }
 }
 
@@ -201,6 +208,17 @@ struct SettingsRootView: View {
             notifications: NotificationsPaneModel(store: store,
                                                   syncSoundSettings: syncSoundSettings,
                                                   playCue: playCue),
+            // Plan 6.6. `onChange` defaults to a no-op — the same shape
+            // `NotificationsPaneModel`'s four `AlertPolicy` writers already have
+            // no live consumer for. `IslandModel.rightFlank`/`.coat`/`.motion`/
+            // `.cardOptions` are read from disk exactly once, at
+            // `NotchController.init` (see each property's own doc comment: "the
+            // island draws... on the next launch"), and nothing in this window
+            // holds a reference to a running `NotchController` to push a live
+            // update into even if this closure did something. Wiring a live
+            // update is real work belonging to whichever plan changes that
+            // architecture, not to assembling this page.
+            display: DisplayPaneModel(store: store),
             persist: { key in
                 var prefs = store.load()
                 prefs.selectedPage = key

@@ -190,7 +190,11 @@ public enum SettingsPageKey {
     /// .ownerNote(for:)` no longer answers for it. A string literal in both is
     /// how one of them silently stops matching.
     public static let notifications = "notifications"
-    public static let all = ["general", "integrations", notifications, "display"]
+    /// Named for the identical reason `notifications` is: `SettingsPaneView` now
+    /// draws real controls for this key too (Plan 6.6's Task 6), and `SettingsPage
+    /// .ownerNote(for:)` no longer answers for it.
+    public static let display = "display"
+    public static let all = ["general", "integrations", notifications, display]
     public static func isKnown(_ key: String) -> Bool { all.contains(key) }
 }
 

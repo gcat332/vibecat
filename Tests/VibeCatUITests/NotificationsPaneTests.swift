@@ -267,7 +267,8 @@ struct NotificationsPaneTests {
         // backing scale are ~1072 device pixels each.
         let hosted = try rasteriseHosted(
             SettingsPaneView(page: SettingsPage.page(for: SettingsPageKey.notifications)!,
-                             notifications: makeNotificationsPaneModel().model),
+                             notifications: makeNotificationsPaneModel().model,
+                             display: makeDisplayPaneModel()),
             size: CGSize(width: 400, height: 240))
         let area = Double(hosted.width * hosted.height)
         let cardFraction = Double(hosted.pixelCount(near: SettingsPalette.card, tolerance: 6)) / area
@@ -294,7 +295,8 @@ struct NotificationsPaneTests {
         // costs a quarter of the pixels.
         let pane = try rasterise(
             SettingsPaneView(page: SettingsPage.page(for: SettingsPageKey.notifications)!,
-                             notifications: makeNotificationsPaneModel().model)
+                             notifications: makeNotificationsPaneModel().model,
+                             display: makeDisplayPaneModel())
                 .frame(width: 704, height: 200))
         let chip = SettingsPage.page(for: SettingsPageKey.notifications)!.chip
         var found = 0
