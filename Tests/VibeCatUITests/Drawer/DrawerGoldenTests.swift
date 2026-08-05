@@ -174,6 +174,37 @@ private func contentBands(_ raster: Raster) -> [Range<Int>] {
             "single and multi select rendered near-identically — the control is not carrying the distinction")
 }
 
+/// §10.1: `Other…`'s own control — "neither a numeral nor a checkbox... An
+/// ellipsis reads as 'something else,' not 'option N.'" Restored by Plan 6.1
+/// Task 5 after Plan 4 cut it; this is the render-level proof the control
+/// actually reaches the pixels, the same reasoning
+/// `multiSelectRowsDoNotLookLikeSingleSelectRows` above gives for why single-
+/// and multi-select's own controls get a rendered comparison rather than a
+/// property read. Same label text (`"X"`) on all three renders, so only the
+/// *control* — badge, checkbox, or ellipsis — can be what differs.
+///
+/// What would have to break for this to fail: deleting `ChoiceRow`'s
+/// `isOther` branch (`ChoiceRow.swift:111`) — an `isOther` row would then
+/// fall into the plain single-select branch and render pixel-identical to
+/// `numbered` below, which is exactly Plan 4's cut state.
+@MainActor @Test func otherRowsControlLooksLikeNeitherANumberBadgeNorACheckbox() throws {
+    let accent = Color(IslandState.waiting.accent)
+    func row(isMulti: Bool, isOther: Bool) throws -> Raster {
+        try rasterise(ChoiceRow(choice: Choice(id: "x", label: "X"), index: 0,
+                                isMulti: isMulti, isSelected: false, isRecommended: false,
+                                accent: accent, isOther: isOther)
+            .frame(width: 300))
+    }
+    let numbered = try row(isMulti: false, isOther: false)
+    let checkbox = try row(isMulti: true, isOther: false)
+    let other = try row(isMulti: false, isOther: true)
+
+    #expect(other.differingPixelCount(from: numbered) > 50,
+            "Other…'s control rendered near-identically to a numbered badge — §10.2's 'a number badge means the click is the answer' would then wrongly apply to it")
+    #expect(other.differingPixelCount(from: checkbox) > 50,
+            "Other…'s control rendered near-identically to a checkbox")
+}
+
 /// §10.2: "Send is disabled at zero." Disabled has to look disabled.
 @MainActor @Test func sendLooksDifferentWhenItCannotBePressed() throws {
     let m = QuestionModel(event: threeChoices(multi: true))
@@ -370,6 +401,16 @@ private func destructiveQuestion(body: String = "rm -rf build/") -> VibeEvent {
 /// of the reserved 44pt consumed — the instant "Allow once" is picked and
 /// the confirmation banner appears below the rows. Deleting the inert
 /// `Other…` row moved this to +7pt.
+///
+/// **Plan 6.1 Task 5 update.** Restoring `Other…` reopened exactly this hole:
+/// with the row back and `QuestionFace.rows`' gap corrected to the
+/// prototype's `5px` (`island-motion.html:301`, was `8`), this fixture still
+/// measured -27pt — not a tight margin, `PanelBar`'s mute/gear icons pushed
+/// entirely out of frame (screenshotted in the task report). The fix is
+/// `QuestionFace.rows` gating `Other…` on `!question.needsConfirmation` as
+/// well as `!question.isMulti`: this test is that decision's own regression
+/// guard. Mutation-verified directly — dropping that guard (showing `Other…`
+/// unconditionally alongside the banner again) reproduces the -27pt failure.
 @MainActor @Test func theDrawerStaysClearOfTheFooterAfterPickingADestructiveAnswerAtProductionWidth() throws {
     let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
                             motion: MotionPreference(chosen: .full, systemWantsReduced: false))

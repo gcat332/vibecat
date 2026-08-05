@@ -39,6 +39,46 @@ private let mbp14 = ScreenMetrics(
             > model(.dormant, count: 0).layout.rightFlankWidth)
 }
 
+/// §6.2: "configurable: session count (default), agent icon, or nothing."
+/// `RightFlank` (Task 1) is the stored preference; `layout.right` is what
+/// `IslandView` actually draws. This is Task 5's mapping between them.
+///
+/// What would have to break for this to fail: `layout` ignoring `rightFlank`
+/// and always deriving `.sessionCount` from `sessionCount` alone, which is
+/// exactly the hardcoded ternary this replaced (`IslandModel.layout` used to
+/// read `sessionCount > 0 ? .sessionCount(sessionCount) : .nothing` with no
+/// preference in the picture at all).
+@MainActor @Test func theRightFlankPreferenceSelectsWhatLayoutRightDraws() {
+    let m = model(.running, count: 3)
+    #expect(m.rightFlank == .sessionCount,
+            "setup: the model's default must match Preferences.rightFlank's own default (§6.2: session count)")
+    #expect(m.layout.right == .sessionCount(3))
+
+    m.rightFlank = .agentIcon
+    #expect(m.layout.right == .agentIcon)
+
+    m.rightFlank = .nothing
+    #expect(m.layout.right == .nothing)
+}
+
+/// Decision, recorded here rather than only in `IslandModel.layout`'s own
+/// comment: `.sessionCount` passes `sessionCount` through unconditionally,
+/// even at zero, rather than special-casing zero to `.nothing` the way the
+/// hardcoded ternary this replaced did. `CollapsedLayout` already treats
+/// `.sessionCount(0)` as indistinguishable from `.nothing` on every axis that
+/// matters — nil `sessionCountText`, the same corner-minimum
+/// `rightFlankWidth`, `hasRightContent == false` — pinned by
+/// `CollapsedLayoutTests.aZeroCountCollapsesToNothing`. This test pins that
+/// the *value* passed to `CollapsedLayout` is `.sessionCount(0)`, not merely
+/// that the *effect* happens to match `.nothing`'s.
+@MainActor @Test func sessionCountPassesThroughEvenAtZeroRatherThanBeingSpecialCased() {
+    let m = model(.dormant, count: 0)
+    #expect(m.layout.right == .sessionCount(0),
+            "expected the raw .sessionCount(0), not a re-derived .nothing")
+    #expect(m.layout.rightFlankWidth == IslandGeometry.minimumRightFlank,
+            "a zero count must still measure at the corner minimum, matching .nothing's own width")
+}
+
 /// The switch that reaches 0.0% CPU. All three steady states belong here:
 /// `.dormant`'s badge (`zzz`) used to be a continuous drift even though its
 /// mood (`sleep`) was not, so dormant needed a timeline anyway — see the

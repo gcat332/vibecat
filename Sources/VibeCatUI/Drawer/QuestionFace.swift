@@ -121,30 +121,59 @@ struct QuestionFace: View {
     }
 
     private var rows: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // `island-motion.html:301`'s `.choices{gap:5px}`, not `8` — a
+        // prototype divergence this task's own restoration of `Other…`
+        // surfaced: at 8pt, four rows (three choices plus `Other…`) plus a
+        // picked destructive body's confirmation banner overflow
+        // `DrawerView.footerHeight`'s 44pt reservation at production width
+        // (measured: -39pt margin). `5px` is what the mockup actually
+        // specifies for this exact gap, and closing the divergence recovers
+        // real space rather than inventing a number to make a test pass —
+        // see the task report for the full measurement.
+        VStack(alignment: .leading, spacing: 5) {
             ForEach(Array(question.rows.enumerated()), id: \.element.id) { index, choice in
                 ChoiceRow(choice: choice, index: index, isMulti: question.isMulti,
                           isSelected: question.selected.contains(choice.id),
                           isRecommended: isRecommended(index), accent: accent,
                           onTap: { tapped(choice.id) })
             }
-            // §10.1 says "`Other…` is the last row" — deliberately not
-            // rendered here. Final whole-branch review (2026-08-02): the row
-            // was already inert going in (see the fix-round-1 comment this
-            // replaces — typing into the field it opens needs the panel to
-            // hold key status, Task 9's own unresolved hardware question) and
-            // could not be backed out of once tapped, which reads as broken
-            // rather than as not-yet-built once every *other* row in the same
-            // list responds visibly. Cutting it also gives back the height
-            // this file's own 44pt footer reservation (`DrawerView
-            // .footerHeight`) needs: the confirmation banner below invaded
-            // and then clipped that footer with the row still costing its
-            // own space (see `theDrawerStaysClearOfTheFooterAfterPicking
-            // ADestructiveAnswerAtProductionWidth` in DrawerGoldenTests.swift).
-            // A deliberate deviation from §10.1, recorded as the reviewer's
-            // decision rather than a bug it merely missed — Plan 6 (real
-            // keyboard input) is where `ChoiceRow.isOther`/`beginOther()`
-            // still exist for restoring it. Do not re-add this blind.
+            // §10.1: "`Other…` is the last row." Cut by the final whole-branch
+            // review (2026-08-02) because it opened a field nobody could type
+            // into (the panel did not yet hold key status) and could not be
+            // backed out of once tapped — restored now that both are true:
+            // Plan 6.1 Task 4 proved keyboard input reaches the field on
+            // hardware, and `backTapped()`/`QuestionModel.cancelOther()` below
+            // are the way back the cut reason itself demanded.
+            //
+            // Single select only (`!question.isMulti`), matching
+            // `ChoiceRow.isOther`'s own doc comment and §10.1's placement
+            // under "Single select" — §10.2 never mentions `Other…`, and
+            // `KeyRouting.pick` is scoped to `question.rows`, which this
+            // synthetic row is deliberately not part of.
+            //
+            // `!question.needsConfirmation` too — measured, not assumed: the
+            // mockup this drawer's 288pt height comes from
+            // (`island-motion.html:165`) has no confirmation banner at all
+            // (§10.3 was never built into it), so that height was never
+            // budgeted for three choices *and* `Other…` *and* a banner
+            // together. Rendered with all three present at production width,
+            // `PanelBar`'s mute/gear icons were pushed out of frame entirely —
+            // not a tight margin, an actually-missing footer (see the task
+            // report's screenshots). A pending confirmation already holds the
+            // row list in a provisional state — tapping the highlighted choice
+            // again confirms it, tapping any other row restarts confirmation
+            // or (for `deny`) clears it outright (`switchingToADifferentPermissiveRowRestartsConfirmation`,
+            // `tappingDenyOnADestructiveBodySendsImmediately`) — so folding
+            // `Other…` into that same held state, rather than reserving a
+            // fourth escape hatch that cannot fit beside the banner, keeps a
+            // working footer without inventing a second confirmation
+            // behaviour. `Other…` reappears the moment confirmation clears.
+            if !question.isMulti && !question.needsConfirmation {
+                ChoiceRow(choice: Choice(id: "__other__", label: "Other…"),
+                          index: question.rows.count, isMulti: false, isSelected: false,
+                          isRecommended: false, accent: accent, isOther: true,
+                          onTap: { question.beginOther() })
+            }
             if question.needsConfirmation {
                 confirmBanner
             }
@@ -200,6 +229,17 @@ struct QuestionFace: View {
         if let reply = question.reply() {
             onAnswer(reply)
         }
+    }
+
+    /// Backs out of `Other…`'s reply field to the row list. Never sends an
+    /// answer — this is the way back, not a third way to finish, so it
+    /// forwards to `QuestionModel.cancelOther()` and nothing else. `internal`,
+    /// not `private`, the same reasoning `tapped(_:)`/`sendTapped()` give:
+    /// `QuestionFaceTests` calls this directly, the same way it drives every
+    /// other tap in this file, since a synthesised `NSEvent` cannot reach a
+    /// SwiftUI `.onTapGesture` in this test suite.
+    func backTapped() {
+        question.cancelOther()
     }
 
     /// Nothing in `VibeEvent`/`Choice` marks a choice "recommended" — the
@@ -266,9 +306,22 @@ struct QuestionFace: View {
 
     private var replyField: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Reply")
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(Color(hazeColour))
+            // The way back `beginOther()`'s own cut reason demanded: a row
+            // that opens this field with no way out of it is the exact
+            // defect the final whole-branch review cut over. Tapping this
+            // calls `backTapped()`, never `question.cancelOther()` directly,
+            // so `QuestionFaceTests` can drive the same entry point a real
+            // tap would.
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color(hazeColour))
+                    .contentShape(Rectangle())
+                    .onTapGesture { backTapped() }
+                Text("Reply")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(Color(hazeColour))
+            }
             // A real `TextField` was tried here first and rendered as a
             // solid accent bar with a system "prohibited" glyph and no
             // visible text at all under `ImageRenderer` — confirmed by

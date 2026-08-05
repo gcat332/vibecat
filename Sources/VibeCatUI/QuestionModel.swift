@@ -61,6 +61,18 @@ public final class QuestionModel {
         selected = []
     }
 
+    /// Backs out of `Other…`'s reply field to the row list, discarding
+    /// whatever text was typed. Plan 4 cut the row precisely because it
+    /// opened a field nobody could back out of — this is the other half of
+    /// restoring it, and without it the same defect would just reappear.
+    /// `selected` is left empty rather than restored to whatever it was
+    /// before `beginOther()`: that was always empty too, because
+    /// `beginOther()` itself clears it, so there is nothing to restore.
+    public func cancelOther() {
+        isWritingOther = false
+        otherText = ""
+    }
+
     /// Only ever consulted for multi select — a single select has no Send.
     public var canSend: Bool { isMulti && !selected.isEmpty }
 

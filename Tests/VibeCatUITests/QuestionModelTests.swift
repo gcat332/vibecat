@@ -74,6 +74,27 @@ private func event(multi: Bool, choices: [String] = ["allow", "always", "deny"],
     #expect(m.reply()?.text == "use pnpm instead")
 }
 
+/// Plan 4 cut `Other…` because it opened a field nobody could back out of —
+/// this is the exact claim that has to hold for restoring it not to
+/// reintroduce the same defect. What would have to break for this to fail:
+/// `cancelOther()` not resetting `isWritingOther`, which would strand the
+/// drawer on the reply face with no digit, tap, or Escape able to reach the
+/// row list again.
+@MainActor @Test func cancellingOtherReturnsToTheRowListAndDiscardsWhateverWasTyped() {
+    let m = QuestionModel(event: event(multi: false))
+    m.beginOther()
+    m.otherText = "use pnpm instead"
+
+    m.cancelOther()
+
+    #expect(m.isWritingOther == false,
+            "cancelOther() left the drawer on the reply face — there is still no way back")
+    #expect(m.face == .question)
+    #expect(m.otherText.isEmpty,
+            "backing out should discard the typed text, not leave it to reappear if Other… is tapped again")
+    #expect(m.reply() == nil, "backing out must never itself produce an answer")
+}
+
 /// The reply's id is the last checkpoint before a destructive command is
 /// authorised; HookRunner refuses a mismatch, and it must never see one.
 @MainActor @Test func everyReplyCarriesTheQuestionsOwnId() {

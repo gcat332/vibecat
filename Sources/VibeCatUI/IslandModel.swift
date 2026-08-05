@@ -12,6 +12,15 @@ import VibeCatCore
     public var state: IslandState = .dormant
     public var sessionCount: Int = 0
     public var hovering: Bool = false
+    /// §6.2's choosable right flank: "session count (default), agent icon, or
+    /// nothing." Mirrors `Preferences.rightFlank`'s default so a model built
+    /// with no preference wired in yet (every existing call site) renders
+    /// exactly as it always has. There is no UI for this yet — Plan 6.6's
+    /// Display page owns the picker — and no launch-time wiring either, that
+    /// is Plan 6.1's Task 6; this is what makes the preference *reachable*,
+    /// not what makes it read from disk. A test (or, later, main.swift) sets
+    /// it directly.
+    public var rightFlank: RightFlank = .sessionCount
     public var geometry: IslandGeometry
     public var aura = AuraTrigger()
     public var coat: Coat
@@ -107,8 +116,31 @@ import VibeCatCore
     }
 
     public var layout: CollapsedLayout {
-        CollapsedLayout(right: sessionCount > 0 ? .sessionCount(sessionCount) : .nothing,
-                        hovering: hovering)
+        CollapsedLayout(right: rightContent, hovering: hovering)
+    }
+
+    /// Maps `rightFlank` (Task 1's stored preference, which cannot carry a
+    /// live count) onto `CollapsedLayout.RightContent` (which needs one for
+    /// `.sessionCount`) — the mapping `RightFlank`'s own doc comment says
+    /// Task 5 owns.
+    ///
+    /// `.sessionCount` passes `sessionCount` through unconditionally, even at
+    /// zero, rather than special-casing zero to `.nothing` the way the
+    /// hardcoded ternary this replaces did. That special case was an accident
+    /// of the hardcoding, not a decision worth preserving: `CollapsedLayout`
+    /// already treats `.sessionCount(0)` as indistinguishable from `.nothing`
+    /// on every axis that matters — `sessionCountText` is `nil` (guards `n >
+    /// 0`), `rightFlankWidth` falls to the same corner-minimum floor, and
+    /// `hasRightContent` is `false` — pinned by
+    /// `CollapsedLayoutTests.aZeroCountCollapsesToNothing`. Re-deriving that
+    /// here would just be a second, independent copy of a rule the type
+    /// already owns correctly, and one that could drift from it.
+    private var rightContent: CollapsedLayout.RightContent {
+        switch rightFlank {
+        case .sessionCount: .sessionCount(sessionCount)
+        case .agentIcon: .agentIcon
+        case .nothing: .nothing
+        }
     }
 
     /// Which face the drawer shows. A pending question always wins: §4.2's own

@@ -159,6 +159,31 @@ private func threeChoices(multi: Bool, destructive: Bool = false) -> VibeEvent {
             "Send did not confirm and send in one tap once confirmation was already pending")
 }
 
+// MARK: - `Other…`
+
+/// Plan 4 cut `Other…` because it opened a field nobody could back out of.
+/// `backTapped()` is the way back — called directly here for the same reason
+/// `tapped(_:)`/`sendTapped()` above are: a synthesised `NSEvent` cannot reach
+/// a SwiftUI `.onTapGesture` in this test suite, and this is the entry point
+/// a real tap on the reply field's back chevron ultimately calls.
+///
+/// What would have to break for this to fail: `backTapped()` forwarding to
+/// anything other than `QuestionModel.cancelOther()` — fabricating a reply,
+/// or leaving `isWritingOther` set — either of which would strand the drawer
+/// on the reply face exactly the way Plan 4's cut reason describes.
+@MainActor @Test func backTappedReturnsToTheRowListWithoutSendingAnAnswer() {
+    let question = QuestionModel(event: threeChoices(multi: false))
+    question.beginOther()
+    question.otherText = "port 8082"
+    let box = ReplyBox()
+
+    face(question, box).backTapped()
+
+    #expect(question.isWritingOther == false,
+            "backTapped() did not return to the row list — Other… would still have no way back")
+    #expect(box.value == nil, "backing out of Other… must never itself send an answer")
+}
+
 // MARK: - §9.1's face crossfade
 
 /// §9.1: "Face crossfade `190ms`, fade up 5pt with a 3pt blur", and the

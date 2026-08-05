@@ -178,6 +178,45 @@ struct IslandGoldenTests {
                 "the island's painted left edge moved between states: \(edges)")
     }
 
+    /// §6.2: "configurable: session count (default), agent icon, or nothing."
+    /// Design §5.3's `LW = 58pt` invariant, re-checked against the one axis
+    /// that changes here — the right flank's own *content*, not merely its
+    /// width, which `thePaintedLeftEdgeNeverMoves` above already varies via
+    /// session count. `IslandModel.rightFlank` (Task 5's addition) selects
+    /// between three visibly different right-side contents; this pins that
+    /// doing so never drags the cat sideways with it, exactly the failure
+    /// mode CLAUDE.md's own §5.3 section calls out by name.
+    @MainActor @Test func thePaintedLeftEdgeNeverMovesAcrossRightFlankChoices() throws {
+        let edges = try RightFlank.allCases.map { flank -> Int in
+            let m = Self.model(.running, count: 5)
+            m.rightFlank = flank
+            return try Self.silhouette(m).first
+        }
+        #expect(Set(edges).count == 1,
+                "the island's painted left edge moved across right-flank choices: \(Array(zip(RightFlank.allCases, edges)))")
+    }
+
+    /// The render-level companion to `IslandModelTests
+    /// .theRightFlankPreferenceSelectsWhatLayoutRightDraws`, which only proves
+    /// `layout.right` changed — not that the change reached any pixel. Three
+    /// renders differing in exactly one input (`rightFlank`), session count
+    /// and hovering held fixed throughout.
+    ///
+    /// What would have to break for this to fail: `IslandModel.layout`
+    /// ignoring `rightFlank` and always deriving `.sessionCount` from
+    /// `sessionCount` alone — exactly the hardcoded ternary this task
+    /// replaced. The three painted widths would then collapse to one.
+    @MainActor @Test func eachRightFlankChoicePaintsAVisiblyDifferentIsland() throws {
+        func paintedWidth(_ flank: RightFlank) throws -> Int {
+            let m = Self.model(.running, count: 5)
+            m.rightFlank = flank
+            return try Self.silhouette(m).count
+        }
+        let widths = try RightFlank.allCases.map { ($0, try paintedWidth($0)) }
+        #expect(Set(widths.map(\.1)).count == 3,
+                "expected three distinct painted widths, one per RightFlank case, found \(widths) — some pair rendered identically")
+    }
+
     /// The reason the minimum right flank exists, checked where it has to be
     /// true: on a dormant island the painted silhouette must extend a full
     /// corner radius past the cutout, so our corner covers the hardware's
