@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import Testing
 import VibeCatCore
@@ -751,4 +752,124 @@ extension Raster {
             "a focused row painted nothing in its outermost 2pt — there is no focus ring, so a keyboard user cannot see where they are")
     #expect(focused.pixelCount(near: hazeColour) > plain.pixelCount(near: hazeColour),
             "focusing the row drew no more `--haze` — whatever is in the border is not the mockup's `outline:2px solid var(--haze)`")
+}
+
+// MARK: - Task 5: the row draws its real source
+
+/// A solid-filled square PNG built at runtime, in a per-test scratch directory —
+/// never a committed file and never one of the owner's real icons. Same shape as
+/// `SourceIconTests`' own `makeTempIcon`: square and solid so a resize has no
+/// internal edge to antialias, which is what makes a pixel count against it exact.
+@MainActor
+private func makeTempIcon(_ colour: NSColor, side: Int = 64) throws -> String {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("vibecat-sessionrow-tests-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let path = dir.appendingPathComponent("icon.png").path
+
+    let rep = try #require(NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,
+        samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+        bytesPerRow: 0, bitsPerPixel: 0))
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    colour.setFill()
+    NSBezierPath(rect: NSRect(x: 0, y: 0, width: side, height: side)).fill()
+    NSGraphicsContext.restoreGraphicsState()
+    let data = try #require(rep.representation(using: .png, properties: [:]))
+    try data.write(to: URL(fileURLWithPath: path))
+    return path
+}
+
+/// A colour no `CLIMark` path, no ink tier and no state accent produces — the
+/// same fixture colour `SourceIconTests` uses, and for the same reason: "differs"
+/// is not "differs in the right direction", so what proves the icon actually drew
+/// is a hue nothing else in the row can produce, not merely two renders differing.
+private let iconMagenta = RGBA(r: 1, g: 0, b: 1)
+
+/// `session(_:)` plus a resolved `icon` path — the one field that fixture never
+/// sets, because nothing upstream produces it yet (see `Session.icon`'s own doc
+/// comment).
+@MainActor private func sessionWithIcon(_ state: Kind, path: String, cli: String = "aider") -> Session {
+    var s = session(state, cli: cli)
+    s.icon = path
+    return s
+}
+
+/// The owner's actual request: a row with a known source draws that source's own
+/// icon, in its own colour, rather than the geometric fallback.
+///
+/// Mutation-verified: reverting `SessionRow.body`'s mark to
+/// `CLIMarkView(mark: CLIMark(cli: session.cli), colour: accent)` — dropping
+/// `session.icon` on the floor — takes the first count from >100 to **0** and
+/// the first `#expect` fails; the render still shows *something* (the geometric
+/// mark), so a test that only checked "the row drew more ink than nothing" would
+/// have passed regardless.
+@MainActor @Test func aRowWithAKnownSourceDrawsItsIcon() throws {
+    let path = try makeTempIcon(.magenta)
+    let withIcon = try row(sessionWithIcon(.running, path: path))
+    #expect(withIcon.pixelCount(near: iconMagenta) > 20,
+            "a row whose session carries a real icon path drew none of the icon's own magenta (\(withIcon.pixelCount(near: iconMagenta))) — `session.icon` is not reaching `SessionRow`'s mark")
+
+    let withoutIcon = try row(session(.running, cli: "aider"))
+    #expect(withoutIcon.pixelCount(near: iconMagenta) == 0,
+            "a row with no icon path still drew the icon fixture's magenta — the fallback mark itself produces this colour, so it cannot be evidence the icon loaded")
+}
+
+/// The other half of the owner's request, and the one that must not regress
+/// silently: an unknown CLI with no icon still falls back to the geometric mark,
+/// unchanged from before this task. Compared against a `CLIMarkView` built
+/// directly — never through `SourceIcon(path: nil, ...)` — for the exact reason
+/// `SourceIconTests.expectedFallbackRaster` gives: comparing against the view
+/// under test's own fallback branch means deleting that branch moves both sides
+/// of the comparison together and the test cannot fail.
+@MainActor @Test func anUnknownCLIWithNoIconStillDrawsTheGenericMark() throws {
+    let s = session(.running, cli: "aider")
+    #expect(s.icon == nil, "the fixture must exercise the no-icon path")
+    let raster = try row(s)
+
+    // 10pt of row padding, then the 16pt mark, 8pt of the row's own vertical
+    // padding plus the mark's own 1pt top padding — the exact box
+    // `SessionRow.body` places it in, reproduced here (rather than compared
+    // against `SourceIcon`'s own fallback branch) for the same reason
+    // `SourceIconTests.expectedFallbackRaster`'s own comment gives: comparing
+    // the thing under test against itself moves both sides of a mutation
+    // together and the test cannot fail. `height: raster.height` matches the
+    // real row's height exactly, which `differingPixelCount(from:inColumns:)`
+    // requires to compare at all — everything below the mark's own band is
+    // untouched empty space on both sides either way.
+    let markColumns = 10..<26
+    let reference = try rasterise(
+        HStack(alignment: .top, spacing: 10) {
+            CLIMarkView(mark: .generic, colour: Color(IslandState.running.accent))
+                .padding(.top, 1)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .frame(width: 388, height: CGFloat(raster.height), alignment: .topLeading))
+
+    #expect(raster.differingPixelCount(from: reference, inColumns: markColumns) == 0,
+            "an unknown CLI with no icon path did not render the same mark, pixel for pixel, as an independently built `CLIMarkView(.generic)` in the same box — the fallback path regressed")
+}
+
+/// The plan's own explicit ask: **"the row's height is unchanged by which of the
+/// two it draws."** `SourceIcon`'s icon branch and its fallback branch both end in
+/// `.frame(width: side, height: side)` at the same `side`, so nothing should grow —
+/// this is the render-level proof of that, not an inspection of the view code.
+///
+/// Mutation-verified, both directions: sizing `SourceIcon`'s icon branch's inner
+/// `.frame` to `side * 1.5` (24pt against the mark's 16pt) still passes — the row's
+/// three-line `VStack` is already 51pt tall, so a mark this much taller does not
+/// push the `HStack`'s own height past what its sibling already demands, and the
+/// row genuinely does not grow. Confirming *that* was the point of trying it
+/// rather than assuming a bigger icon always regresses: `side * 5` (80pt) does
+/// exceed the VStack's height and reliably fails, at 97pt against 51pt — quoted
+/// here because it is the actual threshold this fixture's three-line row has, not
+/// a guess at one.
+@MainActor @Test func theRowsHeightIsUnchangedByWhichOfTheTwoItDraws() throws {
+    let path = try makeTempIcon(.magenta)
+    let withIcon = try row(sessionWithIcon(.running, path: path))
+    let withMark = try row(session(.running, cli: "aider"))
+    #expect(withIcon.height == withMark.height,
+            "a row drawing a real icon rendered \(withIcon.height)pt tall against \(withMark.height)pt for the geometric mark — an icon taller than the mark grew the row")
 }

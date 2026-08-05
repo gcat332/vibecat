@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import Testing
 import VibeCatCore
@@ -238,6 +239,44 @@ struct ContactSheetTool {
     /// state field became a duration.
     static let listShotNow = Date()
 
+    /// Task 5's own fixture, for the same reason `lastUserMessage` below is set
+    /// by hand: nothing that builds a real `Session` today can populate `icon`
+    /// (see `Session.icon`'s own doc comment), so this shot — the one place
+    /// this task's own instructions say to actually look at pixels — is the
+    /// only way to see a source's icon drawn inside an assembled row at all.
+    ///
+    /// A solid square built at runtime, never a committed file and never one of
+    /// the owner's own icons — the same shape `SourceIconTests.makeTempIcon`
+    /// and `SessionRowTests.makeTempIcon` already use, so a third near-identical
+    /// copy exists rather than an import across test targets that would need
+    /// its own justification. `try?`, not `try`: this is fixture code for a
+    /// tool that already writes files and asserts nothing, and §2.3's fail-open
+    /// spirit is that a fixture unable to write a scratch file should draw one
+    /// fewer icon in the shot, not fail the build.
+    @MainActor
+    private static func makeListShotIcon() -> String? {
+        let side = 64
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0)
+        else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSColor(red: 0.98, green: 0.55, blue: 0.15, alpha: 1).setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: 0, width: side, height: side)).fill()
+        NSGraphicsContext.restoreGraphicsState()
+        guard let data = rep.representation(using: .png, properties: [:]) else { return nil }
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vibecat-listshot-icon-\(UUID().uuidString)")
+        guard (try? FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true)) != nil else { return nil }
+        let path = dir.appendingPathComponent("icon.png").path
+        guard (try? data.write(to: URL(fileURLWithPath: path))) != nil else { return nil }
+        return path
+    }
+
     /// One CLI per row, so the shot shows all four of `CLIMark`'s marks side by
     /// side — the leading position now carries *which agent*, and a fixture that
     /// gave every row `claude-code` would render four identical glyphs and show
@@ -279,12 +318,18 @@ struct ContactSheetTool {
             if rich { s.lastUserMessage = "clean the build and rebuild from scratch" }
             return s
         }
+        var lastRow = session(.done, "scripts", worktree: nil, rich: false, cli: "aider")
+        // Task 5: `aider` has no `CLIMark` match — `.generic` is what it drew
+        // before this task, and is exactly the row that ought to show a real
+        // custom-source icon now that one is wired, rather than the shot
+        // silently proving nothing changed.
+        lastRow.icon = makeListShotIcon()
         return [session(.permission, "api", worktree: "auth-hardening", rich: true),
                 session(.running, "web-dashboard-with-a-long-name",
                         worktree: "feature/redesign-the-settings-panel", rich: true,
                         cli: "codex"),
                 session(.failed, "infra", worktree: nil, rich: true, cli: "gemini-cli"),
-                session(.done, "scripts", worktree: nil, rich: false, cli: "aider")]
+                lastRow]
     }
 
     /// The assembled list at its real size, beside the one thing the list itself

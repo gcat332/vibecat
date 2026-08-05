@@ -148,8 +148,35 @@ struct SessionRow: View {
             // it was. §4.3's "never by hue" governs **identity** — which agent is
             // speaking must be legible without colour vision — and says nothing
             // against a mark also carrying state. Shape says who, hue says what
-            // state, both on the same mark.
-            CLIMarkView(mark: CLIMark(cli: session.cli), colour: accent)
+            // state, both on the same mark — true of the geometric fallback,
+            // which is still the common case (see `Session.icon`'s own comment
+            // for why real sources have no icon to give yet).
+            //
+            // Task 5: the row's real source, via `SourceIcon`, falling back to
+            // `CLIMarkView` through the exact same call whenever `session.icon`
+            // is `nil` or turns out to be a bad path. `.brandColour`, not
+            // `.tinted` — `SourceIcon`'s own doc comment rules on this and this
+            // is the call site it names: line 1 already states this row's state
+            // twice over, in `stateLabel` below and the pip six points from it,
+            // so the mark's hue is spare capacity here rather than state's only
+            // carrier, and a brand icon may spend it on identity instead.
+            //
+            // `session.icon` is resolved upstream of this view, not read out of
+            // a registry reached into from here — see `Session.icon`'s doc
+            // comment for where that lookup lives and why. A view that had to
+            // hold a `SourceRegistry` to draw itself could not be rasterised by
+            // any test in this file without one.
+            //
+            // One session, one true source: unlike `IslandView`'s
+            // `openMark(face:)` and `collapsedMark`, which fall back to
+            // `.generic` because no single mark is true of a *mixed* set of
+            // CLIs across several open sessions, a row is never asked to speak
+            // for more than the one session it renders — so it never needs that
+            // fallback, and the asymmetry is correct. Nobody should "fix" this
+            // row to also collapse to `.generic` for some notion of mixedness;
+            // there is nothing here for it to mean.
+            SourceIcon(path: session.icon, fallback: CLIMark(cli: session.cli),
+                       accent: accent, style: .brandColour)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
                 headline

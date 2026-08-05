@@ -54,6 +54,31 @@ public struct Session: Identifiable, Sendable, Equatable {
     public var state: SessionState
     public var activity: Activity?
     public var lastUserMessage: String?
+    /// §3's *"a swappable runtime asset"*, resolved for **this session**
+    /// rather than looked up from a registry inside the view —
+    /// `SessionRow` reads this directly and falls back to `CLIMark(cli:)`'s
+    /// geometric mark whenever it is `nil`, the same fallback
+    /// `SourceIcon` itself uses for a path that turns out to be bad.
+    ///
+    /// Always `nil` on every path that builds a `Session` today, and that
+    /// is a fact about the rest of the app, not a placeholder left half-done
+    /// here: `VibeEvent` carries no icon field (the wire only speaks the
+    /// shared `kind` vocabulary, never an adapter's own terms), and the
+    /// running app assembles no `SourceRegistry` of its own —
+    /// `SourceRegistry(adapters:)` appears once in `Sources/`, in
+    /// `VibeCatHook/main.swift` — see `CLIMark.displayName(cli:)`'s own doc
+    /// comment for the identical gap on the display-name side. So there is
+    /// nowhere upstream of this property, yet, that could resolve a real
+    /// path; the honest state is a field that exists and stays `nil`, not a
+    /// view that reaches sideways into a registry it could not be rendered
+    /// in a test without. Once the app side gains a registry, that
+    /// registry's `adapter(for: cli)?.icon` is what sets this — once, at
+    /// the point a `Session` is built or merged, never inside `SessionRow`.
+    ///
+    /// `public var`, not `let`: nothing produces a value for it yet, so
+    /// tests set it directly, the same way `lastUserMessage` above is set
+    /// by hand for a switch with no real producer either.
+    public var icon: String?
     public var tasks: [TaskItem]
     public var agents: [AgentItem]
     public var origin: Origin
