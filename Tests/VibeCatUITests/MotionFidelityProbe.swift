@@ -62,16 +62,15 @@ struct MotionFidelityProbe {
           .detail        max-width  280ms  cubic-bezier(.22,.9,.28,1)   [--t-hover/--ease]
           .detail        margin     280ms  cubic-bezier(.22,.9,.28,1)
           .detail        opacity    160ms  cubic-bezier(.22,.9,.28,1)
-        ours (IslandView.swift:725)
-          silhouette .frame width + RevealContent .frame width + .opacity
-                                  280ms  cubic-bezier(.22,.9,.28,1)  — one modifier,
-                                  all three. Was `.easeOut` until Plan 6.3 Task 3;
-                                  the curve is now the prototype's own `--ease`
-                                  (`IslandMotion.ease`), so the columns below
-                                  comparing `.easeOut` against it are a record of
-                                  what was fixed, not of live code. What Task 4
-                                  still owns: the prototype runs opacity over
-                                  160ms against the width's 280.
+        ours — SINCE PLAN 6.3 TASK 4, three clocks (IslandView.swift)
+          silhouette .frame width  spring(response .42 / damping .62)  IslandMotion.widthSpring
+          RevealContent .frame     280ms  cubic-bezier(.22,.9,.28,1)   IslandMotion.hoverRevealDuration
+          RevealContent .opacity   160ms  cubic-bezier(.22,.9,.28,1)   IslandMotion.hoverFadeDuration
+        ours — BEFORE Task 4
+          all three on one modifier, 280ms cubic-bezier(.22,.9,.28,1). Was `.easeOut`
+          until Task 3, so the `.easeOut` columns below are a record of what Task 3
+          fixed, not of live code at any point after it. `hoverThreeClocks()` prints
+          the live comparison.
         """)
 
         // SwiftUI's `.easeOut`, sampled rather than assumed. `UnitCurve.easeOut`
@@ -121,6 +120,289 @@ struct MotionFidelityProbe {
                               visually clipped at max-width:150px — so the container's
                               travel is content-dependent, ours is a constant 150.
         """)
+    }
+
+    // MARK: - 1b. Hover's three clocks — the live comparison, and the GIF
+
+    /// The three clocks the prototype runs on hover, against ours before and after
+    /// Plan 6.3 Task 4, all sampled from the production constants.
+    ///
+    /// `hoverCurves()` above compares `.easeOut` — the curve Task 3 removed — so its
+    /// headline numbers (38.1% / 29.1%) are a record of a state the code has not
+    /// been in since Task 3. This is the one to read.
+    @Test(.enabled(if: Self.on))
+    @MainActor func hoverThreeClocks() {
+        let travel = CollapsedLayout.hoverReveal
+        let restingW = 273.1
+
+        let protoShape: (Double) -> Double = { css(0.32, 1.5, 0.5, 1, duration: 0.440, atMs: $0) }
+        let protoReveal: (Double) -> Double = { css(0.22, 0.9, 0.28, 1, duration: 0.280, atMs: $0) }
+        let protoFade: (Double) -> Double = { css(0.22, 0.9, 0.28, 1, duration: 0.160, atMs: $0) }
+        // Before Task 4: one `--ease` at `--t-hover`, over all three.
+        let before: (Double) -> Double = { css(0.22, 0.9, 0.28, 1, duration: 0.280, atMs: $0) }
+        // After: the shape on `IslandMotion.widthSpring`, the two content clocks on
+        // `--ease` at their own durations. Read from the production constants.
+        let wSpring = Spring(response: IslandMotion.response, dampingRatio: IslandMotion.widthDamping)
+        let afterShape: (Double) -> Double = { wSpring.value(target: 1.0, time: $0 / 1000) }
+        let afterReveal: (Double) -> Double = {
+            IslandMotion.easeCurve.value(at: min(1, ($0 / 1000) / IslandMotion.hoverRevealDuration))
+        }
+        let afterFade: (Double) -> Double = {
+            IslandMotion.easeCurve.value(at: min(1, ($0 / 1000) / IslandMotion.hoverFadeDuration))
+        }
+
+        func worst(_ a: (Double) -> Double, _ b: (Double) -> Double) -> (dev: Double, ms: Double, p: Double, o: Double) {
+            var w = (0.0, 0.0, 0.0, 0.0)
+            for step in 0...300 {
+                let ms = Double(step) * 5
+                let p = a(ms), o = b(ms)
+                if abs(p - o) > w.0 { w = (abs(p - o), ms, p, o) }
+            }
+            return w
+        }
+        func peak(_ f: (Double) -> Double) -> (v: Double, ms: Double) {
+            var best = (0.0, 0.0)
+            for step in 0...400 {
+                let ms = Double(step) * 2
+                let v = f(ms)
+                if v > best.0 { best = (v, ms) }
+            }
+            return best
+        }
+
+        print("""
+
+        ══════════════════════════════════════════════════════════════════════
+        HOVER — THREE CLOCKS, prototype vs ours before and after Plan 6.3 Task 4
+        ══════════════════════════════════════════════════════════════════════
+                       prototype                  before Task 4        after Task 4
+          shape width  --spring-w / 440ms         --ease / 280ms       widthSpring (.42/\(f(IslandMotion.widthDamping, 2)))
+          reveal width --ease / 280ms             --ease / 280ms       --ease / \(f(IslandMotion.hoverRevealDuration * 1000, 0))ms
+          reveal fade  --ease / 160ms             --ease / 280ms       --ease / \(f(IslandMotion.hoverFadeDuration * 1000, 0))ms
+
+          worst deviation from the prototype's own clock, 5ms steps to 1500ms
+                        before Task 4                       after Task 4
+        """)
+        for (label, proto, b, a) in [("shape ", protoShape, before, afterShape),
+                                     ("reveal", protoReveal, before, afterReveal),
+                                     ("fade  ", protoFade, before, afterFade)] {
+            let wb = worst(proto, b), wa = worst(proto, a)
+            print("  \(label)   \(pct(wb.dev)) at \(pad("\(Int(wb.ms))", 4))ms (proto \(pct(wb.p)) / ours \(pct(wb.o)))   \(pct(wa.dev)) at \(pad("\(Int(wa.ms))", 4))ms (proto \(pct(wa.p)) / ours \(pct(wa.o)))")
+        }
+
+        let pp = peak(protoShape), pb = peak(before), pa = peak(afterShape)
+        print("""
+
+          §9.1's OVERSHOOT on the shape clock — the rule hover did not have
+            prototype     peak \(pct(pp.v)) at \(Int(pp.ms))ms
+            before Task 4 peak \(pct(pb.v)) at \(Int(pb.ms))ms   ← monotone: --ease cannot exceed its target
+            after Task 4  peak \(pct(pa.v)) at \(Int(pa.ms))ms   (+\(f((pa.v - 1) * travel, 2))pt past \(f(restingW + travel))pt on a \(f(travel))pt reveal)
+
+          ORDERING — the reveal's own width when the fade lands (\(f(IslandMotion.hoverFadeDuration * 1000, 0))ms)
+            prototype     \(pct(protoReveal(IslandMotion.hoverFadeDuration * 1000)))
+            before Task 4 \(pct(before(280)))   ← both on one clock, so they land together
+            after Task 4  \(pct(afterReveal(IslandMotion.hoverFadeDuration * 1000)))
+
+          t(ms)   proto shape   after shape   proto reveal  after reveal  proto fade  after fade
+        """)
+        for ms in stride(from: 0.0, through: 480.0, by: 40.0) {
+            print("  \(String(format: "%5.0f", ms))     \(pct(protoShape(ms)))       \(pct(afterShape(ms)))       \(pct(protoReveal(ms)))       \(pct(afterReveal(ms)))     \(pct(protoFade(ms)))     \(pct(afterFade(ms)))")
+        }
+    }
+
+    /// **The hover, as motion, prototype against ours — and measured off the GIF's
+    /// own pixels rather than described.**
+    ///
+    ///     VIBECAT_MOTION_PROBE=1 VIBECAT_GIF=/tmp/hover.gif \
+    ///         swift test --no-parallel --filter hoverGIF
+    ///
+    /// Three bands per frame, all three starting from the same 273.1pt resting
+    /// width and revealing the same 150pt:
+    ///
+    /// | band | colour | shape clock | reveal clock | fade clock |
+    /// |---|---|---|---|---|
+    /// | prototype | `#FFA63C` | `--spring-w` / 440ms | `--ease` / 280ms | `--ease` / 160ms |
+    /// | ours, after Task 4 | `#5B9DF9` | `widthSpring` | `--ease` / 280ms | `--ease` / 160ms |
+    /// | ours, before Task 4 | `#8A93A6` | `--ease` / 280ms | `--ease` / 280ms | `--ease` / 280ms |
+    ///
+    /// The reveal is drawn as a `--bone` bar right-aligned inside its own
+    /// silhouette, at its own width and its own opacity, because that is the
+    /// property the middle and bottom bands differ on and a silhouette alone would
+    /// not show it.
+    ///
+    /// Every number the report quotes about this file is then read back out of the
+    /// rasters: painted columns per band per frame, and the bar's own alpha
+    /// recovered from its rendered colour over `--void`. Nothing here is an
+    /// impression.
+    @Test(.enabled(if: Self.on && ProcessInfo.processInfo.environment["VIBECAT_GIF"] != nil))
+    @MainActor func hoverGIF() throws {
+        let path = ProcessInfo.processInfo.environment["VIBECAT_GIF"]!
+        let travel = CollapsedLayout.hoverReveal      // 150
+        let resting = 273.1                           // mbp14 / 3 sessions, measured
+        let stage: CGFloat = 700
+        let bandHeight: CGFloat = 44
+
+        struct Band {
+            let name: String
+            let tint: RGBA
+            let shape: (Double) -> Double
+            let reveal: (Double) -> Double
+            let fade: (Double) -> Double
+        }
+        let wSpring = Spring(response: IslandMotion.response, dampingRatio: IslandMotion.widthDamping)
+        let easeAt: (Double, Double) -> Double = { ms, dur in
+            IslandMotion.easeCurve.value(at: min(1, (ms / 1000) / dur))
+        }
+        let bands = [
+            Band(name: "prototype", tint: RGBA(hex: "#FFA63C")!,
+                 shape: { css(0.32, 1.5, 0.5, 1, duration: 0.440, atMs: $0) },
+                 reveal: { css(0.22, 0.9, 0.28, 1, duration: 0.280, atMs: $0) },
+                 fade: { css(0.22, 0.9, 0.28, 1, duration: 0.160, atMs: $0) }),
+            Band(name: "ours, after ", tint: RGBA(hex: "#5B9DF9")!,
+                 shape: { wSpring.value(target: 1.0, time: $0 / 1000) },
+                 reveal: { easeAt($0, IslandMotion.hoverRevealDuration) },
+                 fade: { easeAt($0, IslandMotion.hoverFadeDuration) }),
+            Band(name: "ours, before", tint: RGBA(hex: "#8A93A6")!,
+                 shape: { easeAt($0, 0.28) },
+                 reveal: { easeAt($0, 0.28) },
+                 fade: { easeAt($0, 0.28) }),
+        ]
+
+        @MainActor func band(_ b: Band, atMs ms: Double) -> some View {
+            let w = resting + travel * b.shape(ms)
+            let rw = travel * b.reveal(ms)
+            return ZStack(alignment: .topLeading) {
+                // A clear stage the shapes can never outgrow: `.frame(width:)`
+                // affects layout where `.offset` does not, so a stage the overshoot
+                // could exceed would give the GIF frames of differing sizes.
+                Color.clear.frame(width: stage, height: bandHeight)
+                IslandShape().fill(Color(b.tint).opacity(0.92))
+                    .frame(width: w, height: 30)
+                // The revealed text, right-aligned inside the flank — its own
+                // width, its own opacity, over the island's own ground so the
+                // recovered alpha below means something.
+                Rectangle().fill(Color(boneColour))
+                    .frame(width: rw, height: 9)
+                    .opacity(b.fade(ms))
+                    .offset(x: w - rw - 12, y: 10)
+            }
+        }
+
+        @MainActor func frame(atMs ms: Double) -> some View {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("\(Int(ms))ms").font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Color(hazeColour))
+                    .frame(width: stage, height: 14, alignment: .leading)
+                ForEach(bands.indices, id: \.self) { i in band(bands[i], atMs: ms) }
+            }
+            .padding(6)
+            .background(Color(islandGroundColour))
+        }
+
+        let times = stride(from: 0.0, through: 580.0, by: 20.0).map { $0 }
+        var frames: [Raster] = []
+        for ms in times { frames.append(try rasterise(frame(atMs: ms), scale: 1)) }
+        #expect(Set(frames.map { "\($0.width)x\($0.height)" }).count == 1,
+                "the frames are not all one size, so the GIF's motion is a layout artefact: \(Set(frames.map { "\($0.width)x\($0.height)" }))")
+        #expect(writeAnimatedGIF(frames, secondsPerFrame: 0.03, to: path),
+                "could not write \(path)")
+
+        // ── Measured off those very rasters, band by band. ──
+        let top = 6 + 14                              // padding + the label row
+        let boneGreen = Int((boneColour.g * 255).rounded())
+        /// Per band: the silhouette's painted width, the bar's painted width, and
+        /// the bar's own alpha recovered from its rendered colour.
+        ///
+        /// **The green channel, not brightness or neutrality.** The first draft
+        /// identified the bar by near-neutrality and it read `barColumns ==
+        /// columns` at every frame: `IslandShape`'s antialiased top and bottom
+        /// fringe is the tint at a few percent over `--void`, which *is* near-grey
+        /// and *is* brighter than `--void`, and it runs the whole width of the
+        /// shape. A measurement that cannot tell a 0pt bar from a 273pt one is
+        /// worth nothing, so the bar is recovered instead from the one channel
+        /// where `--bone` (239) is far from all three band tints (orange 153, blue
+        /// 157, grey 147) and the composite is linear in alpha:
+        ///
+        ///     rendered.g = alpha * bone.g + (1 - alpha) * tint.g
+        ///
+        /// Sampled on the bar's own middle row, where the thing underneath is
+        /// known to be the band's own tint and nothing else.
+        func measure(_ r: Raster, bandIndex i: Int) -> (columns: Int, barColumns: Int, alpha: Double) {
+            let y0 = top + i * Int(bandHeight)
+            let tint = bands[i].tint
+            let t = (Int((tint.r * 255).rounded()), Int((tint.g * 255).rounded()),
+                     Int((tint.b * 255).rounded()))
+            // The tint is filled at 0.92 over --void, so the expected composite is
+            // ~8% darker than the pure colour; tolerance 26 covers that and the
+            // antialiased interior, and excludes `--bone`.
+            let barRow = min(y0 + 14, r.height - 1)
+            var first = -1, last = -1, barFirst = -1, barLast = -1
+            var peakAlpha = 0.0
+            for x in 0..<r.width {
+                var sawTint = false
+                for y in y0..<min(y0 + 30, r.height) {
+                    let p = r[x, y]
+                    guard p.a > 0 else { continue }
+                    if abs(Int(p.r) - t.0) <= 26 && abs(Int(p.g) - t.1) <= 26
+                        && abs(Int(p.b) - t.2) <= 26 { sawTint = true; break }
+                }
+                if sawTint { if first < 0 { first = x }; last = x }
+
+                // The bar, on its own row. `--void` shows through only outside the
+                // silhouette, where there is no bar either, so a pixel whose green
+                // sits between the tint's and `--bone`'s is the composite.
+                let p = r[x, barRow]
+                guard p.a > 0 else { continue }
+                let alpha = Double(Int(p.g) - t.1) / Double(boneGreen - t.1)
+                if alpha >= 0.5 {
+                    if barFirst < 0 { barFirst = x }
+                    barLast = x
+                    peakAlpha = max(peakAlpha, min(1, alpha))
+                }
+            }
+            return (first < 0 ? 0 : last - first + 1,
+                    barFirst < 0 ? 0 : barLast - barFirst + 1,
+                    peakAlpha)
+        }
+
+        print("""
+
+        ══════════════════════════════════════════════════════════════════════
+        HOVER GIF — \(path)
+        \(frames.count) frames, \(frames[0].width)x\(frames[0].height), 30ms each
+        orange = prototype · blue = ours after Task 4 · grey = ours before Task 4
+        ══════════════════════════════════════════════════════════════════════
+        MEASURED OFF THE FRAMES. painted silhouette columns / --bone bar columns /
+        recovered bar alpha, per band. Resting \(f(resting))pt, reveal \(f(travel))pt,
+        so a settled silhouette is \(f(resting + travel))pt and anything wider is §9.1's overshoot.
+
+          t(ms)      prototype                 ours AFTER               ours BEFORE
+        """)
+        var peaks = [0, 0, 0]
+        for (n, ms) in times.enumerated() where n % 2 == 0 {
+            var cells: [String] = []
+            for i in 0..<3 {
+                let m = measure(frames[n], bandIndex: i)
+                peaks[i] = max(peaks[i], m.columns)
+                cells.append("\(pad("\(m.columns)", 4))pt \(pad("\(m.barColumns)", 4))pt a=\(f(m.alpha, 2))")
+            }
+            print("  \(String(format: "%5.0f", ms))   \(cells.joined(separator: "   "))")
+        }
+        let settled = Int((resting + travel).rounded())
+        print("""
+
+          widest silhouette painted, over all \(frames.count) frames
+            prototype    \(peaks[0])pt   (\(peaks[0] - settled)pt past its settled \(settled)pt)
+            ours AFTER   \(peaks[1])pt   (\(peaks[1] - settled)pt past)
+            ours BEFORE  \(peaks[2])pt   (\(peaks[2] - settled)pt past — §9.1's overshoot, absent)
+        """)
+        for i in 0..<3 {
+            #expect(peaks[i] > 0, "band \(i) (\(bands[i].name)) painted nothing at all — the GIF above shows an empty stage and its numbers are meaningless")
+        }
+        #expect(peaks[2] <= settled,
+                "the pre-Task-4 band painted \(peaks[2])pt, past its settled \(settled)pt — --ease cannot overshoot, so this measurement is picking up something other than the silhouette and the comparison is invalid")
+        #expect(peaks[1] > settled,
+                "ours-after painted at most \(peaks[1])pt against a settled \(settled)pt — the hover's shape clock is not overshooting in the rendered frames")
     }
 
     // MARK: - 2. Expand / collapse

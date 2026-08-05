@@ -102,8 +102,16 @@ enum IslandMotion {
     static let heightDamping: Double = 0.80
 
     /// **The one animation the island's *width* may morph on** — §9.1's
-    /// overshooting half. Sole caller: `IslandBody.body`'s
-    /// `.animation(_:value: restingWidth)`.
+    /// overshooting half. Two callers, both in `IslandBody.body` and both a width:
+    /// `.animation(_:value: restingWidth)` (the click-to-open morph) and
+    /// `.animation(_:value: hoverRevealWidth)` (the hover reveal's shape half,
+    /// added by Plan 6.3 Task 4).
+    ///
+    /// **One accessor for both, not two, because the prototype uses one token for
+    /// both**: `.island{transition:width var(--t-shape) var(--spring-w)}` is the
+    /// only rule that ever moves the island's width, and hover and the click are
+    /// two things that change it. The read count is 2 rather than 1 as a result,
+    /// and it still discriminates — see `widthSpringReadCount`.
     ///
     /// A computed property rather than a `let` so the DEBUG read counter can
     /// fire; the `Animation` it returns is the same value the inline
@@ -135,7 +143,17 @@ enum IslandMotion {
     /// HalfOfTheMorph` in IslandMotionTests.swift evaluates `IslandBody.body` and
     /// `IslandView.body` *separately* and pins the counts on each: the width
     /// spring is read by the first and not the second, the height spring by the
-    /// second and not the first. Because `.animation(_:value:)` evaluates its
+    /// second and not the first.
+    ///
+    /// **The width count is 2 since Plan 6.3 Task 4**, because the island has two
+    /// width morphs — the click and the hover — and the prototype puts both on the
+    /// one `--spring-w` token. Two still discriminates every mutation one did:
+    /// pointing either site at `heightSpring` reads `1 / 1`, pointing both reads
+    /// `0 / 2`, swapping the two levels wholesale reads `0 / 2` here and `2 / 0`
+    /// one level up, and **collapsing hover back onto a single `--ease` clock reads
+    /// `1 / 0`** — the mutation Task 4 was asked to try. What 2 cannot say, and 1
+    /// could not either, is *which* of the two width modifiers got the spring.
+    /// Because `.animation(_:value:)` evaluates its
     /// first argument eagerly at the call site, and because a `some View`
     /// property's body is not run by merely constructing the struct, those four
     /// counts are four independent facts about where each curve is installed. So
@@ -192,13 +210,83 @@ enum IslandMotion {
         return .timingCurve(easeCurve, duration: duration)
     }
 
+    // MARK: - Hover's three clocks
+
+    /// **`island-motion.html:125`'s `--t-hover`: the reveal's own width clock.**
+    ///
+    /// `transition:max-width var(--t-hover) var(--ease), opacity 160ms var(--ease),
+    /// margin var(--t-hover) var(--ease)` — so the revealed text's *width* and the
+    /// margin that separates it from the tally share one 280ms clock, and its
+    /// *opacity* has a shorter one of its own (`hoverFadeDuration`). Neither is the
+    /// clock the island's **shape** moves on: that is `--t-shape`/`--spring-w`, at
+    /// `.island{transition:width var(--t-shape) var(--spring-w)}` (lines 84–85), the
+    /// very same spring the click-to-open morph uses. Three clocks, two curves.
+    ///
+    /// **Ours was one modifier over all three** until Plan 6.3 Task 4 —
+    /// `.animation(IslandMotion.ease(duration: 0.28), value: hoverRevealWidth)` on
+    /// the whole silhouette stack, which covered the frame width, the reveal's own
+    /// width and its opacity together. Measured against the prototype at the moment
+    /// Task 4 opened (i.e. *after* Task 3 had already put `--ease` on it):
+    ///
+    /// | clock | prototype | ours, one-modifier | worst deviation |
+    /// |---|---|---|---|
+    /// | shape width | `--spring-w` / 440ms | `--ease` / 280ms | **14.7%** at 55ms, *ahead* |
+    /// | reveal width | `--ease` / 280ms | `--ease` / 280ms | **0.0%** — already exact |
+    /// | reveal opacity | `--ease` / 160ms | `--ease` / 280ms | **23.6%** at 35ms, behind |
+    ///
+    /// Two things in that table are worth more than the plan's own figures.
+    /// **First, the content gap the investigation reported as "38.1% behind at
+    /// 75ms" was already gone**: that number is `.easeOut` against `--ease`, and
+    /// Task 3 installed `--ease` at exactly `--t-hover`, so the reveal's width clock
+    /// is bit-identical to line 125's and Task 4 changed nothing about it.
+    /// **Second, the 29.1% shape gap had halved to 14.7% and changed sign** — a
+    /// 280ms `--ease` *leads* a 440ms `--spring-w` rather than trailing it. What no
+    /// measurement before Task 4 had isolated is the third row: running the fade on
+    /// the reveal's 280ms clock leaves it 23.6 points behind its own 160ms one.
+    ///
+    /// And the one gap none of that closes: **`--spring-w` peaks at 108.0% of its
+    /// travel at 230ms where a 280ms `--ease` never exceeds 100%.** §9.1 —
+    /// *"width overshoots more than height so the island reads as one body with
+    /// mass"* — was therefore not merely mismatched on hover, it was **absent**,
+    /// while being wired correctly on the click since Task 2. Putting the hover's
+    /// shape width on `widthSpring` gives it a 108.4% peak at 268ms against the
+    /// prototype's 108.0% at 230ms — on a 150pt reveal, 12.5pt past the hovered
+    /// width and back.
+    ///
+    /// **The cost of that, stated rather than buried:** on the front half of the
+    /// gesture the shape now deviates *more*, 28.1% at 65ms against the
+    /// one-modifier version's 14.7%, because a spring accelerates where a bezier
+    /// leaps. That is the same inherent mechanism difference this type's §9.1 note
+    /// already records for the expand (29.8% there), and the decision recorded
+    /// there governs here too: the overshoot is what carries §9.1's intent, so
+    /// matching the overshoot is what matching the prototype means. A `UnitCurve`
+    /// bezier at `(.32,1.5)` would match both axes and is deliberately **not**
+    /// taken — it would give hover a different shape curve from the click, where
+    /// the prototype gives both the same token.
+    static let hoverRevealDuration: Double = 0.28
+
+    /// **`island-motion.html:125`'s `opacity 160ms var(--ease)`** — the third
+    /// clock, and the only one of the three that is a bare millisecond value in the
+    /// prototype rather than a token.
+    ///
+    /// Shorter than `hoverRevealDuration` on purpose, and the ordering is the
+    /// observable part: the text is fully opaque while its container is still
+    /// widening (at 160ms the reveal's own width is at 97.0% of 150pt), so it reads
+    /// as text being uncovered rather than text arriving. Three equal durations
+    /// would satisfy "there are three animations" and look exactly like the one
+    /// modifier they replaced, which is why
+    /// `theHoverFadeFinishesBeforeTheRevealWidthDoes` asserts the ordering and not
+    /// merely the count.
+    static let hoverFadeDuration: Double = 0.16
+
     #if DEBUG
     /// Which durations `ease(duration:)` has been asked for since this was last
     /// emptied.
     ///
     /// Durations and not a bare count, because the duration is the only thing that
-    /// says *which* `--ease` surface was reached: 0.28 is the hover reveal, 0.19 the
-    /// face crossfade, 0.13 a session row, 0.18 the settings switch. So
+    /// says *which* `--ease` surface was reached: 0.28 is the hover reveal's width,
+    /// 0.16 its opacity, 0.19 the face crossfade, 0.13 a session row, 0.18 the
+    /// settings switch. So
     /// `theEaseSitesAreReachedByARealRender` can assert per-site rather than
     /// "something somewhere asked for the curve" — which is what makes reverting one
     /// site to `.easeOut` fail a test that evaluates a body, and not only the source
@@ -207,7 +295,8 @@ enum IslandMotion {
     /// A `Set` and not an ordered array, which was the first draft: this is appended
     /// to on *every* body build, and in a debug build of the actual app nothing ever
     /// empties it, so an array is an unbounded leak that grows with uptime. A set is
-    /// bounded by the number of distinct `--ease` durations in the codebase — four.
+    /// bounded by the number of distinct `--ease` durations in the codebase — five
+    /// since Task 4 split the hover fade off onto its own 160ms.
     /// Nothing is lost: no site asks for two durations, so "which durations" already
     /// identifies the set of sites reached, and call order was never the claim.
     ///

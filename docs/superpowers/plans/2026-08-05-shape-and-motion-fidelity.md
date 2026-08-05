@@ -260,16 +260,32 @@ overshoots to 107.9% at 240ms where we never exceed 100%.
 island reads as one body with mass — and hover is a width change that currently has
 no overshoot at all.
 
-- [ ] Tests first: sample each of the three with `MotionFidelityProbe` against the
+- [x] Tests first: sample each of the three with `MotionFidelityProbe` against the
       prototype's curve; assert the shape curve **exceeds 100%** during the hover
       (that single assertion is what the current code cannot pass); assert the
       opacity finishes before the width does.
-- [ ] Mutation-verify: collapse the three back onto one clock → at least two tests
+- [x] Mutation-verify: collapse the three back onto one clock → at least two tests
       must fail, and say which.
-- [ ] **`VIBECAT_GIF=/tmp/hover.gif`**, and put the artefact path in the report so
+- [x] **`VIBECAT_GIF=/tmp/hover.gif`**, and put the artefact path in the report so
       the owner can compare it against the prototype in a browser. **You cannot see;
       do not report an impression.**
-- [ ] Full suite, commit.
+- [x] Full suite, commit.
+
+**Done, commit below. `.superpowers/sdd/2026-08-05-shape-and-motion-fidelity/task-4-report.md`.**
+Three clocks: shape on `IslandMotion.widthSpring` (108.4% peak at 268ms against the
+prototype's 108.0% at 230ms, +12.5pt past the hovered width), reveal width on
+`--ease`/280ms, reveal opacity on `--ease`/160ms — the last two now 0.0% from the
+prototype. **The plan's two headline gaps were stale**: the 38.1% content gap was
+already closed by Task 3 (identical curve *and* duration) and the 29.1% shape gap had
+halved to 14.7% and changed sign. What was real, and what nobody had isolated: the
+opacity ran 23.6% behind, and the overshoot was **absent** rather than approximate.
+The collapse-to-one-clock mutation fails **four** tests. Two green mutations reported
+rather than patched — deleting `.clipped()` from the reveal leaves all 721 green
+(redundant against the enclosing `.clipShape`, and `content(cell:)`'s comment calling
+it load-bearing is wrong), and a `--bone`-span assertion could not fail and was
+removed. §9.1 gained a correction block: its damping figures were stale since Plan
+4.5 and its "Hover reveal | 280ms" row is one row where the prototype has three.
+Cost unmeasured by design — Task 6 owns it.
 
 ---
 

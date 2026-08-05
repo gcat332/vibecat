@@ -739,27 +739,38 @@ struct IslandBody: View {
                 // accessor is counted, so it cannot silently become the other
                 // half of §9.1. See `IslandMotion.widthSpringReadCount`.
                 .animation(IslandMotion.widthSpring, value: restingWidth)
-                // Design §9.1's OTHER named animation: hover reveal, 280ms,
-                // max-width 0 → 150pt — a distinct transition from the width
-                // spring above, not the same curve wearing a second hat.
-                // Keying each `.animation(value:)` to its own independent
-                // input, rather than both to `body.width`, is what makes that
-                // true: toggling `hovering` alone leaves `restingWidth`
-                // unchanged, so the spring modifier has nothing to react to
-                // and this one governs — and vice versa when only the session
-                // count changes. A naive `withAnimation(.easeOut(duration:
-                // 0.28))` wrapped around the `hovering` mutation instead would
-                // be overridden by the spring above, because both would then
-                // be keyed to the same changing `body.width`.
+                // **The hover's SHAPE clock — the first of hover's three, and the
+                // same spring as the click above.** Kept as a second modifier
+                // rather than folded into the first because the two are keyed to
+                // independent inputs: toggling `hovering` alone leaves
+                // `restingWidth` unchanged, so that modifier has nothing to react
+                // to and this one governs; when only the session count changes it
+                // is the other way round. Keying both to `body.width` instead
+                // would let whichever came last swallow the other, which is also
+                // why a naive `withAnimation(…)` wrapped around the `hovering`
+                // mutation does not work here.
                 //
-                // `IslandMotion.ease`, not `.easeOut`: the prototype's line 125
-                // is `transition:max-width var(--t-hover) var(--ease),opacity
-                // 160ms var(--ease),margin var(--t-hover) var(--ease)` — that is
-                // `cubic-bezier(.22,.9,.28,1)`, and `.easeOut` is off it by 38.1
-                // percentage points at the worst interior point. 280ms is
-                // `--t-hover`; Task 4 owns the fact that the prototype's opacity
-                // runs 160ms against the width's 280.
-                .animation(IslandMotion.ease(duration: 0.28), value: hoverRevealWidth)
+                // **`IslandMotion.widthSpring`, not `IslandMotion.ease(duration:
+                // 0.28)`, since Plan 6.3 Task 4.** The prototype's line 84–85 is
+                // `.island{transition:width var(--t-shape) var(--spring-w),
+                // transform var(--t-shape) var(--spring-w)}` — one rule, covering
+                // *every* width change the island makes, hover included. Line 125's
+                // `--t-hover`/`--ease` governs the `.detail` element inside it, not
+                // the island, and that is now where our two `--ease` clocks live
+                // too (see `content(cell:)`). So this modifier and the one above
+                // are the same curve because the prototype has one width rule, not
+                // because one is doubling for the other.
+                //
+                // What it buys, measured: `--spring-w` peaks at **108.0%** of its
+                // travel at 230ms and `widthSpring` at **108.4%** at 268ms, where a
+                // 280ms `--ease` never exceeds 100%. §9.1 — width overshoots more
+                // than height so the island reads as one body with mass — was
+                // wired on the click since Task 2 and **absent on hover**, which is
+                // a width change. On a 150pt reveal the island now runs 12.5pt past
+                // its hovered width and settles back. `IslandMotion.hoverReveal
+                // Duration`'s doc comment carries the full before/after table
+                // including what this costs on the front half of the gesture.
+                .animation(IslandMotion.widthSpring, value: hoverRevealWidth)
                 // Fix round 1: the click that opens the drawer. Scoped to
                 // the stack's own rect via `.contentShape` — that is
                 // `restingWidth + revealWidth` wide by `body.height` tall,
@@ -822,9 +833,9 @@ struct IslandBody: View {
             //
             // Kept as a zero *width* rather than an `if` that drops the subview:
             // the drawer-closed hover reveal has to keep behaving exactly as it
-            // did, and the outer `.animation(IslandMotion.ease(duration: 0.28),
-            // value: hoverRevealWidth)` animates this frame's width from inside the
-            // enclosing shape's subtree. An `if` would replace that 280ms clip
+            // did, and the `.animation(IslandMotion.ease(duration:
+            // IslandMotion.hoverRevealDuration), value: revealWidth)` below
+            // animates this frame's width. An `if` would replace that 280ms clip
             // with an uninterpolated pop. Width 0 + `.clipped()` is already
             // measured to paint nothing at all — the drawer-open, not-hovering
             // render counts 0 `--bone` pixels — so "no width" is also "no
@@ -840,10 +851,35 @@ struct IslandBody: View {
             // opacity to 1 before anything was drawn. The sentence's own
             // conclusion is unaffected: width 0 plus `.clipped()` is what makes
             // this paint nothing, and that half was measured.
+            // **Hover's second and third clocks, and the order below is what
+            // assigns each one to its own property.** `island-motion.html:125`:
+            // `transition:max-width var(--t-hover) var(--ease),opacity 160ms
+            // var(--ease),margin var(--t-hover) var(--ease)` — the `.detail`'s
+            // width and margin run 280ms, its opacity 160ms, and until Plan 6.3
+            // Task 4 both of those plus the island's own shape were one
+            // `.animation(IslandMotion.ease(duration: 0.28))` on the enclosing
+            // stack. Three clocks is a shorter fade *inside* a container still
+            // widening: at 160ms the reveal's own width is at 97.0% of 150pt, so
+            // the text reads as uncovered rather than as arriving.
+            //
+            // `.animation(_:value:)` governs the modifiers **below** it in the
+            // chain and is overridden by any nearer one, so the fade animation
+            // sitting between `.opacity` and `.frame` is what makes 160ms the
+            // opacity's clock and 280ms the width's — and it is also what keeps
+            // the enclosing stack's `widthSpring` from reaching either. That
+            // ordering is the whole mechanism, so
+            // `theRevealsTwoClocksSitOnTheirOwnProperties` asserts it against this
+            // file's own source rather than trusting the comment: SwiftUI offers no
+            // way to ask a built view which curve is on which modifier, and this
+            // repo does not take a view-inspection dependency.
             RevealContent(session: model.revealed, now: now)
+                .opacity(revealWidth > 0 ? 1 : 0)
+                .animation(IslandMotion.ease(duration: IslandMotion.hoverFadeDuration),
+                           value: revealWidth)
                 .frame(width: revealWidth, alignment: .leading)
                 .clipped()
-                .opacity(revealWidth > 0 ? 1 : 0)
+                .animation(IslandMotion.ease(duration: IslandMotion.hoverRevealDuration),
+                           value: revealWidth)
         }
         .frame(height: model.geometry.notch.height)
     }

@@ -455,6 +455,44 @@ Width overshoots more than height, so the island reads as one body with mass
 rather than a resizing box. Faces never slide in from outside; they fade in
 *inside* a shape that is already the right size.
 
+> **Corrected 2026-08-05, after Plan 6.3 Task 4 shipped.** The table's damping
+> figures are stale and its "Hover reveal" row is one row where the prototype has
+> three.
+>
+> **The damping numbers.** `0.72`/`0.78` were retuned to **`0.62`/`0.80`** by Plan
+> 4.5, measured against `island-motion.html`'s own `--spring-w: cubic-bezier(.32,
+> 1.5,.5,1)` and `--spring-h: cubic-bezier(.34,1.22,.5,1)`. At the old values width
+> overshot 3.8% against height's 2.0% — a ratio of 1.9× where the prototype's beziers
+> give 5.3× — so the numbers written here very nearly erased the rule stated
+> underneath them. `IslandMotion` carries the measurement table.
+>
+> **"Hover reveal | 280ms" is the revealed text, not the island.** Three separate
+> things move on hover and the prototype gives them three clocks on two curves:
+>
+> | what | prototype | duration | curve |
+> |---|---|---|---|
+> | the island's own width (and its recentring shift) | `.island`, lines 84–85 | `--t-shape` **440ms** | `--spring-w` |
+> | the revealed text's `max-width` and `margin` | `.detail`, line 125 | `--t-hover` **280ms** | `--ease` |
+> | the revealed text's `opacity` | `.detail`, line 125 | **160ms** | `--ease` |
+>
+> Only the middle row is the `280ms`/`max-width 0 → 150pt` written above. The other
+> two were absent from this section, and the omission was read the way omissions here
+> keep being read: one `.animation` modifier covered all three at `280ms`. **So the
+> rule in the paragraph above this box was, on hover, not merely mismatched but
+> absent** — the island's width had no overshoot at all, because `--ease` cannot
+> exceed its target, while the click's width morph had been on the overshooting
+> spring since Plan 6.3 Task 2. Measured: `--spring-w` peaks at **108.0%** of its
+> travel at 230ms and our width spring at **108.4%** at 268ms; a `280ms` `--ease`
+> peaks at exactly `100.0%`. On the `150pt` reveal that is `12.5pt` of travel past
+> the hovered width and back, which is what "one body with mass" costs and what it
+> buys.
+>
+> The trade is recorded rather than hidden: a spring accelerates where a bezier
+> leaps, so the *front* of the hover now deviates from the prototype by 28.1% at 65ms
+> against the single modifier's 14.7%. Matching the overshoot is what matching this
+> section means — the same decision Plan 4.5 recorded for the click, for the same
+> reason.
+
 ### 9.2 The aura is an event
 
 Light blooms out of the island's silhouette in the new state's colour and leaves

@@ -205,17 +205,27 @@ private func ease(_ x: Double) -> Double { cssBezier(0.22, 0.9, 0.28, 1, atX: x)
 ///
 /// | evaluated | `widthSpring` | `heightSpring` |
 /// |---|---|---|
-/// | `IslandBody.body` | 1 | 0 |
+/// | `IslandBody.body` | **2** | 0 |
 /// | `IslandView.body` | 0 | 1 |
 ///
 /// Four facts, not two, and that is what makes both mutations fail:
 ///
-/// - **the reported mutation** (width site reads the height spring, or the height
-///   damping inline): row 1 becomes `0 / 1` for the accessor form and `0 / 0` for
-///   the inline form. Fails on the first row's first expectation.
-/// - **swapping the two sites wholesale**: both counts stay at 1 overall, which a
-///   single combined count could not see — but row 1 becomes `0 / 1` and row 2
-///   becomes `1 / 0`. Fails on both rows.
+/// - **the reported mutation** (a width site reads the height spring, or the height
+///   damping inline): row 1 becomes `1 / 1` for the accessor form and `1 / 0` for
+///   the inline form. Fails on the first row's first expectation either way.
+/// - **swapping the two sites wholesale**: row 1 becomes `0 / 2` and row 2 becomes
+///   `2 / 0`, which a single combined count could not see. Fails on both rows.
+///
+/// **The `2` is Plan 6.3 Task 4's**, and it is not slop. The island has *two* width
+/// morphs — the click (`value: restingWidth`) and the hover reveal's shape half
+/// (`value: hoverRevealWidth`) — and the prototype puts both on the one
+/// `--spring-w` token, `.island{transition:width var(--t-shape) var(--spring-w)}`
+/// at island-motion.html:84. Before Task 4 the hover site was
+/// `IslandMotion.ease(duration: 0.28)`, so **collapsing hover back onto one
+/// `--ease` clock reads `1 / 0` here and fails.** What `2` cannot say — and `1`
+/// could not either — is which of the two width modifiers got the spring; the
+/// ordering assertion in `HoverMotionTests` is what covers the hover one
+/// specifically.
 ///
 /// The zeros are load-bearing and are not an accident of `Group`: `.animation(_:
 /// value:)` evaluates its first argument eagerly where it is written, and building
@@ -244,12 +254,14 @@ private func ease(_ x: Double) -> Double { cssBezier(0.22, 0.9, 0.28, 1, atX: x)
         return m
     }
 
-    // Row 1 — the collapsed silhouette's own body. The width spring lives here.
+    // Row 1 — the collapsed silhouette's own body. Both width morphs live here:
+    // the click (`value: restingWidth`) and the hover reveal's shape half
+    // (`value: hoverRevealWidth`), hence 2.
     IslandMotion.widthSpringReadCount = 0
     IslandMotion.heightSpringReadCount = 0
     _ = IslandBody(model: freshModel(), now: Date()).body
-    #expect(IslandMotion.widthSpringReadCount == 1,
-            "IslandBody.body read widthSpring \(IslandMotion.widthSpringReadCount) times, expected 1 — the §9.1 width morph is no longer keyed to the overshooting spring (Plan 6.3 Task 2's reported mutation, or the site was deleted)")
+    #expect(IslandMotion.widthSpringReadCount == 2,
+            "IslandBody.body read widthSpring \(IslandMotion.widthSpringReadCount) times, expected 2 — one of the island's two width morphs (the click, or the hover reveal's shape half) is no longer keyed to the overshooting spring (Plan 6.3 Task 2's reported mutation, Task 4's collapse-to-one-clock mutation, or a deleted site)")
     #expect(IslandMotion.heightSpringReadCount == 0,
             "IslandBody.body read heightSpring \(IslandMotion.heightSpringReadCount) times, expected 0 — the drawer's nearly-critically-damped curve has been installed on the width, which is the mutation §9.1 forbids")
 
@@ -330,15 +342,18 @@ private func ease(_ x: Double) -> Double { cssBezier(0.22, 0.9, 0.28, 1, atX: x)
         return IslandMotion.easeDurationsRead
     }
 
-    // 1. The hover reveal, `--t-hover` 280ms (island-motion.html:125).
+    // 1. The hover reveal's TWO `--ease` clocks — `--t-hover` 280ms on its width
+    //    and a bare 160ms on its opacity (island-motion.html:125). One duration
+    //    here until Plan 6.3 Task 4; the set is the assertion, so three equal
+    //    clocks collapse it to one element and fail.
     let model = IslandModel(geometry: IslandGeometry(screen: IslandGoldenTests.mbp14),
                             motion: MotionPreference(chosen: .full, systemWantsReduced: false))
     model.state = .waiting
     model.sessionCount = 3
     model.hovering = true
     let hover = durations { _ = IslandBody(model: model, now: Date()).body }
-    #expect(hover == [0.28],
-            "IslandBody.body asked for --ease at \(hover), expected exactly [0.28] — the hover reveal is off --t-hover or back on .easeOut")
+    #expect(hover == [IslandMotion.hoverFadeDuration, IslandMotion.hoverRevealDuration],
+            "IslandBody.body asked for --ease at \(hover), expected exactly [\(IslandMotion.hoverFadeDuration), \(IslandMotion.hoverRevealDuration)] — the hover reveal's width and fade are no longer on two separate clocks, or one of them reverted")
 
     // 2. The drawer's face swap, `--t-face` 190ms (island-motion.html:173).
     let question = QuestionModel(event: VibeEvent(id: "e", cli: "claude-code", kind: .permission,
@@ -384,11 +399,13 @@ private func ease(_ x: Double) -> Double { cssBezier(0.22, 0.9, 0.28, 1, atX: x)
 /// exists to prevent — §9.1's two springs went unchecked for four plans precisely
 /// because they were assembled at their call sites.
 ///
-/// The five sites, all replaced by Plan 6.3 Task 3:
+/// The six sites — five replaced by Plan 6.3 Task 3, the sixth split off the
+/// first by Task 4:
 ///
 /// | site | prototype | was |
 /// |---|---|---|
-/// | `IslandView.swift` hover reveal, 280ms | `island-motion.html:125` | `.easeOut` |
+/// | `IslandView.swift` hover reveal **width**, 280ms | `island-motion.html:125` | `.easeOut` |
+/// | `IslandView.swift` hover reveal **opacity**, 160ms | `island-motion.html:125` | *shared the 280ms clock* |
 /// | `DrawerView.swift` face swap, 190ms | `island-motion.html:173` | `.easeInOut` |
 /// | `QuestionFace.swift` sub-face swap, 190ms | `island-motion.html:173` | `.easeInOut` |
 /// | `SessionRow.swift` row background, 130ms | `island-motion.html:346` | `.easeOut` |
@@ -398,8 +415,14 @@ private func ease(_ x: Double) -> Double { cssBezier(0.22, 0.9, 0.28, 1, atX: x)
 /// `island-motion.html`'s uses, and `settings.html:27` declares the same token
 /// verbatim.
 ///
-/// Would fail if: a sixth `--ease` surface were added with an inline
-/// `.timingCurve(0.22, 0.9, 0.28, 1, …)`, or one of the five reverted to a
+/// **Counted per file rather than as a set of names**, because Task 4 made
+/// `IslandView.swift` hold two of them and a `Set` would have swallowed that: a
+/// mutation that deletes one of the island's two `--ease` clocks has to be visible
+/// here. `theRevealsTwoClocksSitOnTheirOwnProperties` in `HoverMotionTests` is what
+/// says the two are on the right properties; this only counts them.
+///
+/// Would fail if: a seventh `--ease` surface were added with an inline
+/// `.timingCurve(0.22, 0.9, 0.28, 1, …)`, or one of the six reverted to a
 /// built-in curve (the `.easeOut`/`.easeInOut` scan below).
 @Test func theFiveEaseSitesAllRouteThroughIslandMotion() throws {
     let sources = URL(fileURLWithPath: #filePath)
@@ -431,9 +454,11 @@ private func ease(_ x: Double) -> Double { cssBezier(0.22, 0.9, 0.28, 1, atX: x)
         }
     }
 
-    #expect(easeCallers.sorted() == ["DrawerView.swift", "IslandView.swift", "QuestionFace.swift",
-                                     "SessionRow.swift", "SettingsSwitch.swift"],
-            "the set of files calling IslandMotion.ease changed: \(easeCallers.sorted()) — one of the five --ease sites in the table above has gone, or a sixth arrived without a row")
+    let callsPerFile = Dictionary(grouping: easeCallers, by: { $0 }).mapValues(\.count)
+    #expect(callsPerFile == ["IslandView.swift": 2, "DrawerView.swift": 1,
+                             "QuestionFace.swift": 1, "SessionRow.swift": 1,
+                             "SettingsSwitch.swift": 1],
+            "the IslandMotion.ease call sites per file changed: \(callsPerFile.sorted { $0.key < $1.key }) — one of the six --ease sites in the table above has gone (IslandView holds two since Task 4: the reveal's width and its opacity), or a seventh arrived without a row")
     #expect(inlineBeziers.isEmpty,
             "a --ease bezier is spelled out away from IslandMotion in \(inlineBeziers) — that is how the two shape springs went unchecked for four plans")
     // The two that stay are the looping keyframe approximations, and
