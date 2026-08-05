@@ -16,12 +16,12 @@ plan files twice; it is cheaper to keep it written down.
 | 6.4 | The Settings **shell** — persisted preferences, the drawer footer's mute and gear, the window the gear opens, its sidebar and the four panes' chrome · **mute wired end to end** | §14's layout, §6.4's footer | **done** — [the plan](2026-08-03-settings-shell.md), 6 tasks plus a whole-branch review and one fix round; 574 tests. **The first plan in this project's history to actually diff `settings.html`** |
 | 6.5 | The Notifications page — the four alert switches, the Sound section that gives Plan 6.2's engine its sheet, stall detection, and the system-notification fallback | §14's Notifications | **done** — [the plan](2026-08-04-notifications-page.md), 7 tasks; 647 tests. The browser diff found the page did not fit its own window |
 | 6.3 | The island's shape and its motion — a per-face width, opening that widens instead of narrowing, the prototype's own curves, the bezel fillets, and the list's overflow cue | §5–§6, §9.1 | **done** — [the plan](2026-08-05-shape-and-motion-fidelity.md), 6 tasks; 744 tests. Found that the drawer had no width of its own and that opening the island made it narrower |
-| **6.6** | The Display page — every control whose behaviour exists: the motion picker, §11's nine session-card switches, §6.2's right flank, the coat, and a live preview | §14's Display, §11, §9.3, §6.2 | **written** — [the plan](2026-08-05-display-page.md), 6 tasks |
+| 6.6 | The Display page — every control whose behaviour exists: the motion picker, §11's eight session-card switches, §6.2's right flank with a real CLI mark, the coat, and a live preview that *is* `SessionRow` | §14's Display, §11, §9.3, §6.2 | **done** — [the plan](2026-08-05-display-page.md), 6 tasks; 788 tests |
 | **6.8** | The Display controls with no behaviour anywhere — Clean/Detailed tiers, Meter/Dot, the four panel-size sliders, the two notch-tuning offsets, the display picker, editable state colours, Always/Never reveal | §14's Display | not written |
 | **6.7** | The General and Integrations pages | §14 | not written |
 | 6.1 | Keyboard answering, `Other…`, the three motion defects a motion switch exposes, the duplicate tier, and §6.2's choosable right flank | §10.1, §9.3, §6.2 | **done** — [the plan](2026-08-04-keyboard-and-switches.md), 6 tasks; 686 tests. Keyboard answering verified on hardware with a TextEdit witness, including all three key releases |
 | **6** | Jump and §16's AppleScript hint — everything else that was gated on keyboard input is 6.1 | §13, §16 | not written |
-| **7** | Generic adapter and custom sources | §3 | not written |
+| **7** | Generic adapter and custom sources — plus `SourceAdapter.icon`, so a source can point at its own icon file | §3 | **written** — [the plan](2026-08-05-generic-adapter.md), 6 tasks |
 | **8** | Matching motion cost to motion content | §9.1's rates | not written |
 
 Everything that had no owner now has one. What follows is where each thing went
@@ -951,9 +951,27 @@ already resolves a duplicate id in favour of the later adapter, precisely so a
 user's custom source can shadow a built-in — so this fills a designed hole
 rather than opening one.
 
-**It comes after Plan 6** for one reason: a *custom* source is one a person
-configures, and there is nowhere to configure anything until Settings exists.
-The adapter engine could technically land earlier; its useful half cannot.
+**It came after Plan 6's Settings pages, and is now written** —
+[the plan](2026-08-05-generic-adapter.md), 6 tasks. The reason it waited was that
+*"a custom source is one a person configures, and there is nowhere to configure
+anything until Settings exists"*. 6.4 built the shell and 6.5–6.6 two of its pages,
+which is enough: **the definitions are config, and the UI that edits them is 6.7's.**
+A source defined in a file is already useful and already testable, which is the same
+"reachable, not dead" standard Plan 6.1 used for the right flank before its picker.
+
+**It also carries the owner's icon request.** §3 already specified the mechanism —
+*"VibeCat ships neutral geometric marks and lets a source point at its own icon
+file"* — and `SourceAdapter` never had the field. Measured while reviewing the
+owner's set: `NSImage` loads SVG, PNG and WebP with **no dependency**; two SVGs
+reported `1×1` because they used `width="1em"` with no font context; and the icons
+**must not be committed**, because the repo is public and MIT and MIT cannot grant
+trademark rights — which is §3's own stated reason for the point-at-a-file design.
+
+**The unresolved half is §4.3.** `CLIMark` is `currentColor` geometry tinted by the
+state accent: shape says who, hue says what state. A brand logo arrives with its own
+colour, so it puts a second meaning on hue. Task 1 rules; the plan says plainly there
+may be no answer that satisfies both, and asks for the trade to be named in the
+source rather than resolved silently.
 
 Codex, Copilot and Gemini presets stay in §18's **Later** column. The generic
 adapter is what makes them cheap when they come.
