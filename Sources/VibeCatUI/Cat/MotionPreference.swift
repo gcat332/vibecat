@@ -15,13 +15,36 @@ public struct MotionPreference: Sendable, Equatable {
     public let chosen: MotionLevel
     public let systemWantsReduced: Bool
 
-    public init(chosen: MotionLevel = .full, systemWantsReduced: Bool) {
+    /// §14's *"Follow the system Reduce Motion setting"* switch, on by default.
+    ///
+    /// **This is not a new invariant, it is the one §9.3 already stated and this
+    /// file's own summary had dropped.** §9.3, verbatim: *"Settings offers Full /
+    /// Reduced / Off, and **by default** follows the system Reduce Motion setting,
+    /// which overrides the choice."* Two words — "by default" — presuppose a switch
+    /// that can turn the following off, and §14 lists exactly that switch. Without
+    /// it, "by default" describes nothing.
+    ///
+    /// Plan 6.6's own plan file called this a contradiction with §9.3 and asked for
+    /// a dated spec correction. **There is no contradiction and §9.3 is unchanged.**
+    /// The contradiction came from `CLAUDE.md`'s summary of §9.3, which kept the
+    /// override's direction and lost the qualifier — the same failure mode as the
+    /// `9px` radius Plan 6.3 untangled, where four documents repeated a summary
+    /// nobody had checked against the line it summarised.
+    ///
+    /// **What does not change:** while following is on, the override still runs one
+    /// way only. A system asking for less motion beats a user asking for more, and
+    /// it never drags a user who chose `off` back into motion.
+    public let followsSystem: Bool
+
+    public init(chosen: MotionLevel = .full, systemWantsReduced: Bool,
+                followsSystem: Bool = true) {
         self.chosen = chosen
         self.systemWantsReduced = systemWantsReduced
+        self.followsSystem = followsSystem
     }
 
     public var effective: MotionLevel {
-        guard systemWantsReduced else { return chosen }
+        guard followsSystem, systemWantsReduced else { return chosen }
         return chosen == .off ? .off : .reduced
     }
 
@@ -89,10 +112,12 @@ extension MotionPreference {
     /// Motion setting. Gated to AppKit so the rule above stays testable
     /// without it — this is the only place in the file that touches
     /// NSWorkspace.
-    @MainActor public static func current(chosen: MotionLevel = .full) -> MotionPreference {
+    @MainActor public static func current(chosen: MotionLevel = .full,
+                                         followsSystem: Bool = true) -> MotionPreference {
         MotionPreference(
             chosen: chosen,
-            systemWantsReduced: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+            systemWantsReduced: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+            followsSystem: followsSystem)
     }
 
     /// This preference with a fresh read of the system setting and the user's
@@ -109,10 +134,18 @@ extension MotionPreference {
     /// only — the system asking for less beats a user asking for more, and it
     /// never drags a user who chose `off` back into motion — and that includes
     /// not doing it by accident on a refresh.
+    ///
+    /// **`followsSystem` is carried across for the same reason, one field later.**
+    /// It defaults to `true`, so omitting it here would silently switch the
+    /// following back on the first time the system posted an accessibility change —
+    /// exactly the accident the paragraph above describes, in a field added after
+    /// that paragraph was written. Both stored choices survive a refresh; only the
+    /// system's own bit is re-read, which is the whole point of the method.
     @MainActor public func refreshed() -> MotionPreference {
         MotionPreference(
             chosen: chosen,
-            systemWantsReduced: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+            systemWantsReduced: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+            followsSystem: followsSystem)
     }
 
     /// What `NSWorkspace` posts when Reduce Motion — or any other accessibility

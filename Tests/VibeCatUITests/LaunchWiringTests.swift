@@ -84,6 +84,27 @@ private func fixtureMetrics() -> ScreenMetrics {
     #expect(plain.model.coat == .plain)
 }
 
+@MainActor @Test func aStoredFollowTheSystemChoiceReachesTheIslandAtLaunch() {
+    // **Added because the enumerating guard below does not cover this**, and Plan 6.6's
+    // Task 3 checked rather than assumed: removing
+    // `followsSystem: prefs.followsSystemReduceMotion` from `NotchController.init` left
+    // the whole suite green. The guard asserts every `Preferences` field has a *named*
+    // reader in its dictionary — a string — not that the named reader still reads. So a
+    // field can be documented as wired and be silently disconnected, which is the exact
+    // failure Plan 6.4 shipped three times.
+    //
+    // Same shape as `aStoredCoatReachesTheIslandAtLaunch` above, which is the pattern
+    // that does bind: build a real controller from a store and read the model.
+    let off = controller(InMemoryPreferenceStore(
+        Preferences(followsSystemReduceMotion: false)))
+    #expect(off.model.motion.followsSystem == false,
+            "§14's follow-the-system switch does not reach the island — it is write-only")
+
+    let on = controller(InMemoryPreferenceStore(
+        Preferences(followsSystemReduceMotion: true)))
+    #expect(on.model.motion.followsSystem == true)
+}
+
 /// The two above plus the mute glyph, in one controller, from one `load()`.
 ///
 /// Separate from them on purpose: those two would both pass if `init` read the
@@ -143,6 +164,7 @@ private func fixtureMetrics() -> ScreenMetrics {
         "choiceForFail": "SoundSettings(_:) → CueRenderer",
         "postsSystemNotification": "Notifier.postStalls(from:preferences:) (re-read per stall)",
         "motion": "NotchController.init → IslandModel.motion.chosen",
+        "followsSystemReduceMotion": "NotchController.init → MotionPreference.current(followsSystem:) → .effective",
         "rightFlank": "NotchController.init → IslandModel.rightFlank",
         "coat": "NotchController.init → IslandModel.coat (IslandView already reads model.coat into ResolvedCat)",
         "cardOptions": "NOT YET WIRED — Plan 6.6's Task 4 re-threads SessionListFace's `options` " +

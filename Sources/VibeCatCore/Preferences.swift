@@ -44,6 +44,15 @@ public struct Preferences: Sendable, Equatable {
     /// default `chosen`, not `settings.html`, since Plan 6.6's Display page owns
     /// this control and has not shipped yet.
     public var motion: MotionLevel
+    /// §14's *"Follow the system Reduce Motion setting"*, on by default —
+    /// `settings.html:506`'s `aria-checked="true"`.
+    ///
+    /// **§9.3 already required this and nothing needed correcting.** Its wording is
+    /// *"Settings offers Full / Reduced / Off, and **by default** follows the system
+    /// Reduce Motion setting"* — the qualifier presupposes a switch. Plan 6.6's plan
+    /// file called it a contradiction because `CLAUDE.md`'s summary of §9.3 had
+    /// dropped those two words.
+    public var followsSystemReduceMotion: Bool
     /// §6.2's choosable right flank. Default `sessionCount`, matching
     /// `IslandModel.layout`'s hardcoded behaviour today (Plan 6.1's Task 5 makes
     /// this preference the thing that actually drives it).
@@ -67,6 +76,7 @@ public struct Preferences: Sendable, Equatable {
                 choiceForFail: CueChoice = .standard,
                 postsSystemNotification: Bool = false,
                 motion: MotionLevel = .full,
+                followsSystemReduceMotion: Bool = true,
                 rightFlank: RightFlank = .sessionCount,
                 coat: Coat = .tabby,
                 cardOptions: SessionCardOptions = SessionCardOptions()) {
@@ -81,6 +91,7 @@ public struct Preferences: Sendable, Equatable {
         self.choiceForFail = choiceForFail
         self.postsSystemNotification = postsSystemNotification
         self.motion = motion
+        self.followsSystemReduceMotion = followsSystemReduceMotion
         self.rightFlank = rightFlank
         self.coat = coat
         self.cardOptions = cardOptions

@@ -246,7 +246,8 @@ private func withFreshDefaults(_ body: (UserDefaults, String) throws -> Void) re
         for name in ["soundEnabled", "volume", "quietDuringDoNotDisturb", "selectedPage",
                      "alerts.onNeedsAnswer", "alerts.onFinish", "alerts.onFail", "alerts.onStall",
                      "pack", "choiceForNeedsAnswer", "choiceForFinish", "choiceForFail",
-                     "postsSystemNotification", "motion", "rightFlank", "coat",
+                     "postsSystemNotification", "motion", "followsSystemReduceMotion",
+                     "rightFlank", "coat",
                      "cardOptions.activity", "cardOptions.lastMessage", "cardOptions.tasks",
                      "cardOptions.agents", "cardOptions.subagents", "cardOptions.project",
                      "cardOptions.worktree", "cardOptions.model", "cardOptions.effort"] {
@@ -309,6 +310,7 @@ private let sharedTestSuite = "vibecat.tests"
         choiceForFail: .none,
         postsSystemNotification: true,
         motion: .off,
+        followsSystemReduceMotion: false,
         rightFlank: .agentIcon,
         coat: .siamese,
         cardOptions: SessionCardOptions(activity: false, lastMessage: true, tasks: false,
@@ -360,6 +362,7 @@ private let sharedTestSuite = "vibecat.tests"
         choiceForNeedsAnswer: .meow, choiceForFinish: .meow, choiceForFail: .meow,
         postsSystemNotification: true,
         motion: .off,
+        followsSystemReduceMotion: false,
         rightFlank: .agentIcon,
         coat: .siamese,
         // Every field `false`, unlike the sibling-crossing test above: this
@@ -382,7 +385,7 @@ private let sharedTestSuite = "vibecat.tests"
         // Was 12. Plan 6.6's Task 1 added `coat` and `cardOptions`, so this is
         // the assertion the plan predicted would fail before any production
         // code existed — it did, and updating the number is the fix.
-        #expect(readChildren.count == 14, "Preferences grew or shrank — update both round-trip tests")
+        #expect(readChildren.count == 15, "Preferences grew or shrank — update both round-trip tests")
         for (label, value) in readChildren {
             #expect(value != defaultChildren[label],
                     "`\(label)` came back as its default, so it is not persisted in both directions")

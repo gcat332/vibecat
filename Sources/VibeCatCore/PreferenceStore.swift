@@ -92,6 +92,13 @@ public struct UserDefaultsPreferenceStore: PreferenceStoring {
         // )!` is not an option here — that would turn an untrusted plist value
         // into a production crash, the exact thing this file's own doc comment
         // says the clamping boundary exists to prevent.
+        // Presence-checked, not read unconditionally: it defaults to `true`, and
+        // `bool(forKey:)` returns `false` for a key that was never written — so an
+        // unconditional read would silently stop a fresh install following the
+        // system's Reduce Motion setting. Plan 6.4's most valuable mutation.
+        if defaults.object(forKey: key("followsSystemReduceMotion")) != nil {
+            prefs.followsSystemReduceMotion = defaults.bool(forKey: key("followsSystemReduceMotion"))
+        }
         if let raw = defaults.string(forKey: key("motion")) {
             prefs.motion = MotionLevel(rawValue: raw) ?? fallback.motion
         }
@@ -153,6 +160,8 @@ public struct UserDefaultsPreferenceStore: PreferenceStoring {
         defaults.set(preferences.choiceForFail.rawValue, forKey: key("choiceForFail"))
         defaults.set(preferences.postsSystemNotification, forKey: key("postsSystemNotification"))
         defaults.set(preferences.motion.rawValue, forKey: key("motion"))
+        defaults.set(preferences.followsSystemReduceMotion,
+                     forKey: key("followsSystemReduceMotion"))
         defaults.set(preferences.rightFlank.rawValue, forKey: key("rightFlank"))
         defaults.set(preferences.coat.rawValue, forKey: key("coat"))
         defaults.set(preferences.cardOptions.activity, forKey: key("cardOptions.activity"))

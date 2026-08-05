@@ -185,7 +185,9 @@ import VibeCatCore
         // `SoundSettings(_:)` does for the sound half, so that
         // `LaunchWiringTests` can drive it with an `InMemoryPreferenceStore`.
         self.model = IslandModel(geometry: geometry,
-                                 motion: MotionPreference.current(chosen: prefs.motion))
+                                 motion: MotionPreference.current(
+                                     chosen: prefs.motion,
+                                     followsSystem: prefs.followsSystemReduceMotion))
         // §6.2's flank, same seam and same reasoning. Assigned after `init`
         // rather than passed in: `IslandModel.rightFlank` has a default that
         // ~40 test call sites depend on, and adding a parameter here would not
