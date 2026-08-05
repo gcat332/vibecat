@@ -17,7 +17,7 @@ plan files twice; it is cheaper to keep it written down.
 | 6.5 | The Notifications page — the four alert switches, the Sound section that gives Plan 6.2's engine its sheet, stall detection, and the system-notification fallback | §14's Notifications | **done** — [the plan](2026-08-04-notifications-page.md), 7 tasks; 647 tests. The browser diff found the page did not fit its own window |
 | **6.6** | The Display page — 21 controls, and the one that re-threads `SessionRow.Options`, picks the list's overflow cue, settles §6.3's per-face width and ships the motion control | §14's Display, §9.3's UI | not written |
 | **6.7** | The General and Integrations pages | §14 | not written |
-| **6.1** | Keyboard answering, `Other…`, the three motion defects a motion switch exposes, the duplicate tier, and §6.2's choosable right flank | §10.1, §9.3, §6.2 | **written** — [the plan](2026-08-04-keyboard-and-switches.md), 6 tasks |
+| 6.1 | Keyboard answering, `Other…`, the three motion defects a motion switch exposes, the duplicate tier, and §6.2's choosable right flank | §10.1, §9.3, §6.2 | **done** — [the plan](2026-08-04-keyboard-and-switches.md), 6 tasks; 686 tests. Keyboard answering verified on hardware with a TextEdit witness, including all three key releases |
 | **6** | Jump and §16's AppleScript hint — everything else that was gated on keyboard input is 6.1 | §13, §16 | not written |
 | **7** | Generic adapter and custom sources | §3 | not written |
 | **8** | Matching motion cost to motion content | §9.1's rates | not written |
@@ -736,7 +736,7 @@ skipped.
 - **`Soft`, `System`, `Blip` and `Buzz` still do not exist** and the pickers
   deliberately do not offer them. Plan 6.2's written decision 3, unchanged.
 
-## Plan 6.1 — keyboard and the switches (in progress)
+## Plan 6.1's carried findings — keyboard and the switches
 
 [The plan](2026-08-04-keyboard-and-switches.md), 6 tasks. Two findings already
 worth reading out of order:
@@ -758,6 +758,17 @@ worth reading out of order:
   `minimumInterval(for:)` already applies, and a view transform is run by the render
   server regardless. Documented, not invented around. **Whether `reduced` should do
   more is the owner's call.**
+- **`.agentIcon` draws an empty rounded square.** §6.2's third flank option is now
+  selectable from disk and says nothing, while §4.3 is explicit that *shape* is what
+  says which agent is speaking. **Plan 6.6 must not ship a picker for a
+  placeholder** — either the marks land first (they exist: `island-motion.html`'s
+  `MARKS` has four portable 24×24 `currentColor` geometries) or the option stays out
+  of the picker.
+- **The session list holds key for as long as it is open, with no time bound.** It
+  ends only when the drawer closes. Verified on hardware that Escape and a second
+  click both release it, and that typing reaches the terminal again afterwards — but
+  if that turns out to be irritating in real use, the cheapest correct fix is to
+  release key when another app activates.
 - **§10.3's confirmation banner was never in the mockup, so the drawer's height was
   never budgeted for it.** Restoring `Other…` in Task 5 surfaced it: at production
   width, three choices plus `Other…` plus the destructive banner pushed `PanelBar`'s
