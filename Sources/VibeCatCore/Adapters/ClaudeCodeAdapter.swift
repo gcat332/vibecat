@@ -8,7 +8,7 @@ public struct ClaudeCodeAdapter: SourceAdapter {
     /// The bundled mark, or `nil` when the resource bundle is not beside the
     /// executable — in which case `SourceIcon` falls back to `CLIMark`'s neutral
     /// geometry, which is what shipped before the icons were bundled and still works.
-    public var icon: String? { BundledIcon.forSourceID(id)?.path }
+    public var icon: String? { BundledIcon.forSourceID(id).path }
 
     public init() {}
 

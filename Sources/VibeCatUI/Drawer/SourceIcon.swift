@@ -63,6 +63,17 @@ struct SourceIcon: View {
     /// actually be used.
     var accent: Color
     var style: Style = .tinted
+    /// How much of `side` the mark is allowed to occupy, so a shape that reads
+    /// heavier than its neighbours can be brought down without editing a binary.
+    ///
+    /// **Optical weight is a property of the mark, not of the layout**, and putting it
+    /// here rather than in the PNG means it is greppable, adjustable and — the reason
+    /// that matters — *testable*: `iconWeight` measures what each mark actually paints
+    /// and the value can be checked against it. Baking the same inset into the image
+    /// would make the next adjustment a binary edit and the assertion impossible.
+    ///
+    /// Defaults to `1`. `BundledIcon.opticalScale` supplies the per-mark values.
+    var opticalScale: CGFloat = 1
 
     enum Style: Sendable, Equatable {
         case brandColour
@@ -86,6 +97,15 @@ struct SourceIcon: View {
                 }
             }
             .aspectRatio(contentMode: .fit)
+            // Inset by padding, then constrained to `side` — so the *slot* is always
+            // the same and the row's text never shifts when a mark is scaled.
+            //
+            // Padding rather than a nested `.frame(side * scale)`, so the image is asked
+            // to fit what is left after the inset and a `.resizable()` image cannot grow
+            // back into an outer frame. Verified by `iconWeight`: `vscode` fills 85.9%
+            // of its slot against 100% for an unscaled mark, which is 0.86 within a
+            // pixel of rounding.
+            .padding(side * (1 - opticalScale) / 2)
             .frame(width: side, height: side)
         } else {
             CLIMarkView(mark: fallback, side: side, colour: accent)

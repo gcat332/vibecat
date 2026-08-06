@@ -30,13 +30,53 @@ public enum BundledIcon: String, Sendable, CaseIterable {
     case claudeCode = "claude_logo"
     /// Codex the CLI — likewise glyph-only.
     case codex = "codex_logo"
+    /// Gemini the CLI.
+    ///
+    /// **A PNG, because the SVG could not be rendered.** `gemini-color.svg` produced
+    /// 475 opaque pixels out of 65536 through CoreSVG *regardless of what the file
+    /// contained* — measured against three progressively simplified rewrites, all
+    /// byte-identical — and QuickLook returned a white page with the glyph in a
+    /// corner. Its root used `width="1em"` and its glyph was three stacked copies of
+    /// one path, two referencing React-generated gradient ids (`_R_0_`). The owner
+    /// supplied a 640x640 PNG instead; it is downscaled to 256 like the rest.
+    case gemini
     /// Claude the desktop app: a filled circle. A §13 jump target, not a CLI.
     case claude
     /// ChatGPT / OpenAI: a filled circle. Also a jump target.
     case openai
-    /// iTerm2 and VS Code — §13 jump targets, unused until jump ships.
+    /// iTerm2 and VS Code — §13 jump targets.
+    ///
+    /// **`iterm2` doubles as the mark for any source nothing else ships one for**, on
+    /// the owner's instruction. Its palette is why that works rather than jars:
+    /// measured, the file fills with `#0078D4` and `#f2f2f2` — Microsoft blue on
+    /// off-white, not iTerm2's black terminal — so it reads as a generic *code* mark
+    /// and not as a claim that some other CLI is iTerm2. **The file is very likely
+    /// mislabelled**, and that mislabelling is what makes it a serviceable default.
     case iterm2
     case vscode
+
+    /// How much of its slot this mark should occupy, measured rather than guessed.
+    ///
+    /// `iconWeight` renders every mark in the row's real 16pt slot and reports what it
+    /// paints. With the scale applied: `vscode` and `codex_logo` both fill 85.9%,
+    /// `gemini` 90.6%, `iterm2` 93.8%, and the two filled circles 100% — a 1.16×
+    /// spread that is the assets' own, not something this value tries to flatten.
+    ///
+    /// **`vscode` is scaled because the owner looked at it and said so.** Its chevron
+    /// reaches corner to corner diagonally, so it reads heavier than a circle of the
+    /// same box; 0.86 puts it level with `codex_logo`, the other diagonal glyph.
+    ///
+    /// **The first version of this comment claimed a 1.02× spread and that nothing
+    /// needed scaling. That was a broken measurement**, not a finding: the probe
+    /// thresholded on `Pixel.isTransparent` (`a == 0`), so it counted antialiased
+    /// edge pixels and reported every mark at 98–100% — the canvas, not the glyph.
+    /// Left recorded because the wrong number was the more convincing one.
+    public var opticalScale: Double {
+        switch self {
+        case .vscode: 0.86
+        default: 1
+        }
+    }
 
     /// The absolute path, or `nil` when the resource bundle is not beside the
     /// executable.
@@ -59,11 +99,30 @@ public enum BundledIcon: String, Sendable, CaseIterable {
     /// the mapping lives here, beside the assets, rather than as a branch anywhere in
     /// the core. A custom source that wants its own icon names a path and never
     /// reaches this.
-    public static func forSourceID(_ id: String) -> BundledIcon? {
+    /// Never `nil` while any mark ships: an id nothing has a mark for gets `iterm2`,
+    /// which is a generic code mark rather than another CLI's identity — see that
+    /// case's own note.
+    ///
+    /// **This trades one §4.3 property for another, and the trade is deliberate.**
+    /// Shape says which agent is speaking, so one mark shared by every unknown source
+    /// says less than `CLIMark`'s four geometries did — `CLIMark(cli:)` at least maps
+    /// several known names to distinct shapes. What it buys is that an unknown source
+    /// is *visibly a source* at a glance instead of falling through to a shape that
+    /// looked like a mark for nothing in particular. The owner asked for it, and the
+    /// property it gives up is named here rather than lost.
+    ///
+    /// `CLIMark` is still the fallback below this: if the resource bundle is missing,
+    /// `path` returns `nil` and `SourceIcon` draws geometry, which is what shipped
+    /// before any of this existed.
+    public static func forSourceID(_ id: String) -> BundledIcon {
         switch id {
         case "claude-code": .claudeCode
         case "codex": .codex
-        default: nil
+        case "gemini": .gemini
+        case "claude": .claude
+        case "chatgpt", "openai": .openai
+        case "vscode", "code": .vscode
+        default: .iterm2
         }
     }
 }

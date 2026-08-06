@@ -176,7 +176,8 @@ struct SessionRow: View {
             // row to also collapse to `.generic` for some notion of mixedness;
             // there is nothing here for it to mean.
             SourceIcon(path: session.icon, fallback: CLIMark(cli: session.cli),
-                       accent: accent, style: .brandColour)
+                       accent: accent, style: .brandColour,
+                       opticalScale: BundledIcon.forSourceID(session.cli).opticalScale)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
                 headline

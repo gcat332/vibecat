@@ -50,25 +50,32 @@ private struct IconedAdapter: SourceAdapter {
 /// should do when the policy changes. It is replaced rather than deleted so the
 /// reversal reads as a decision instead of as a lapse.
 ///
-/// What replaces it is the half that is still true and still worth guarding: an
-/// adapter for a source nothing ships a mark for must resolve to `nil`, so
-/// `SourceIcon` falls back to `CLIMark`'s neutral geometry. **That is the property
-/// that makes bundling cheap to undo** — delete the icons directory and the app
-/// degrades to the geometry rather than breaking.
+/// **Amended again the same day**, when the owner asked for every source without a
+/// mark of its own to share one rather than fall through to geometry. So the
+/// assertion is now the opposite of what it briefly was: an unknown id resolves to a
+/// real mark, and the property being guarded moved from "resolves to nil" to "resolves
+/// to the *generic* mark and not to another CLI's identity".
 ///
 /// `ClaudeCodeAdapter`'s own path is asserted by
 /// `theClaudeCodeAdapterCarriesItsOwnMarkRatherThanTheDefaultNil` below.
-@Test func anAdapterForASourceWithNoBundledMarkStillResolvesToNil() {
-    struct Unmarked: SourceAdapter {
-        let id = "gemini"
-        let displayName = "Gemini"
+@Test func anUnknownSourceGetsTheGenericMarkAndNotAnotherCLIsIdentity() throws {
+    struct Unknown: SourceAdapter {
+        let id = "some-cli-nobody-has-heard-of"
+        let displayName = "Unknown"
         let jumpStrategy = JumpStrategy.none
         let reports: Set<Kind> = [.running]
-        var icon: String? { BundledIcon.forSourceID(id)?.path }
+        var icon: String? { BundledIcon.forSourceID(id).path }
         func parse(_ raw: [String: Any], origin: Origin) throws -> VibeEvent? { nil }
     }
-    #expect(Unmarked().icon == nil,
-            "an unmarked source picked up someone else's logo, which would be a false claim about which agent is speaking (§4.3)")
+    let path = try #require(Unknown().icon, "an unknown source got no mark at all")
+    #expect(path.hasSuffix("iterm2.png"), "got \(path)")
+
+    // The half that still matters most: it must not be a *named* CLI's mark. Handing
+    // an unknown agent Claude's logo would be a false claim about which agent is
+    // speaking, which is the identity half of §4.3.
+    for named in [BundledIcon.claudeCode, .codex, .claude, .openai] {
+        #expect(path != named.path, "an unknown source is wearing \(named.rawValue)")
+    }
 }
 
 // MARK: - the bundled icons
@@ -98,13 +105,19 @@ private struct IconedAdapter: SourceAdapter {
     #expect(path.hasSuffix("claude_logo.png"), "got \(path)")
 }
 
-@Test func anIdNothingShipsAMarkForResolvesToNilRatherThanToSomeoneElsesLogo() {
-    // The mapping is a lookup on id, and a wrong `default:` branch would hand every
-    // unknown CLI Claude's mark — which would be worse than the neutral geometry it
-    // is supposed to fall back to, because it would be a false claim about which
-    // agent is speaking (§4.3: shape says who).
-    #expect(BundledIcon.forSourceID("gemini") == nil)
-    #expect(BundledIcon.forSourceID("") == nil)
+@Test func theMappingIsExactForKnownIdsAndGenericForEverythingElse() {
+    // Every known id must reach its *own* mark: a `default:` branch that swallowed one
+    // of these would silently rename an agent, and the id strings are the only thing
+    // standing between a row and someone else's logo.
     #expect(BundledIcon.forSourceID("claude-code") == .claudeCode)
     #expect(BundledIcon.forSourceID("codex") == .codex)
+    #expect(BundledIcon.forSourceID("claude") == .claude)
+    #expect(BundledIcon.forSourceID("openai") == .openai)
+    #expect(BundledIcon.forSourceID("chatgpt") == .openai)
+
+    // Gemini ships a mark now — a PNG, after its SVG proved unrenderable through both
+    // of macOS's paths. Everything genuinely unknown lands on the generic mark.
+    #expect(BundledIcon.forSourceID("gemini") == .gemini)
+    #expect(BundledIcon.forSourceID("") == .iterm2)
+    #expect(BundledIcon.forSourceID("Claude-Code") == .iterm2, "the lookup is case-sensitive, which the ids are")
 }
