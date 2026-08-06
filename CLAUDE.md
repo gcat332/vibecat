@@ -106,9 +106,10 @@ These are load-bearing. Breaking one is a product failure, not a bug.
   Every failure path returns the CLI's own default and exits `0`. Two deadlines,
   bounding two different things: delivery `300ms`, answer `answerDeadline`
   (default 20s, clamped `0.02…3600` by `SocketClient.clampedChosenByPerson`, not
-  `clamped` — see below). Any interval that becomes a deadline goes through one
-  of two clamps split by provenance, never arithmetic, because an absurd value
-  saturates a `DispatchTime` into `.distantFuture`, parking a thread forever.
+  by `clamped` — see the table below). Any interval that becomes a deadline goes
+  through one of those clamps and never through arithmetic, because an absurd
+  value saturates a `DispatchTime` into `.distantFuture`, parking a thread
+  forever.
 
   **The ceiling was 60 until Plan 9, and *why* it moved matters more than the
   number.** Measured against Claude Code 2.1.223: while a `PreToolUse` hook is
@@ -120,12 +121,27 @@ These are load-bearing. Breaking one is a product failure, not a bug.
   .handBackToTerminalAfter` is that value in minutes (default 1), and an hour had
   to fit inside the clamp for a chosen hour not to become one minute.
 
-  **The floor did not move with it, and there are now two clamps.**
-  `SocketClient.clamped`'s only job is to reject the absurd, so `floorDeadline`
-  stays `0.02` — nine tests observe a real answer timeout at 0.05s and 0.6s, and
-  a floor of "long enough for a person to read a sentence" would make them
-  impossible rather than slow. What a *person* may choose is bounded separately,
-  by `UserDefaultsPreferenceStore.clampedHandBack` at `0.5…60` minutes.
+  **There are three bounds now, and the split is by *provenance* rather than by
+  magnitude.** An earlier draft of this bullet said "two clamps" and never gave
+  `clamped`'s own ceiling, which is the number that matters most here:
+
+  | | range | for a value that came from |
+  |---|---|---|
+  | `SocketClient.clamped` | `0.02…60` s | **the wire** — `AppModel.ingest` |
+  | `SocketClient.clampedChosenByPerson` | `0.02…3600` s | this app's own preferences — `SocketClient.init` |
+  | `UserDefaultsPreferenceStore.clampedHandBack` | `0.5…60` **minutes** | a Settings control |
+
+  The wire's is the strict one because `ingest` cannot tell a hook-written event
+  from one any process running as this user wrote to a `0600` socket. Plan 9
+  originally raised *that* ceiling to 3600 so a person could choose an hour, which
+  a test-premise audit caught: nothing reads the preference yet, so the only live
+  effect was letting anything on the socket park a hook for an hour. **The
+  unqualified name is deliberately the stricter one** — `clamped` is what a reader
+  reaches for, and the safer bound should be the one reached for by accident.
+
+  **The floor is shared and stayed at `0.02`.** Nine tests observe a real answer
+  timeout at 0.05s and 0.6s; a floor of "long enough for a person to read a
+  sentence" would make them impossible rather than slow.
 
   **"Every wait is bounded" now has one deliberate exception.**
   `handBackToTerminalAfter` may be `Never`, which the owner ruled available and
