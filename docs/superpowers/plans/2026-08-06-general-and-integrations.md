@@ -94,20 +94,44 @@ That is a deliberate, written divergence, and it must be repeated in
 not only here. A reviewer diffing against the prototype will find a missing row
 and needs to find the reason in the same file.
 
-### 2. `Hook reply timeout` — **wired for real**
+### 2. `Hook reply timeout` — **wired for real, and it is not the deadline I thought**
 
 **Ruling: build the field, persist it, clamp it, and have the hook read it.**
 
-The prototype's field (`settings.html:290-292`) holds `300` with a `ms` suffix,
-which is the **delivery** deadline — the bound on reaching the app at all, not
-the `answerDeadline` a person answers within.
+**Superseded in part by Plan 9, and the correction is the substance.** This section
+originally read the prototype's `300` / `ms` and concluded the field was the
+**delivery** deadline. It is not. The caption at `settings.html:290-292` says *"How
+long the hook waits before letting the agent carry on without you"* — that is the
+**answer** deadline, and the owner asking for the unit in minutes is what exposed
+the misreading. The prototype puts one deadline's number under the other one's
+caption.
 
-`SocketClient.clamped`'s `0.02…60` is the answer deadline's range and is wrong
-here: a 60-second delivery wait is §2.3 broken by arithmetic rather than by a
-switch. **This plan adds its own bound, `0.05…2.0` seconds**, as a named constant
-beside `clamped` in `SocketClient` — not a bare `min(max(...))` at the use site,
-because this repo's rule is that every interval becoming a deadline goes through
-one clamp and that rule is what stops the next one drifting.
+So the field is:
+
+| | |
+|---|---|
+| Preference | `handBackToTerminalAfter: Double?` — minutes; `nil` is `Never` |
+| Default | **1 minute** |
+| Range | `0.5…60` minutes plus `Never` |
+| Clamp | `SocketClient.clampedAnswer` — **Plan 9 Task 7 owns it**, 30…3600 seconds |
+| Untouched | the delivery deadline stays a hard `300ms` |
+
+**Do not invent a clamp here.** An earlier draft of this section proposed a new
+`0.05…2.0` second bound for a delivery deadline this field never was. Plan 9 Task 7
+defines `clampedAnswer`; this plan's row binds to it. **This plan's Task 7 must not
+run before Plan 9's**, or the row has nothing valid to clamp against.
+
+**The copy is wrong in the prototype and this plan fixes it.** Measured (Plan 9's
+own section, Claude Code 2.1.223): the agent does *not* carry on without you — the
+CLI asks you itself, because it shows no prompt of its own while a hook is blocked.
+The row reads **"How long the notch holds the question before the terminal asks you
+instead."** Record it as a written divergence in the pane's doc comment with the
+line number.
+
+**The hook still has to read preferences, so the hazard below still applies.**
+`HookRunner` sets `event.answerDeadline = client.answerDeadline` and waits on it, so
+the *hook* owns the wait — a preference the hook cannot see is a preference that
+does nothing.
 
 #### The measured hazard that makes this task more than a text field
 
@@ -134,7 +158,7 @@ prevent, arriving through the back door as an apparently-wired control.
 ```
 wrote via suiteName from a bare binary, read back = 0.42
 $ defaults read com.gcat332.vibecat
-{ "vibecat.hookReplyTimeout" = "0.42"; }
+{ "vibecat.handBackToTerminalAfter" = "0.42"; }
 ```
 
 So `UserDefaults(suiteName: "com.gcat332.vibecat")` works from a bare binary and
@@ -228,10 +252,12 @@ ever disagree:
 | `confirmDestructiveAnswers` | `Bool` | `true` | `:266` |
 | `autoConfigureNewCLIs` | `Bool` | `true` | `:279` |
 | `replyChannel` | `ReplyChannel` | `.hook` | `:286` (`aria-pressed` on `Hook`) |
-| `hookReplyTimeout` | `Double` | `0.300` | `:290` (`value="300"`, ms) |
+| `handBackToTerminalAfter` | `Double?` | `1.0` (minutes; `nil` = `Never`) | `:290` — see ruling 2, the prototype's `300`/`ms` is the wrong deadline's number |
 
-All sixteen ship. `hookReplyTimeout` is wired for real in Task 7 per ruling 2 —
-it is not a declared-inert field. There is **no** `failOpen` field: ruling 1
+All sixteen ship. `handBackToTerminalAfter` is wired for real in Task 7 per ruling
+2 — it is not a declared-inert field. **`Double?`, not `Double`:** `Never` is not a
+duration, and spelling it as a magic large number is the trap `IdleCleanup` above
+avoids for the same reason. There is **no** `failOpen` field: ruling 1
 removed that row, so no preference backs it.
 
 **Also in this task, because every later task depends on it:** change
@@ -917,15 +943,15 @@ strictly worse than one hardcoded `true`.
 `main.swift` builds a client with no preferences at all. Three changes, smallest
 first:
 
-1. `SocketClient.clampedDelivery(_:) -> TimeInterval` bounding `0.05…2.0`,
-   beside the existing `clamped`, with a doc comment saying why the ranges
-   differ: one bounds how long a *person* may take, the other how long *IPC* may
-   take, and 60 seconds of IPC is §2.3 violated by arithmetic.
-2. `SocketClient` takes `deliveryDeadline` as an init parameter defaulting to the
-   current constant, so nothing that does not pass one changes behaviour.
+1. **Nothing new in `SocketClient`** — Plan 9 Task 7 already added
+   `clampedAnswer` (30…3600s) and `deadlineInstant(minutes:)`. Use them. The
+   delivery deadline is not touched by this row at all.
+2. `HookRunner`/`SocketClient` take the answer deadline from a preference rather
+   than from `defaultAnswerDeadline`, defaulting to the constant so nothing that
+   passes no value changes behaviour.
 3. `vibecat-hook`'s `main.swift` builds a `UserDefaultsPreferenceStore` — which
-   after Task 1 points at the explicit suite — reads `hookReplyTimeout`, and
-   passes it through `clampedDelivery`.
+   after Task 1 points at the explicit suite — reads `handBackToTerminalAfter`,
+   and passes it through `SocketClient.clampedAnswer` (Plan 9 Task 7's).
 
 **The cost of step 3 is on the 300ms path and must be stated.** The hook is a
 short-lived process launched on every event; reading a plist adds work before the
@@ -960,13 +986,13 @@ extension rows, custom jump rules, and the event log.
 @Test func theHookReadsTheDeadlineTheAppWroteRatherThanItsOwnDefault() {
     let store = UserDefaultsPreferenceStore(defaults: <the explicit suite>, keyPrefix: Self.prefix)
     var p = store.load()
-    p.hookReplyTimeout = 0.85
+    p.handBackToTerminalAfter = 2.5      // minutes
     store.save(p)
     // Built the way `vibecat-hook`'s `main.swift` builds it — same suite, same
     // prefix, a separate store instance standing in for a separate process.
     let asTheHookSeesIt = UserDefaultsPreferenceStore(defaults: <the explicit suite>,
                                                       keyPrefix: Self.prefix).load()
-    #expect(asTheHookSeesIt.hookReplyTimeout == 0.85,
+    #expect(asTheHookSeesIt.handBackToTerminalAfter == 2.5,
             "the hook's store did not see what the app's store wrote")
 }
 
