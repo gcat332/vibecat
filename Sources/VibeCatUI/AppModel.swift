@@ -380,6 +380,29 @@ import VibeCatTransport
         clearQuestion()
     }
 
+    /// Ruling B's `Dismiss` (Plan 9 Task 6): the session row's header, for a
+    /// *parked* question named by id rather than whichever one is frontmost.
+    /// `SessionRow` never sees `pending` at all — a row only ever draws from
+    /// `IslandModel.questions`, so this has to look a question up the same
+    /// way `answer(_:)` does, not assume it is the one the drawer holds.
+    ///
+    /// Same shape as `answer(_:)`, one line up: settle the question, forget it,
+    /// then close the drawer only if the one dismissed happened to be the
+    /// frontmost one. That last case is vanishingly unlikely by construction —
+    /// a `QuestionBlock` only ever draws in the session list, and the drawer
+    /// shows that face only while nothing is `pending` (`face`'s own doc
+    /// comment) — but costs nothing to guard against rather than assume away.
+    ///
+    /// A reply id matching nothing is a no-op, the same as `answer(_:)`'s own
+    /// mismatched-reply guard: the row that drew a `Dismiss` for this id may
+    /// already have lost the race against a lapse or an answer landing first.
+    @MainActor public func dismissQuestion(id: String) {
+        guard let question = questions.first(where: { $0.id == id }) else { return }
+        question.lapse()
+        forget(question)
+        if pending === question { clearQuestion() }
+    }
+
     /// Set the frontmost question aside — Escape, or the notch collapsing. It
     /// keeps its place in `questions` and its hook keeps waiting; only the drawer
     /// lets go of it.

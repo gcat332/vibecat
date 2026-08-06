@@ -139,6 +139,44 @@ struct SessionRow: View {
     var questions: [IslandModel.RowQuestion] = []
     /// Fires with the `Reply` a tap in one of those blocks produced.
     var onAnswer: (Reply) -> Void = { _ in }
+    /// §13's jump to the session's own terminal — Plan 9 Task 6 defines the hit
+    /// region and calls this; **making it do anything is a later plan's job**
+    /// ("Out of scope, deliberately" in
+    /// `docs/superpowers/plans/2026-08-06-parking-questions.md`). No production
+    /// call site passes one — `SessionListFace` never threads it — so this stays
+    /// at its default everywhere the app actually runs. Said here, in the
+    /// declaration, because an unwired closure that looks wired is a defect this
+    /// project has shipped before.
+    var onJump: () -> Void = {}
+    /// Ruling B's `Dismiss` (same plan): fires with the id of whichever
+    /// answerable question the row's one Dismiss control names — see
+    /// `firstAnswerableQuestionID`. Defaulted so every existing call site keeps
+    /// compiling and rendering unchanged.
+    var onDismiss: (String) -> Void = { _ in }
+
+    /// Ruling B's single Dismiss control needs exactly one question to name —
+    /// the first this row can still do anything about. A handed-back question's
+    /// hook is already gone, so there is nothing left to give up on for it;
+    /// `questions.contains { !$0.isHandedBack }` is the brief's own condition
+    /// for *whether* to draw the control, restated here as the id it actually
+    /// fires with so the view and the tap can never name two different
+    /// questions.
+    private var firstAnswerableQuestionID: String? {
+        questions.first { !$0.isHandedBack }?.id
+    }
+
+    private func headerTapped() { onJump() }
+    private func dismissTapped(_ questionID: String) { onDismiss(questionID) }
+
+    /// The one place a `QuestionBlock` is built for this row. `body`'s own
+    /// `ForEach` and `answerTapForTesting` below both go through this, so a test
+    /// exercising "answering a question does not jump" exercises the very same
+    /// wiring a real render uses, rather than a hand-rebuilt stand-in that could
+    /// quietly drift from it.
+    private func questionBlock(for row: IslandModel.RowQuestion) -> QuestionBlock {
+        QuestionBlock(question: row.model, accent: accent, isHandedBack: row.isHandedBack,
+                      handedBackTo: terminalName, onAnswer: onAnswer)
+    }
 
     var body: some View {
         // The mark sits *outside* the three lines and they indent past it —
@@ -199,13 +237,7 @@ struct SessionRow: View {
                 // block because it never rendered one (`island-motion.html:832`
                 // anticipates it in a comment), so this is a decision, not a
                 // reading.
-                ForEach(questions) { row in
-                    QuestionBlock(question: row.model,
-                                  accent: accent,
-                                  isHandedBack: row.isHandedBack,
-                                  handedBackTo: terminalName,
-                                  onAnswer: onAnswer)
-                }
+                ForEach(questions) { row in questionBlock(for: row) }
                 SessionBlocks(session: session, options: options)
             }
         }
@@ -246,6 +278,34 @@ struct SessionRow: View {
         }
     }
 
+    // MARK: - Testing hooks (Plan 9 Task 6)
+    //
+    // No ViewInspector, and nothing headless can prove which closure a real
+    // `.onTapGesture` is bound to — same reasoning as `QuestionBlock
+    // .tapForTesting`/`.sendForTesting` and `SettingsButton.actionForTesting`.
+    // Each of these calls exactly what its real gesture calls, no more.
+
+    /// What tapping the header does.
+    func headerTapForTesting() { headerTapped() }
+
+    /// What tapping the Dismiss control does, for the question it would
+    /// actually name — `firstAnswerableQuestionID`, the same computation
+    /// `headline` uses to decide whether to draw the control at all. A no-op
+    /// with nothing answerable, matching the control's own absence there.
+    func dismissTapForTesting() {
+        guard let id = firstAnswerableQuestionID else { return }
+        dismissTapped(id)
+    }
+
+    /// What tapping one choice of one of this row's own question blocks does —
+    /// through `questionBlock(for:)`, the same factory `body` builds that block
+    /// with, so a mutation that coupled that block's `onAnswer` to `onJump`
+    /// would be caught here, not just by a hand-copied stand-in for it.
+    func answerTapForTesting(questionID: String, choiceID: String) {
+        guard let row = questions.first(where: { $0.id == questionID }) else { return }
+        questionBlock(for: row).tapForTesting(choiceID)
+    }
+
     /// `border-radius:9px`, shared by the hover fill, the focus ring and the hit
     /// region so the three can never disagree about the row's shape.
     private static let corner = RoundedRectangle(cornerRadius: 9)
@@ -255,6 +315,24 @@ struct SessionRow: View {
     private var isHovered: Bool { hovering || highlight.contains(.hovered) }
     private var isFocused: Bool { keyboardFocus || highlight.contains(.focused) }
 
+    /// §11's line 1 — `.rtop` — and, since Plan 9 Task 6, the row's *only* jump
+    /// target.
+    ///
+    /// **A deliberate divergence from the prototype, recorded here because a
+    /// reviewer diffing against it will find a smaller hit area and needs the
+    /// reason in the file.** `island-motion.html:345` puts `cursor:pointer` on
+    /// the whole `.row` — the mockup's entire card is one jump target, header to
+    /// last block. Narrowing it to the header alone is Plan 9 Task 6's own
+    /// ruling: a question can now render *inside* this same row, and every tap
+    /// inside it — a choice, `Dismiss`, a task line — must never also mean "go
+    /// to the terminal". `RowHitRegionTests.swift` is the three-test proof this
+    /// reasoning demands; any one of the three alone is satisfiable by a broken
+    /// implementation.
+    ///
+    /// `Dismiss` (ruling B) lives *inside* this same header, before `.rstate` —
+    /// `.rstate` carries the mockup's own `margin-left:auto` (line 354), so
+    /// whatever sits after the `Spacer` and before it shares that same
+    /// right-hand edge rather than displacing it.
     private var headline: some View {
         HStack(spacing: 10) {
             // `${card.project ? s.proj : s.term}` — a substitution, not a
@@ -292,6 +370,12 @@ struct SessionRow: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 8)
+            // Ruling B: only when there is something left to give up on — a
+            // handed-back question's hook is already gone, so there is nothing
+            // here for `Dismiss` to do.
+            if let id = firstAnswerableQuestionID {
+                dismissControl(for: id)
+            }
             // `.rstate` — the word *and* a pip, `gap:6px`. The pip is where the
             // state's colour lives now that the leading position belongs to the
             // CLI's mark: §4.3 wants hue to mean state and only state, and it
@@ -308,6 +392,37 @@ struct SessionRow: View {
             }
             .fixedSize()
         }
+        // Same reasoning as the row's own `.contentShape(Self.corner)` below —
+        // an `HStack` only hit-tests its children's own frames, so without this
+        // the gaps between the project name, the worktree chip and `.rstate`
+        // would be inert to a tap, the same way they would be to the hover
+        // cursor without that one.
+        .contentShape(Rectangle())
+        .onTapGesture { headerTapped() }
+    }
+
+    /// Ruling B's control, new UI: `island-motion.html` has no `Dismiss`
+    /// anywhere on a row — Plan 9 invented the whole idea — so this is designed
+    /// rather than transcribed, at the same 10.5pt/`--dim` register the row's
+    /// other quiet fields (`.rmeta`, `.rwt`) already use. No hue of its own:
+    /// this is a housekeeping action, not a report on the session's state, and
+    /// §4.3 only asks *state* to speak through `--accent`.
+    ///
+    /// `.highPriorityGesture`, not a second `.onTapGesture`: this view is
+    /// nested inside `headline`, which already carries the header's own
+    /// tap-to-jump gesture, and a plain `.onTapGesture` here would risk exactly
+    /// the "gets both" trap `answeringInsideTheBlockDoesNotJump`'s own doc
+    /// comment describes — the inner gesture has to *consume* the tap, not
+    /// merely be recognised alongside the outer one.
+    private func dismissControl(for questionID: String) -> some View {
+        Text("Dismiss")
+            .font(.system(size: 10.5))
+            .foregroundStyle(Color(dimColour))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(dimColour), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .highPriorityGesture(TapGesture().onEnded { dismissTapped(questionID) })
     }
 
     /// §11's line 3, the last thing you asked — the mockup's `.rsaid`.
