@@ -28,12 +28,13 @@ struct SessionListFace: View {
     /// Plan 9's parked and handed-back questions, keyed the way `IslandModel` publishes
     /// them. Defaulted so `HookLoopProbe` and every golden keeps compiling and rendering
     /// unchanged.
+    /// Ruling B's `Dismiss` used to be a second closure parameter forwarded to
+    /// every `SessionRow` alongside `onAnswer`. Review round 2 removed it — each
+    /// `IslandModel.RowQuestion` in this dictionary already carries its own
+    /// `onDismiss`, so `SessionRow` reads it straight off `questions` rather than
+    /// needing a row-level parameter this face would have to keep forwarding.
     var questions: [SessionKey: [IslandModel.RowQuestion]] = [:]
     var onAnswer: (Reply) -> Void = { _ in }
-    /// Ruling B's `Dismiss`, threaded straight through to every row exactly as
-    /// `onAnswer` is. Defaulted for the same reason: every golden and preview
-    /// that predates Plan 9 Task 6 keeps compiling and rendering unchanged.
-    var onDismiss: (String) -> Void = { _ in }
 
     let sessions: [Session]
     /// Forwarded straight to every `SessionRow`. Defaulted to `.all` so the
@@ -140,7 +141,7 @@ struct SessionListFace: View {
                 ForEach(sessions) { session in
                     SessionRow(session: session, now: now, options: options,
                                questions: questions[session.id] ?? [],
-                               onAnswer: onAnswer, onDismiss: onDismiss)
+                               onAnswer: onAnswer)
                 }
             }
             .padding(.top, 2)

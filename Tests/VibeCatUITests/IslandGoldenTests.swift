@@ -808,6 +808,85 @@ struct IslandGoldenTests {
         }
     }
 
+    /// **A gap found while closing a different one.** Plan 9 Task 6's review
+    /// round 2 argued for letting `IslandModel.RowQuestion` carry its own
+    /// `onDismiss` rather than threading a fifth closure through `IslandView`,
+    /// `DrawerView` and `SessionListFace`, on the premise that `RowQuestion`
+    /// "already travels that whole path… and is already covered by
+    /// `aParkedQuestionReachesTheIslandModelUnderItsOwnSession`." That premise
+    /// is only half true: that test proves a parked question reaches
+    /// `IslandModel.questions` — it never renders anything, so it says nothing
+    /// about whether `questions` then survives the three view hops into an
+    /// actual `QuestionBlock` on screen. Measured directly, the same way review
+    /// round 2 measured the `onDismiss` hops: dropping `rowQuestions: model
+    /// .questions` from `IslandView`'s own `DrawerView(…)` call left every one
+    /// of 745 `VibeCatUITests` green — this file's own drawer tests included,
+    /// because none of them populates `model.questions` at all.
+    ///
+    /// This is what actually closes it, and it is now load-bearing for `Dismiss`
+    /// too — `RowQuestion.onDismiss` rides on exactly the data this test proves
+    /// survives the trip, so a regression here would silently take the control
+    /// down with the block it belongs to.
+    ///
+    /// `rasteriseHosted`, not `rasterise` — `islandTierStrip`'s own doc comment
+    /// gives the reason: §11's list is a `ScrollView`, and `ImageRenderer`
+    /// paints one fully transparent.
+    ///
+    /// **`differingPixelCount`, not `opaquePixelCount` — the first version of
+    /// this test used the latter and passed against a render that never
+    /// actually drew the question.** The drawer's own silhouette fills its
+    /// whole panel with the ground colour regardless of content, so every
+    /// pixel in it is already non-transparent whether or not a question block
+    /// exists — measured directly: the two PNGs this fixture produces differ
+    /// (37,098 against 54,269 bytes on disk, different hashes) while
+    /// `opaquePixelCount` read identically for both. This repo's own testing
+    /// standards call a colour/coverage-count assertion "nearly worthless" for
+    /// exactly this reason; `differingPixelCount` compares colour rather than
+    /// coverage, so it is the tool that actually sees a change inside an area
+    /// guaranteed to be covered either way.
+    @MainActor @Test func aParkedQuestionSurvivesTheWholeViewTreeIntoARenderedBlock() throws {
+        let session = Session(event: VibeEvent(id: "e", cli: "claude-code", kind: .permission,
+                                                session: "s", cwd: "/Users/dev/api"), now: Date())
+        let question: [SessionKey: [IslandModel.RowQuestion]] = [
+            SessionKey(cli: "claude-code", session: "s"): [
+                IslandModel.RowQuestion(model: QuestionModel(event: VibeEvent(
+                    id: "q1", cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
+                    title: "Allow this command?", body: "pnpm install",
+                    choices: [Choice(id: "allow", label: "Allow once")], wantsReply: true)),
+                    isHandedBack: false)
+            ]
+        ]
+
+        func rendered(withQuestion: Bool) throws -> Raster {
+            let m = Self.model(.waiting, count: 1)
+            m.sessions = [session]
+            if withQuestion { m.questions = question }
+            m.drawerOpen = true
+            guard case .drawer = m.tier else {
+                Issue.record("setup: the fixture never reached the drawer tier")
+                throw RasterError.renderProducedNothing
+            }
+            let size = CGSize(width: m.panelFrames.panel.width, height: m.panelFrames.panel.height)
+            return try rasteriseHosted(IslandView(model: m), size: size)
+        }
+
+        let withQuestion = try rendered(withQuestion: true)
+        let without = try rendered(withQuestion: false)
+        // `opaquePixelCount` alone is exactly the worthless-colour-count shape
+        // this repo's own testing standards warn about: the drawer's own filled
+        // silhouette is fully opaque over its whole panel regardless of what is
+        // drawn on top of it, so a question block changing colours inside that
+        // already-opaque area moves nothing this metric can see. Measured: the
+        // two PNGs differ (37,098 against 54,269 bytes, different hashes) while
+        // `opaquePixelCount` read identically for both, which is what caught
+        // this before the assertion below was written the right way.
+        // `differingPixelCount` compares colour, not coverage, so it is the
+        // right tool for "did the content change" over an area that is
+        // guaranteed to be covered either way.
+        #expect(withQuestion.differingPixelCount(from: without) > 0,
+                "a parked question's own block never reached the rendered view — model.questions is not surviving IslandView → DrawerView → SessionListFace → SessionRow")
+    }
+
     /// Carried finding from Task 2's own review: no committed test exercised
     /// `RevealContent` with an open drawer *and* a populated `model.revealed`
     /// together. A reviewer verified by hand that this is safe today — the

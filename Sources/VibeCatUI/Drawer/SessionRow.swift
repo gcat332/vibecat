@@ -94,6 +94,16 @@ struct SessionRow: View {
     var highlight: Highlight = []
 
     @State private var hovering = false
+    /// **Separate from `hovering` since review round 2.** `hovering` still
+    /// drives the whole-row fill; this drives only the pointing-hand cursor,
+    /// scoped to `headline` — see that property's own `.onHover`. Two
+    /// independent booleans rather than one, because a single `pointingHand`
+    /// stack has to balance its own pushes and pops (`NSCursor.pointingHand
+    /// .push()`/`.pop()` is a literal stack, not a set-and-clear flag), and two
+    /// `.onHover` regions delivering edges into one shared `Bool` would let a
+    /// pointer crossing from the header into the rest of the row read as "still
+    /// hovering" and never pop.
+    @State private var hoveringHeader = false
     @FocusState private var keyboardFocus: Bool
 
     private var accent: Color { Color(IslandState(session.state).accent) }
@@ -148,25 +158,32 @@ struct SessionRow: View {
     /// declaration, because an unwired closure that looks wired is a defect this
     /// project has shipped before.
     var onJump: () -> Void = {}
-    /// Ruling B's `Dismiss` (same plan): fires with the id of whichever
-    /// answerable question the row's one Dismiss control names — see
-    /// `firstAnswerableQuestionID`. Defaulted so every existing call site keeps
-    /// compiling and rendering unchanged.
-    var onDismiss: (String) -> Void = { _ in }
 
-    /// Ruling B's single Dismiss control needs exactly one question to name —
-    /// the first this row can still do anything about. A handed-back question's
-    /// hook is already gone, so there is nothing left to give up on for it;
-    /// `questions.contains { !$0.isHandedBack }` is the brief's own condition
-    /// for *whether* to draw the control, restated here as the id it actually
-    /// fires with so the view and the tap can never name two different
-    /// questions.
-    private var firstAnswerableQuestionID: String? {
-        questions.first { !$0.isHandedBack }?.id
+    /// Ruling B's `Dismiss` releases every answerable question this row holds
+    /// (adjudicated in review round 2 — a row-level control acting on one
+    /// unnamed question among several was the worse of the two options), so the
+    /// control needs only *one* answerable question to find the shared closure
+    /// through — every `RowQuestion` for this session was built with the same
+    /// one (see `NotchController.syncRowQuestions()`), so it does not matter
+    /// which. A handed-back question's hook is already gone, so there is
+    /// nothing left for `Dismiss` to do for it — `questions.contains {
+    /// !$0.isHandedBack }` is the brief's own condition for *whether* to draw
+    /// the control, restated here as the question it actually reads
+    /// `onDismiss` off so the view and the tap can never disagree about it.
+    ///
+    /// No separate `onDismiss` parameter on this row any more — round 1 had
+    /// one, threaded through `SessionListFace`/`DrawerView`/`IslandModel`
+    /// alongside `onAnswer`, and round 2's review measured that dropping either
+    /// of two of those three threading lines left all 922 tests green. This
+    /// reads the closure straight off `IslandModel.RowQuestion` instead, which
+    /// already has to survive the same trip for the row to draw a question
+    /// block at all — see that struct's own doc comment.
+    private var firstAnswerableQuestion: IslandModel.RowQuestion? {
+        questions.first { !$0.isHandedBack }
     }
 
     private func headerTapped() { onJump() }
-    private func dismissTapped(_ questionID: String) { onDismiss(questionID) }
+    private func dismissTapped() { firstAnswerableQuestion?.onDismiss() }
 
     /// The one place a `QuestionBlock` is built for this row. `body`'s own
     /// `ForEach` and `answerTapForTesting` below both go through this, so a test
@@ -268,13 +285,21 @@ struct SessionRow: View {
         // `IslandMotion.ease` and is not `.easeOut` — this line read `.easeOut`
         // until Plan 6.3 Task 3.
         .animation(IslandMotion.ease(duration: 0.13), value: isHovered)
+        // **The fill only, since review round 2 — the cursor push moved to
+        // `headline`'s own `.onHover` below.** This one still spans the whole
+        // padded rectangle: the mockup's `.row:hover` highlight is a "this is
+        // the row you are near" cue, and narrowing *that* along with the cursor
+        // would have removed the only visual feedback a pointer gets anywhere
+        // outside the header — over a task line, say — leaving no affordance at
+        // all rather than a merely honest one. Only the promise of a click
+        // needed narrowing (Important 3); the highlight was never the promise.
         .onHover { inside in
-            // Guarded so the cursor stack stays balanced: SwiftUI can deliver the
-            // same edge twice, and two pushes with one pop leaves a pointing hand
-            // over the whole app.
+            // Guarded so this can never re-fire on the same edge SwiftUI
+            // occasionally redelivers — harmless here (it would just reassign
+            // the same `Bool`), kept for symmetry with `headline`'s own guard,
+            // where an unguarded double-fire is not harmless.
             guard inside != hovering else { return }
             hovering = inside
-            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
     }
 
@@ -288,14 +313,10 @@ struct SessionRow: View {
     /// What tapping the header does.
     func headerTapForTesting() { headerTapped() }
 
-    /// What tapping the Dismiss control does, for the question it would
-    /// actually name — `firstAnswerableQuestionID`, the same computation
-    /// `headline` uses to decide whether to draw the control at all. A no-op
-    /// with nothing answerable, matching the control's own absence there.
-    func dismissTapForTesting() {
-        guard let id = firstAnswerableQuestionID else { return }
-        dismissTapped(id)
-    }
+    /// What tapping the Dismiss control does. A no-op with nothing answerable
+    /// (`firstAnswerableQuestion == nil`), matching the control's own absence
+    /// there.
+    func dismissTapForTesting() { dismissTapped() }
 
     /// What tapping one choice of one of this row's own question blocks does —
     /// through `questionBlock(for:)`, the same factory `body` builds that block
@@ -334,6 +355,20 @@ struct SessionRow: View {
     /// whatever sits after the `Spacer` and before it shares that same
     /// right-hand edge rather than displacing it.
     ///
+    /// **The divergence has a visible half too, and review round 2 is what
+    /// noticed this file had only recorded the invisible one.** Narrowing the
+    /// hit *region* means nothing if the pointer still promises a click
+    /// everywhere the mockup's undivided `cursor:pointer` did — `NSCursor
+    /// .pointingHand` used to push from the row's own `.onHover` (`body`,
+    /// below), spanning `.rmid`, the last-message line, every task line and a
+    /// question block's own chrome, none of which a click does anything to any
+    /// more. `headline` now pushes it from its *own* `.onHover` instead, into
+    /// `hoveringHeader` rather than `hovering` — see that state var's own doc
+    /// comment for why the two cannot share one `Bool`. The whole-row hover
+    /// *fill* stays wide on purpose: it is "this is the row you are near", not
+    /// a promise of what a click there does, and narrowing it too would have
+    /// left every field below the header with no hover feedback at all.
+    ///
     /// **Why this split is structural rather than gesture-priority-dependent.**
     /// `.onTapGesture` here is scoped to `headline`'s own `HStack`; `ForEach
     /// (questions)`/`SessionBlocks` are its *siblings* inside `body`'s outer
@@ -341,7 +376,7 @@ struct SessionRow: View {
     /// ancestor in common with this gesture to propagate through in the first
     /// place — the header and every block simply do not share a container that
     /// carries a jump gesture. That is a stronger guarantee than getting an
-    /// inner-consumes-outer priority right (which is what `dismissControl(for:)`
+    /// inner-consumes-outer priority right (which is what `dismissControl`
     /// below still needs, since `Dismiss` *is* nested inside this same header).
     ///
     /// **Recorded rather than proven by test, and that gap is real.** This
@@ -360,7 +395,18 @@ struct SessionRow: View {
     /// place of a test it cannot yet write (same reasoning `QuestionFaceTests`
     /// gives for `QuestionFace.rows`/`.sendRow`'s own wiring).
     private var headline: some View {
-        HStack(spacing: 10) {
+        // `.rtop{display:flex;align-items:baseline;gap:10px}` (island-motion.html
+        // :351) — `baseline`, not `center`, and this `HStack` read the default
+        // `.center` until review round 2's Minor 5: with every child the same
+        // height that difference is invisible, and `Dismiss` was the first
+        // sibling ever taller than the rest, which is exactly what made it show.
+        // Baseline alignment keeps every *other* child's text sitting on the
+        // same line regardless of how tall one sibling's own box is — a taller
+        // `Dismiss` chip extends below the shared baseline instead of pushing
+        // the row's text down to stay centred against it, which is what a
+        // fixed-height `.frame` would have had to fake by re-deriving a number
+        // this alignment gets for free, from the same rule the mockup states.
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             // `${card.project ? s.proj : s.term}` — a substitution, not a
             // removal. Falls back to the project when there is no origin app to
             // name: an unattributed session must not leave the field empty.
@@ -399,8 +445,8 @@ struct SessionRow: View {
             // Ruling B: only when there is something left to give up on — a
             // handed-back question's hook is already gone, so there is nothing
             // here for `Dismiss` to do.
-            if let id = firstAnswerableQuestionID {
-                dismissControl(for: id)
+            if firstAnswerableQuestion != nil {
+                dismissControl
             }
             // `.rstate` — the word *and* a pip, `gap:6px`. The pip is where the
             // state's colour lives now that the leading position belongs to the
@@ -425,6 +471,16 @@ struct SessionRow: View {
         // cursor without that one.
         .contentShape(Rectangle())
         .onTapGesture { headerTapped() }
+        // The pointing hand, narrowed to match the gesture two lines up —
+        // Important 3 of review round 2. Same push/pop and same double-fire
+        // guard `body`'s own `.onHover` uses, into `hoveringHeader` rather than
+        // `hovering` so the two regions' edges cannot stack unbalanced pushes
+        // against one shared flag.
+        .onHover { inside in
+            guard inside != hoveringHeader else { return }
+            hoveringHeader = inside
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
     }
 
     /// Ruling B's control, new UI: `island-motion.html` has no `Dismiss`
@@ -440,15 +496,15 @@ struct SessionRow: View {
     /// the "gets both" trap `answeringInsideTheBlockDoesNotJump`'s own doc
     /// comment describes — the inner gesture has to *consume* the tap, not
     /// merely be recognised alongside the outer one.
-    private func dismissControl(for questionID: String) -> some View {
+    private var dismissControl: some View {
         Text("Dismiss")
             .font(.system(size: 10.5))
             .foregroundStyle(Color(dimColour))
             .padding(.horizontal, 8)
-            .padding(.vertical, 3)
+            .padding(.vertical, 0)
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(dimColour), lineWidth: 1))
             .contentShape(RoundedRectangle(cornerRadius: 6))
-            .highPriorityGesture(TapGesture().onEnded { dismissTapped(questionID) })
+            .highPriorityGesture(TapGesture().onEnded { dismissTapped() })
     }
 
     /// §11's line 3, the last thing you asked — the mockup's `.rsaid`.

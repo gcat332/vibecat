@@ -13,7 +13,7 @@ import VibeCatCore
 /// doc comment already establishes this for `QuestionFace`, and the same limit
 /// applies here. So `SessionRow.headerTapForTesting()`/`.dismissTapForTesting()`/
 /// `.answerTapForTesting(questionID:choiceID:)` each call exactly what their real
-/// gesture calls — `headerTapped()`/`dismissTapped(_:)`/`questionBlock(for:)`,
+/// gesture calls — `headerTapped()`/`dismissTapped()`/`questionBlock(for:)`,
 /// the same private methods `body` itself uses — rather than a hand-rebuilt
 /// stand-in that could quietly drift from the real wiring.
 private let t0 = Date(timeIntervalSince1970: 1_000_000)
@@ -29,14 +29,20 @@ private func session(_ state: Kind = .permission) -> Session {
 /// twice. `answeringInsideTheBlockDoesNotJump` below needs one tap to *finish*
 /// answering, the same reason `QuestionFaceTests.threeChoices(destructive:
 /// false)` picks a benign command.
-@MainActor private func rowQuestion(_ id: String = "q1", handedBack: Bool = false) -> IslandModel.RowQuestion {
+///
+/// `onDismiss` defaults to a no-op — since review round 2 this is where `Dismiss`
+/// actually rides (`IslandModel.RowQuestion.onDismiss`, not a `SessionRow`
+/// parameter any more), so a test that cares which closure fired passes its own
+/// in per fixture rather than reading a shared row-level property.
+@MainActor private func rowQuestion(_ id: String = "q1", handedBack: Bool = false,
+                                    onDismiss: @escaping @MainActor () -> Void = {}) -> IslandModel.RowQuestion {
     IslandModel.RowQuestion(
         model: QuestionModel(event: VibeEvent(
             id: id, cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
             title: "Allow this command?", body: "pnpm install",
             choices: [Choice(id: "allow", label: "Allow once"), Choice(id: "deny", label: "Deny")],
             wantsReply: true)),
-        isHandedBack: handedBack)
+        isHandedBack: handedBack, onDismiss: onDismiss)
 }
 
 // MARK: - The three-test set the brief demands together
@@ -77,17 +83,17 @@ private func session(_ state: Kind = .permission) -> Session {
 /// propagated would jump *and* give up on the question in one click — the worst
 /// possible pair of outcomes to combine, since one of them is irreversible for
 /// that question. `.highPriorityGesture` on the Dismiss control is what this
-/// test stands behind; see `SessionRow.dismissControl(for:)`'s own doc comment.
+/// test stands behind; see `SessionRow.dismissControl`'s own doc comment.
 @MainActor @Test func dismissingFromTheHeaderDoesNotJump() {
     var jumped = false
-    var dismissed: String?
-    let question = rowQuestion()
+    var dismissed = false
+    let question = rowQuestion(onDismiss: { dismissed = true })
     let row = SessionRow(session: session(), now: t0, questions: [question],
-                         onJump: { jumped = true }, onDismiss: { dismissed = $0 })
+                         onJump: { jumped = true })
 
     row.dismissTapForTesting()
 
-    #expect(dismissed == question.id, "Dismiss did not fire onDismiss with the question's own id")
+    #expect(dismissed == true, "Dismiss did not fire the question's own onDismiss")
     #expect(jumped == false, "dismissing a question also jumped to its terminal")
 }
 
@@ -99,33 +105,40 @@ private func session(_ state: Kind = .permission) -> Session {
 /// just the control's visibility. Without it, `Dismiss` would silently fire for
 /// a question nobody can still answer.
 @MainActor @Test func dismissDoesNothingWithNoAnswerableQuestion() {
-    var dismissed: String?
+    var dismissed = false
     let row = SessionRow(session: session(), now: t0,
-                         questions: [rowQuestion(handedBack: true)],
-                         onDismiss: { dismissed = $0 })
+                         questions: [rowQuestion(handedBack: true, onDismiss: { dismissed = true })])
 
     row.dismissTapForTesting()
 
-    #expect(dismissed == nil,
+    #expect(dismissed == false,
             "Dismiss fired for a handed-back question, which has no hook left to release")
 }
 
-/// A row can carry more than one parked question (parallel tool calls each fire
-/// their own hook — `AppModel.questions`'s own doc comment). The header holds
-/// exactly one `Dismiss` control, so it has to name a *specific* one rather than
-/// whichever `first` happens to be handed-back.
-@MainActor @Test func dismissNamesTheFirstAnswerableQuestionAmongSeveral() {
-    var dismissed: String?
-    let handedBack = rowQuestion("q1", handedBack: true)
-    let answerable = rowQuestion("q2", handedBack: false)
-    let row = SessionRow(session: session(), now: t0,
-                         questions: [handedBack, answerable],
-                         onDismiss: { dismissed = $0 })
+/// **Adjudicated in review round 2: Dismiss acts on the whole session, not one
+/// question.** A row can carry more than one parked question (parallel tool
+/// calls each fire their own hook — `AppModel.questions`'s own doc comment), and
+/// the header holds exactly one `Dismiss` control — but rather than that control
+/// silently picking one of several to release, every `RowQuestion` for a session
+/// is built with the *same* `onDismiss` (dismissing all of them at once — see
+/// `AppModel.dismissQuestions(forSession:)`). So this row only has to reach
+/// *some* answerable question's closure, and must never reach a handed-back
+/// one's — pinned here by giving the two fixtures distinguishable closures
+/// rather than one shared flag, so a mutation that fired both or neither would
+/// be visible.
+@MainActor @Test func dismissReachesAnAnswerableQuestionsClosureAndNeverAHandedBackOnes() {
+    var handedBackDismissed = false
+    var answerableDismissed = false
+    let handedBack = rowQuestion("q1", handedBack: true, onDismiss: { handedBackDismissed = true })
+    let answerable = rowQuestion("q2", handedBack: false, onDismiss: { answerableDismissed = true })
+    let row = SessionRow(session: session(), now: t0, questions: [handedBack, answerable])
 
     row.dismissTapForTesting()
 
-    #expect(dismissed == "q2",
-            "Dismiss named \(dismissed ?? "nil") rather than \"q2\", the one answerable question among two parked ones")
+    #expect(answerableDismissed == true,
+            "Dismiss never reached the answerable question's own onDismiss")
+    #expect(handedBackDismissed == false,
+            "Dismiss reached a handed-back question's onDismiss — it has no hook left to release")
 }
 
 // MARK: - The control's own visibility
@@ -141,7 +154,7 @@ private func session(_ state: Kind = .permission) -> Session {
 /// so comparing whole-row ink between an answerable and a handed-back fixture
 /// would be satisfied by that alone and prove nothing about `Dismiss`
 /// specifically. `headline` itself never reads `isHandedBack` — only
-/// `firstAnswerableQuestionID` does — so within this band the *only* thing that
+/// `firstAnswerableQuestion` does — so within this band the *only* thing that
 /// can differ between the two fixtures is whether `Dismiss` drew.
 @MainActor @Test func dismissDrawsInTheHeaderOnlyWhenAQuestionIsAnswerable() throws {
     func headerInk(handedBack: Bool) throws -> Int {
@@ -159,4 +172,37 @@ private func session(_ state: Kind = .permission) -> Session {
     let handedBack = try headerInk(handedBack: true)
     #expect(answerable > handedBack,
             "the header drew the same ink (\(answerable) against \(handedBack)) whether the question was answerable or already handed back — Dismiss is not gated on isHandedBack, or was never wired into the header at all")
+}
+
+// MARK: - The header's own baseline (Minor 5, review round 2)
+
+/// `headline` is a default-`.center` `HStack`, so a sibling taller than the
+/// project name grows the *whole* line and re-centres everything inside it.
+/// Measured before the fix (`Scripts/test.sh --filter
+/// theHeaderStaysOnOneBaselineWhetherOrNotDismissIsShown`, against the
+/// unpadded-down `dismissControl`): ink ran `y=8…26` with `Dismiss` drawn and
+/// `y=10…23` without it — the project name and state pip sit two points higher
+/// whenever a row happens to carry an answerable question, so two rows stacked
+/// at the session list's own `spacing: 1` visibly stop sharing a line.
+///
+/// Answerable-vs-answerable rather than answerable-vs-handed-back: the point is
+/// that *whether Dismiss is drawn at all* must not move the header's own ink,
+/// and a fixture that also changed the block underneath (as `handedBack: true`
+/// does) would let a real regression here hide behind an unrelated block-height
+/// change satisfying "the numbers differ" for the wrong reason.
+@MainActor @Test func theHeaderStaysOnOneBaselineWhetherOrNotDismissIsShown() throws {
+    func headerInkTop(hasDismiss: Bool) throws -> Int {
+        let raster = try rasterise(SessionRow(session: session(), now: t0,
+                                              questions: hasDismiss ? [rowQuestion()] : [])
+            .frame(width: 388))
+        for y in 0..<min(30, raster.height) {
+            for x in 0..<raster.width where !raster[x, y].isTransparent { return y }
+        }
+        return -1
+    }
+
+    let withDismiss = try headerInkTop(hasDismiss: true)
+    let withoutDismiss = try headerInkTop(hasDismiss: false)
+    #expect(withDismiss == withoutDismiss,
+            "the header's own ink starts at row \(withDismiss) with Dismiss showing against \(withoutDismiss) without it — rows in the same list would stop sharing a baseline")
 }

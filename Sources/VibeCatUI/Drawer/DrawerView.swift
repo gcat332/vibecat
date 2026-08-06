@@ -26,11 +26,12 @@ struct DrawerView: View {
     /// Plan 9's parked and handed-back questions, for §11's rows to draw under
     /// themselves. Defaulted for the same reason `sessions` is: every golden and preview
     /// that predates this keeps rendering exactly what it rendered before.
+    /// Ruling B's `Dismiss` used to be a second closure parameter forwarded
+    /// straight through here, alongside this one. Review round 2 removed it:
+    /// `RowQuestion` above already carries its own `onDismiss`, so there is
+    /// nothing left for this view to forward — see that struct's own doc
+    /// comment for why riding the data was preferred to a fifth closure hop.
     var rowQuestions: [SessionKey: [IslandModel.RowQuestion]] = [:]
-    /// Ruling B's `Dismiss`, forwarded straight to `SessionListFace` exactly as
-    /// `onAnswer` is. Defaulted for the same reason: every existing call site
-    /// (none of which cares) keeps compiling and rendering unchanged.
-    var onDismiss: (String) -> Void = { _ in }
     let accent: RGBA
     let width: CGFloat
     /// The bottom corner radius, `IslandGeometry.openBottomRadius` (20) in
@@ -149,7 +150,6 @@ struct DrawerView: View {
                                 .transition(.faceCrossfade)
                         } else {
                             SessionListFace(questions: rowQuestions, onAnswer: onAnswer,
-                                            onDismiss: onDismiss,
                                             sessions: sessions, options: options)
                                 .transition(.faceCrossfade)
                         }

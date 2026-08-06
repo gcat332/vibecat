@@ -103,25 +103,6 @@ import VibeCatCore
     @ObservationIgnored
     public var onAnswer: (@MainActor (Reply) -> Void)?
 
-    /// Ruling B's `Dismiss` (Plan 9 Task 6), fired with the id of whichever
-    /// answerable question a row's own header names. Threaded down to
-    /// `DrawerView`/`SessionListFace`/`SessionRow` exactly as `onAnswer` is —
-    /// see those types' own doc comments — and, like `onAnswer`, wiring for
-    /// `@ObservationIgnored`: this is a callback, not content a view redraws for.
-    ///
-    /// **Wired by `NotchController.present()`**, to `dismissQuestion(id:)`
-    /// there, mirroring `onAnswer`'s own line. This is *not* the same shape as
-    /// `SessionRow.onJump`, which stays uncalled on purpose: §13's jump has no
-    /// implementation anywhere yet, so a closure with no caller is an honest
-    /// placeholder for it. `AppModel.dismissQuestion(id:)` already exists and
-    /// does something, so an `onDismiss` left at `nil` would not be a
-    /// placeholder — it would be a control that looks finished and silently
-    /// does nothing, the exact defect this project has shipped three times
-    /// before (`Session.lastUserMessage`, three write-only preferences, Plan
-    /// 7's whole icon mechanism). Fixed after the first round of Task 6 review
-    /// caught it unwired.
-    @ObservationIgnored
-    public var onDismiss: (@MainActor (String) -> Void)?
 
     /// Whether the drawer's own footer should show the muted glyph. **The
     /// same setting as `Preferences.soundEnabled`** — `island-motion.html:1060`
@@ -191,13 +172,38 @@ import VibeCatCore
     /// describes cannot drift apart. `isHandedBack` is derived in `NotchController
     /// .render()` from `PendingQuestion.hasLapsed(at:)` — the view has no clock and
     /// should not grow one.
+    ///
+    /// **A trio since review round 2, not a pair — `onDismiss` rides here rather than
+    /// travelling as a separate `IslandModel`/`DrawerView`/`SessionListFace`/`SessionRow`
+    /// closure parameter.** The alternative (a fifth closure threaded the way `onAnswer`
+    /// is) was tried in round 1 and found, by measurement, to be a silently droppable
+    /// parameter at two of its three hops — cutting either line left all 922 tests green.
+    /// `RowQuestion` already makes the same trip as the one thing a row needs to draw a
+    /// question block *at all*, so carrying the action alongside the data it already acts
+    /// on removes those hops rather than adding a test that has to keep re-proving each
+    /// one is still there. See `NotchController.syncRowQuestions()` for where this is
+    /// actually built, and `AppModel.dismissQuestions(forSession:)` for what it calls.
+    ///
+    /// `@MainActor () -> Void`, not a plain `() -> Void`: `onDismiss`'s body calls back
+    /// into `NotchController`, which is main-actor state, and the type has to say so for
+    /// the same reason `IslandModel.onAnswer` always has. This is also what keeps `Sendable`
+    /// on the struct rather than costing it — a global-actor-isolated closure type already
+    /// satisfies `Sendable`'s cross-actor-safety requirement (only reachable by hopping to
+    /// that actor), so no `@unchecked` and no dropped conformance were needed. Checked by
+    /// building, not assumed: an *unannotated* `() -> Void` stored here does not compile at
+    /// all once its body reaches `NotchController.dismissQuestions(forSession:)`, "call to
+    /// main actor-isolated instance method … in a synchronous nonisolated context" — which
+    /// is the fixture-construction error this file's own tests hit first.
     public struct RowQuestion: Identifiable, Sendable {
         public let model: QuestionModel
         public let isHandedBack: Bool
+        public let onDismiss: @MainActor () -> Void
         public var id: String { model.event.id }
-        public init(model: QuestionModel, isHandedBack: Bool) {
+        public init(model: QuestionModel, isHandedBack: Bool,
+                    onDismiss: @escaping @MainActor () -> Void = {}) {
             self.model = model
             self.isHandedBack = isHandedBack
+            self.onDismiss = onDismiss
         }
     }
 

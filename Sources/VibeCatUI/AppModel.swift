@@ -380,27 +380,45 @@ import VibeCatTransport
         clearQuestion()
     }
 
-    /// Ruling B's `Dismiss` (Plan 9 Task 6): the session row's header, for a
-    /// *parked* question named by id rather than whichever one is frontmost.
+    /// Ruling B's `Dismiss` (Plan 9 Task 6) — **adjudicated in review round 2 to
+    /// act on the whole session, not one question.** A row draws exactly one
+    /// `Dismiss` however many questions it holds (parallel tool calls each fire
+    /// their own hook — see `questions`'s own doc comment, "a row carrying more
+    /// than one question is real and not hypothetical"), and a single control
+    /// that silently released one of several with nothing on screen naming
+    /// which is worse than releasing the whole set the control visibly belongs
+    /// to. Each released hook fails open to its own terminal independently, so
+    /// "dismiss all" reads as "I will handle this session's questions in the
+    /// terminal" — coherent, where an unnamed single release was not.
+    ///
+    /// **Only the answerable ones.** A handed-back question's hook is already
+    /// gone — ruling C keeps it in `questions` on purpose, so its block can go
+    /// on showing the command someone still needs to read before walking to a
+    /// terminal. Round 1's first version of this method (then `dismissQuestion
+    /// (id:)`, keyed by a single question id) got exactly this wrong on a lost
+    /// race: its `guard` found a question by id regardless of whether it had
+    /// already lapsed, so a handed-back question dismissed after the fact was
+    /// silently `forget`-deleted rather than left alone — round 2's review
+    /// caught it as a doc-comment/code mismatch and this is the fix, not a
+    /// carried-over bug with new prose on top.
+    ///
     /// `SessionRow` never sees `pending` at all — a row only ever draws from
-    /// `IslandModel.questions`, so this has to look a question up the same
-    /// way `answer(_:)` does, not assume it is the one the drawer holds.
-    ///
-    /// Same shape as `answer(_:)`, one line up: settle the question, forget it,
-    /// then close the drawer only if the one dismissed happened to be the
-    /// frontmost one. That last case is vanishingly unlikely by construction —
-    /// a `QuestionBlock` only ever draws in the session list, and the drawer
-    /// shows that face only while nothing is `pending` (`face`'s own doc
-    /// comment) — but costs nothing to guard against rather than assume away.
-    ///
-    /// A reply id matching nothing is a no-op, the same as `answer(_:)`'s own
-    /// mismatched-reply guard: the row that drew a `Dismiss` for this id may
-    /// already have lost the race against a lapse or an answer landing first.
-    @MainActor public func dismissQuestion(id: String) {
-        guard let question = questions.first(where: { $0.id == id }) else { return }
-        question.lapse()
-        forget(question)
-        if pending === question { clearQuestion() }
+    /// `IslandModel.questions`, so `pending` is checked against the *matched
+    /// set*, not assumed to be one of them.
+    @MainActor public func dismissQuestions(forSession key: SessionKey) {
+        let now = Date()
+        let matching = questions.filter { question in
+            SessionKey(cli: question.event.cli, session: question.event.session) == key
+                && !question.hasLapsed(at: now)
+        }
+        guard !matching.isEmpty else { return }
+        for question in matching {
+            question.lapse()
+            forget(question)
+        }
+        if let pending, matching.contains(where: { $0 === pending }) {
+            clearQuestion()
+        }
     }
 
     /// Set the frontmost question aside — Escape, or the notch collapsing. It

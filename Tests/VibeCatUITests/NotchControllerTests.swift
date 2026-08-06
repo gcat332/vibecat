@@ -1657,28 +1657,50 @@ private final class ReplyBox: @unchecked Sendable {
     c.dismiss()
 }
 
-/// **The wiring `IslandModel.onDismiss` exists for, driven end to end.** Task 6's
-/// first round threaded `onDismiss` up through `SessionListFace`/`DrawerView`/
-/// `IslandView` to `IslandModel` and stopped there — `model.onDismiss` was `nil`
-/// in every real launch, so a tap on a row's `Dismiss` reached a control that
-/// looked finished and did nothing. `AppModel.dismissQuestion(id:)` already
-/// existed and worked; the missing piece was this file's own `present()` never
-/// assigning `model.onDismiss` the way it already assigns `model.onAnswer`.
+/// **The wiring `RowQuestion.onDismiss` exists for, driven end to end.** Round 1
+/// threaded a fifth `IslandModel.onDismiss` closure up through `SessionListFace`/
+/// `DrawerView`/`IslandView` and wired it in `present()`, keyed by question id.
+/// Round 2's review found two more gaps and one design problem with that shape,
+/// and this test (rewritten, not merely patched) is what stands behind all three
+/// fixes at once:
 ///
-/// **`#expect(m.questions.isEmpty)` alone would pass against a dismiss that only
-/// dropped the question from the list without lapsing it** — a hook released
-/// that way is not released at all, and it would ride out its own deadline for
-/// nothing, which is exactly the fail-open §2.3 exists to prevent. So this
-/// bounds the waiter's own wall clock from *below*, the same shape
-/// `escapeParksTheQuestionInsteadOfFailingItOpen` uses just above for the
-/// opposite claim: a genuinely released waiter returns long before its
-/// deadline; one merely dropped from a list rides it out in full.
+/// - **Nothing reflowed.** `dismissQuestions(forSession:)` — this test's own
+///   name for what round 1 called `dismissQuestion(id:)` — released the hook
+///   but touched neither `onChange` nor `onQuestion`, so `model.questions` sat
+///   stale until an unrelated hover edge forced a `reflow()`. Round 1's own
+///   version of this test *called `c.render()` manually* before its final
+///   assertion, which is exactly what hid this: it proved `syncRowQuestions()`
+///   is correct, never that production runs it after a dismiss. There is no
+///   `c.render()` between the dismiss below and the assertions that follow it
+///   any more — `NotchController.dismissQuestions(forSession:)` now ends in its
+///   own `render()`, and this is the test that goes red without that line (see
+///   the mutation note below).
+/// - **The threading hops were untested.** Cutting `onDismiss: onDismiss` from
+///   either `SessionListFace`'s or `IslandView`'s call left all 922 tests green
+///   — measured by the reviewer, twice. `RowQuestion.onDismiss` removes the hops
+///   instead of adding tests for them (see that struct's own doc comment), so
+///   this test reaches the closure through `c.model.questions[key]`, the same
+///   dictionary a real `SessionRow` reads its block from — not through a
+///   parameter that no longer exists.
+/// - **One `Dismiss` for two questions is now "dismiss both", not "guess one".**
+///   `dismissingReleasesEveryAnswerableHookForTheSession` below is the sibling
+///   this finding needed; this test stays single-question, close to
+///   `escapeParksTheQuestionInsteadOfFailingItOpen`'s own shape.
 ///
-/// Mutation-verified: commenting out this file's own `model.onDismiss = { ... }`
-/// line in `present()` makes `c.model.onDismiss` `nil`, so the call below is a
-/// silent no-op — `m.questions.isEmpty` and the elapsed-time bound both fail,
-/// and `await waiter.value` only returns once the full 0.6s deadline lapses it
-/// instead of this test's own release. Restored after.
+/// **`start` sits immediately before the dismiss call, not before `ingest`
+/// (Minor 6).** The `< 0.3` bound has to discriminate "released now" from
+/// "released only once the full 0.6s deadline ran out", and moving `start`
+/// earlier would have made it also absorb `Task.sleep(50ms)` and a `render()`
+/// — exactly the load-sensitive shape `pollUntil`'s own doc comment warns
+/// about, where `escapeParksTheQuestionInsteadOfFailingItOpen`'s `> 0.5` lower
+/// bound is not sensitive to that load in the same direction.
+///
+/// Mutation-verified: commenting out `NotchController.dismissQuestions
+/// (forSession:)`'s own `render()` line makes `c.model.questions[key]` retain
+/// the dismissed question with no manual render to paper over it — the last
+/// `#expect` below goes red on its own, with `m.questions.isEmpty` and the
+/// elapsed-time bound both still green (the hook genuinely was released; only
+/// the model failed to catch up). Restored after.
 @MainActor @Test func dismissingFromTheRowActuallyReleasesTheHook() async throws {
     let (c, m) = controller { mbp14 }
     c.refreshGeometry()
@@ -1686,26 +1708,142 @@ private final class ReplyBox: @unchecked Sendable {
     let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s",
                           cwd: "/tmp/proj", choices: [Choice(id: "allow", label: "Allow")],
                           wantsReply: true, answerDeadline: 0.6)
-    let start = Date()
     let waiter = Task.detached { m.ingest(event) }
     try await Task.sleep(for: .milliseconds(50))
     m.parkQuestion()
     c.render()
-    #expect(m.questions.first?.isParked == true, "setup: the question never actually parked")
+    let key = SessionKey(cli: "claude-code", session: "s")
+    let rowQuestion = try #require(c.model.questions[key]?.first,
+                                   "setup: the parked question never reached the model")
 
-    // The exact closure a real tap on the row's `Dismiss` control calls — see
-    // `IslandView`'s own `DrawerView(onDismiss:)` wiring.
-    c.model.onDismiss?("q1")
+    let start = Date()
+    // The exact closure a real tap on the row's `Dismiss` control calls —
+    // `SessionRow.dismissTapped()` reads this same property off whichever
+    // `RowQuestion` `firstAnswerableQuestion` names.
+    rowQuestion.onDismiss()
 
     #expect(m.questions.isEmpty, "the dismissed question stayed in AppModel.questions")
     #expect(await waiter.value == nil,
             "the hook received an answer it was never actually given")
     #expect(Date().timeIntervalSince(start) < 0.3,
             "Dismiss did not release the hook — it rode out its own 0.6s deadline instead")
+    #expect(c.model.questions[key] == nil,
+            "a dismissed question stayed in the rendered model too — dismissQuestions(forSession:) never reflowed")
+    c.dismiss()
+}
 
-    let key = SessionKey(cli: "claude-code", session: "s")
+/// **Important 4's adjudication, driven end to end: one `Dismiss` releases
+/// every answerable hook for the session, not one chosen among several.**
+/// Two questions parked under the same session key, both real hooks blocking
+/// real threads — a `RowQuestion.onDismiss` fired for *either* one is the same
+/// closure (see `NotchController.syncRowQuestions()`), so this only has to
+/// prove that firing it releases both, not that it can be aimed at a specific
+/// one.
+@MainActor @Test func dismissingReleasesEveryAnswerableHookForTheSession() async throws {
+    let (c, m) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+    let e1 = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s",
+                       cwd: "/tmp/proj", choices: [Choice(id: "allow", label: "Allow")],
+                       wantsReply: true, answerDeadline: 0.6)
+    let e2 = VibeEvent(id: "q2", cli: "claude-code", kind: .permission, session: "s",
+                       cwd: "/tmp/proj", choices: [Choice(id: "allow", label: "Allow")],
+                       wantsReply: true, answerDeadline: 0.6)
+    let w1 = Task.detached { m.ingest(e1) }
+    try await Task.sleep(for: .milliseconds(50))
+    m.parkQuestion()
+    let w2 = Task.detached { m.ingest(e2) }
+    try await Task.sleep(for: .milliseconds(50))
+    m.parkQuestion()
     c.render()
-    #expect(c.model.questions[key] == nil, "a dismissed question stayed in the rendered model too")
+    let key = SessionKey(cli: "claude-code", session: "s")
+    let rows = try #require(c.model.questions[key], "setup: both questions must be parked under the same row")
+    #expect(rows.count == 2, "setup: both questions must be parked under the same row")
+
+    let start = Date()
+    rows.first?.onDismiss()
+
+    #expect(m.questions.isEmpty, "dismiss released only one of the two hooks")
+    #expect(await w1.value == nil)
+    #expect(await w2.value == nil)
+    #expect(Date().timeIntervalSince(start) < 0.3,
+            "at least one hook rode out its own deadline instead of being released")
+    c.dismiss()
+}
+
+/// **Ruling C, at the session-wide control: a handed-back question is left
+/// alone.** Its hook is already gone — dismissing it a second time would
+/// silently drop the block that still shows the command someone needs to read
+/// before walking to a terminal (see `AppModel.dismissQuestions(forSession:)`'s
+/// own doc comment on the round 1 defect this replaces). `PendingQuestion
+/// .lapse()` is called directly here, rather than racing a real deadline, so
+/// this test's timing is deterministic.
+@MainActor @Test func dismissingLeavesAHandedBackQuestionInTheSameSessionAlone() async throws {
+    let (c, m) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+    let handedBack = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s",
+                               cwd: "/tmp/proj", choices: [Choice(id: "allow", label: "Allow")],
+                               wantsReply: true, answerDeadline: 5)
+    let answerable = VibeEvent(id: "q2", cli: "claude-code", kind: .permission, session: "s",
+                               cwd: "/tmp/proj", choices: [Choice(id: "allow", label: "Allow")],
+                               wantsReply: true, answerDeadline: 5)
+    let w1 = Task.detached { m.ingest(handedBack) }
+    try await Task.sleep(for: .milliseconds(50))
+    m.parkQuestion()
+    // Simulates the hook having already given up — the same effect
+    // `handBackQuestion()` produces — without racing a real deadline.
+    m.questions.first(where: { $0.id == "q1" })?.lapse()
+    _ = await w1.value
+
+    let w2 = Task.detached { m.ingest(answerable) }
+    try await Task.sleep(for: .milliseconds(50))
+    m.parkQuestion()
+    c.render()
+    let key = SessionKey(cli: "claude-code", session: "s")
+    let rows = try #require(c.model.questions[key])
+    #expect(rows.count == 2, "setup: both questions must still be under the row")
+    #expect(rows.first(where: { $0.id == "q1" })?.isHandedBack == true,
+            "setup: q1 never actually registered as handed back")
+
+    rows.first(where: { !$0.isHandedBack })?.onDismiss()
+
+    #expect(m.questions.count == 1, "dismiss touched more than the one answerable question")
+    #expect(m.questions.first?.id == "q1",
+            "dismiss removed the handed-back question instead of leaving it alone")
+    _ = await w2.value
+    c.dismiss()
+}
+
+/// **Important 1's twin, for the other ending review round 2 checked and found
+/// sharing the same gap.** `AppModel.answer(_:)` touches only `questions`, same
+/// as `dismissQuestions(forSession:)` — so answering a *parked* question (not
+/// the frontmost one) left `model.questions` stale for the identical reason,
+/// rescued in production only by the agent's own follow-up event (`PostToolUse`
+/// → `onChange` → `reflow()`), which a bare reply gives no guarantee of on any
+/// particular timeline — an agent that stops immediately after the tool call
+/// this answer authorised never sends one. `NotchController.answer(_:)` now
+/// ends in `render()` too.
+@MainActor @Test func answeringAParkedQuestionAlsoReflowsTheModel() async throws {
+    let (c, m) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s",
+                          cwd: "/tmp/proj", choices: [Choice(id: "allow", label: "Allow")],
+                          wantsReply: true, answerDeadline: 5)
+    let waiter = Task.detached { m.ingest(event) }
+    try await Task.sleep(for: .milliseconds(50))
+    m.parkQuestion()
+    c.render()
+    let key = SessionKey(cli: "claude-code", session: "s")
+    #expect(c.model.questions[key]?.first != nil, "setup: the parked question never reached the model")
+
+    // The exact closure a real tap on a parked question's own choice calls.
+    c.model.onAnswer?(Reply(id: "q1", choice: "allow"))
+
+    #expect(await waiter.value?.choice == "allow", "the hook never received the answer at all")
+    #expect(c.model.questions[key] == nil,
+            "an answered parked question stayed in the rendered model — answer(_:) never reflowed")
     c.dismiss()
 }
 

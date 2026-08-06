@@ -180,7 +180,6 @@ public struct IslandView: View {
                 // regardless of where the cursor drifts while it is open.
                 DrawerView(question: model.question, sessions: model.sessions,
                            options: model.cardOptions, rowQuestions: model.questions,
-                           onDismiss: { model.onDismiss?($0) },
                            accent: model.state.accent, width: model.drawerWidth,
                            // The same 20pt the drawer half of `IslandBody`'s
                            // silhouette draws, from the same

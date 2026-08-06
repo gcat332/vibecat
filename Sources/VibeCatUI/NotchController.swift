@@ -344,16 +344,18 @@ import VibeCatCore
         // number key are the same ending, so they go through the same method
         // rather than each remembering to release on its own.
         model.onAnswer = { [weak self] reply in self?.answer(reply) }
-        // Ruling B's `Dismiss` (Plan 9 Task 6), the fourth ending — a tap on a
-        // session row's header, for whichever question that row names. Wired
-        // here, unlike `SessionRow.onJump`: `onJump` has no implementation
-        // anywhere yet (§13's jump is a later plan's), so a closure with no
-        // caller is an honest placeholder for it. `dismissQuestion(id:)` below
-        // already exists and does something, so leaving `model.onDismiss` at
-        // `nil` would not be a placeholder — it would be a control that looks
-        // finished and silently does nothing, the exact defect this project
-        // has shipped three times before (see that method's own doc comment).
-        model.onDismiss = { [weak self] id in self?.dismissQuestion(id: id) }
+        // Ruling B's `Dismiss` (Plan 9 Task 6), the fourth ending — **not** wired
+        // here, unlike `onAnswer` above. Review round 2 moved it off a fifth
+        // `IslandModel` closure entirely: it now rides on `IslandModel.RowQuestion
+        // .onDismiss`, built per session key inside `syncRowQuestions()` below,
+        // because that struct already travels `NotchController.render()` →
+        // `IslandModel.questions` → `IslandView` → `DrawerView` →
+        // `SessionListFace` → `SessionRow` as the one thing a row draws a question
+        // block *from* — a fifth parallel closure parameter threaded through all
+        // four of those views would have been a fifth place to drop it silently
+        // (review round 2, finding 2: dropping either of two existing such
+        // parameters left all 922 tests green), where riding on data already
+        // making that trip has nowhere new to go missing.
         // The footer's mute button — see `toggleMute()` and
         // `onSoundEnabledChanged`'s own doc comments.
         model.onToggleMute = { [weak self] in self?.toggleMute() }
@@ -459,7 +461,6 @@ import VibeCatCore
         appModel.onQuestion = nil
         model.onIslandClick = nil
         model.onAnswer = nil
-        model.onDismiss = nil
         model.onToggleMute = nil
         bloomEnd?.cancel()
         bloomEnd = nil
@@ -676,25 +677,49 @@ import VibeCatCore
     /// `answerOnNumberKey` (§10.1's digit), so both finish the same way rather
     /// than each half-remembering what finishing involves.
     ///
+    /// **`render()` at the end since review round 2.** Answering the *frontmost*
+    /// question is rescued regardless — `clearQuestion()` fires `onQuestion(nil)`,
+    /// which `setQuestion(_:)` already reflows on. What this line actually fixes
+    /// is answering a *parked* one: `AppModel.answer(_:)` touches only
+    /// `questions`, which nothing here read before, so `model.questions` stayed
+    /// stale — the same staleness round 2's review measured for `Dismiss` and
+    /// asked to be checked for this path too. Measured stale before this line
+    /// existed: a parked answer's block stood on screen, answered and
+    /// unresponsive, until an unrelated hover edge or store change forced a
+    /// `reflow()`.
+    ///
     /// `internal`, not `private`: this file's own tests drive wiring entry points
     /// directly, the same as `click()`/`setHovering(_:)`/`toggleMute()`.
     func answer(_ reply: Reply) {
         appModel.answer(reply)
         releaseKeyStatus()
+        render()
     }
 
-    /// The fourth ending — Ruling B's `Dismiss`, wired to `model.onDismiss` in
-    /// `present()`. Same shape as `answer(_:)` above, deliberately mirrored
-    /// rather than special-cased: whichever question this names, parked or
-    /// (vanishingly unlikely, per `AppModel.dismissQuestion(id:)`'s own doc
-    /// comment) frontmost, giving it up is one of the ways a question ends,
-    /// and every one of them gives key status back the same way — a mouse tap
-    /// on a row's `Dismiss` is no different from a mouse tap on a choice.
+    /// The fourth ending — Ruling B's `Dismiss`. **Not wired through `IslandModel`
+    /// at all since review round 2** — see the comment on `syncRowQuestions()`
+    /// below for where this is actually reached from a real tap
+    /// (`RowQuestion.onDismiss`, built there per session key).
+    ///
+    /// Session-keyed, not question-id-keyed, per round 2's adjudication: the
+    /// row's one `Dismiss` control releases every answerable hook for the
+    /// session it belongs to, not an unnamed pick among several — see
+    /// `AppModel.dismissQuestions(forSession:)`'s own doc comment for the reasoning.
+    ///
+    /// **`render()` at the end, and this is the finding that made it necessary,
+    /// not `answer(_:)`'s.** `AppModel.dismissQuestions(forSession:)` fires
+    /// neither `onChange` (`store`-only) nor `onQuestion` (only via
+    /// `clearQuestion()`, which a parked question's dismissal essentially never
+    /// reaches — see that method's own doc comment on why). Measured, before
+    /// this line existed: the hook released correctly and `model.questions`
+    /// still held the dismissed question — the block and its `Dismiss` stayed on
+    /// screen, unresponsive to a second tap, until an unrelated reflow.
     ///
     /// `internal`, not `private`: same reasoning as `answer(_:)`.
-    func dismissQuestion(id: String) {
-        appModel.dismissQuestion(id: id)
+    func dismissQuestions(forSession key: SessionKey) {
+        appModel.dismissQuestions(forSession: key)
         releaseKeyStatus()
+        render()
     }
 
     /// The hover monitor's own edge callback routes here, and so does every
@@ -1040,6 +1065,19 @@ import VibeCatCore
     /// but `render()` is only called from `reflow()`, which itself only runs on a real
     /// change, so the guard would sit inside something already guarded. `sessions` above
     /// is assigned the same way and for the same reason.
+    ///
+    /// **`RowQuestion.onDismiss` is also built here, since review round 2.** The
+    /// alternative — a fifth `IslandModel` closure threaded through `IslandView`,
+    /// `DrawerView` and `SessionListFace` the way `onAnswer` is — would have been
+    /// a fourth and fifth place for the same silent-drop failure round 2's review
+    /// measured twice already (dropping either existing threading line left all
+    /// 922 tests green). `RowQuestion` already makes that whole trip as the data
+    /// a row draws its block *from*, so carrying the action on the same value
+    /// removes the hops rather than adding a test for each: every `RowQuestion`
+    /// in one session's array gets the *same* closure, pre-bound to `key`, because
+    /// Ruling B's `Dismiss` is one control per row acting on the whole session
+    /// (see `AppModel.dismissQuestions(forSession:)`) — which of the several it
+    /// is called on cannot matter and does not.
     @MainActor private func syncRowQuestions() {
         let now = Date()
         var models: [String: QuestionModel] = [:]
@@ -1049,7 +1087,10 @@ import VibeCatCore
             models[pending.id] = existing
             let key = SessionKey(cli: pending.event.cli, session: pending.event.session)
             bySession[key, default: []].append(
-                IslandModel.RowQuestion(model: existing, isHandedBack: pending.hasLapsed(at: now)))
+                IslandModel.RowQuestion(model: existing, isHandedBack: pending.hasLapsed(at: now),
+                                        onDismiss: { [weak self] in
+                                            self?.dismissQuestions(forSession: key)
+                                        }))
         }
         rowQuestionModels = models
         model.questions = bySession
