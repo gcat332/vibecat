@@ -176,10 +176,13 @@ import VibeCatTransport
     /// can answer, and `everyHeldQuestionIsEitherTheFrontmostOrParked` is the
     /// assertion.
     ///
-    /// One per *session*, not one per question: a session can only be blocked on
-    /// one tool call at a time, so a second question from the same session means
-    /// the first is already gone and gets lapsed rather than parked. See
-    /// `present(_:)`.
+    /// **One per outstanding question, not one per session.** An earlier version
+    /// of this held one per session on the reasoning that a session can only be
+    /// blocked on one tool call at a time; that is false — parallel tool calls
+    /// each fire their own `PreToolUse` hook and subagents share the parent's
+    /// `session_id` — and keying by session fail-opened all but the newest. So a
+    /// session row can carry more than one question block, and a person answers
+    /// them in whatever order they choose. See `present(_:)`.
     public private(set) var questions: [PendingQuestion] = []
 
     public var onQuestion: (@MainActor (PendingQuestion?) -> Void)?
@@ -302,22 +305,43 @@ import VibeCatTransport
     }
 
     @MainActor private func present(_ question: PendingQuestion) {
-        let key = SessionKey(cli: question.event.cli, session: question.event.session)
-
-        // **A second question from the same session lapses the first; one from a
-        // different session parks it.** The distinction is the whole of Plan 9
-        // Task 2. A session can only be blocked on one tool call at a time, so a
-        // repeat from the same session means the first call is already gone —
-        // parking it would leave a row offering an answer to a call that no
-        // longer exists. Two *different* agents asking at once is the case the
-        // old unconditional `pending?.lapse()` got wrong: it fail-opened the
-        // first without anyone ever seeing it.
-        if let i = questions.firstIndex(where: { keyOf($0) == key }) {
+        // **Every outstanding question is kept. Nothing is displaced except an
+        // exact duplicate of itself.**
+        //
+        // A first version of this keyed by `SessionKey` and lapsed a question when
+        // its own session asked again, on the reasoning that "a session can only
+        // be blocked on one tool call at a time". **That reasoning is wrong and
+        // the owner caught it.** Claude Code issues independent tool calls in
+        // parallel and `PreToolUse` fires per call, so several hooks from one
+        // session block concurrently; subagents share the parent's `session_id`
+        // too (`ClaudeCodeAdapter` reads one `session_id` per session). Keyed by
+        // session, an agent asking for three permissions at once had two of them
+        // silently fail open — some questions appearing on the island and some in
+        // the terminal, with the island under-reporting.
+        //
+        // Keyed by question id instead, the wrong-guess costs are asymmetric and
+        // that is the argument: if concurrent same-session questions never happen,
+        // this path is simply unused. If they do, the alternative loses real
+        // questions invisibly.
+        //
+        // **The same-id branch below is unreachable from a real hook, and is kept
+        // for `answer`'s sake rather than for retries.** `ClaudeCodeAdapter` sets
+        // `id: UUID().uuidString` per invocation, so no hook can ever send the
+        // same question id twice. But `answer(_:)` finds its question by
+        // `$0.id == reply.id`, and this socket is `0600` — reachable by anything
+        // running as the same user — so two questions sharing an id would make
+        // that lookup pick one arbitrarily and leave the other's thread waiting on
+        // a reply that can never be routed to it. Deduping here is what keeps the
+        // lookup unambiguous. Labelled as unreachable rather than presented as a
+        // retry path, because a comment that overstates its own reachability is
+        // how the *previous* version of this method came to be wrong.
+        if let i = questions.firstIndex(where: { $0.id == question.id }) {
             questions[i].lapse()
             questions.remove(at: i)
         }
-        // The displaced question, if it belongs to another session, keeps its
-        // hook waiting and moves into the list.
+        // Whatever the drawer was showing keeps its hook waiting and moves into
+        // the list. This is what the old unconditional `pending?.lapse()` got
+        // wrong.
         pending?.park()
 
         questions.append(question)
@@ -391,10 +415,6 @@ import VibeCatTransport
     /// prevent.
     @MainActor private func forget(_ question: PendingQuestion) {
         questions.removeAll { $0 === question }
-    }
-
-    @MainActor private func keyOf(_ question: PendingQuestion) -> SessionKey {
-        SessionKey(cli: question.event.cli, session: question.event.session)
     }
 
     /// Only notifies when a prune actually removed something. The timer

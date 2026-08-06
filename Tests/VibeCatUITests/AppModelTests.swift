@@ -350,42 +350,73 @@ private nonisolated func questionEvent(_ id: String, session: String,
     _ = await (a.value, b.value, c.value)
 }
 
-/// A second question **from the same session** still replaces the first, and the
-/// first must fail open rather than being left parked forever.
+/// **Rewritten 2026-08-06, and the old version asserted a defect.**
 ///
-/// **This is the case park does not apply to, and the distinction is
-/// load-bearing.** A session can only be blocked on one tool call at a time, so a
-/// second question from the same session means the first is gone — its hook is
-/// either already unblocked or about to be. Parking it would leave a row in the
-/// list offering an answer to a call that no longer exists. Both events here use
-/// session `"s"`; `twoAgentsAskingAtOnceBothKeepTheirQuestions` above is the
-/// different-sessions case.
-@MainActor @Test func asecondQuestionLapsesTheFirst() async throws {
+/// This was `asecondQuestionLapsesTheFirst`: two `wantsReply` events from session
+/// `"s"`, asserting the first fails open. That was right when `AppModel` had one
+/// question slot — a displaced question's socket thread would otherwise block with
+/// nothing able to wake it — and it stayed right through Plan 9 Task 2's first
+/// draft, which kept one slot *per session* on the reasoning that a session can
+/// only be blocked on one tool call at a time.
+///
+/// **That reasoning is false.** Claude Code issues independent tool calls in
+/// parallel and `PreToolUse` fires per call, so several hooks from one session
+/// block concurrently; subagents share the parent's `session_id` as well. An agent
+/// asking for three permissions at once had two of them silently fail open —
+/// appearing in the terminal while the island showed only the third.
+///
+/// So the behaviour under test is now the opposite: **both survive, and a person
+/// answers them in whichever order they like.** The old assertion is kept in
+/// spirit one test down, where it belongs: a retry of the *same* `event.id`.
+@MainActor @Test func twoQuestionsFromOneSessionBothSurviveAndAreAnsweredInAnyOrder() async throws {
     let m = AppModel(socketPath: "/tmp/unused.sock")
-    // `nonisolated`: a local function nested in a @MainActor test inherits
-    // that isolation by default, but this one is called from inside
-    // Task.detached below — a plain value-building helper with no actor
-    // affinity of its own, so it must opt back out explicitly or the calls
-    // at lines below become cross-actor and fail to compile without `await`.
-    nonisolated func q(_ id: String) -> VibeEvent {
-        VibeEvent(id: id, cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
-                  choices: [Choice(id: "allow", label: "Allow")],
-                  wantsReply: true, answerDeadline: 5)
-    }
-    let first = Task.detached { m.ingest(q("q1")) }
+    let first = Task.detached { m.ingest(questionEvent("q1", session: "s")) }
+    try await Task.sleep(for: .milliseconds(50))
+    let second = Task.detached { m.ingest(questionEvent("q2", session: "s")) }
+    try await Task.sleep(for: .milliseconds(50))
+
+    #expect(m.questions.count == 2, "a parallel tool call's question was discarded")
+    #expect(m.pending?.id == "q2")
+    #expect(m.questions.first { $0.id == "q1" }?.isParked == true)
+
+    // Deliberately out of arrival order: nothing forces A before B.
+    m.answer(Reply(id: "q1", choice: "allow"))
+    #expect(await first.value?.choice == "allow")
+    #expect(m.pending?.id == "q2", "answering a parked question disturbed the drawer")
+
+    m.answer(Reply(id: "q2", choice: "deny"))
+    #expect(await second.value?.choice == "deny")
+    #expect(m.questions.isEmpty)
+}
+
+/// **The one case that still replaces — and it is unreachable from a real hook.**
+/// `ClaudeCodeAdapter` sets `id: UUID().uuidString` per invocation, so no hook
+/// sends the same question id twice. What this defends is `answer(_:)`, which
+/// finds its question by id: two questions sharing one would make that lookup
+/// pick arbitrarily and leave the other's thread waiting for a reply that can
+/// never reach it. The socket is `0600` and reachable by anything running as this
+/// user, so "no hook does this" is not the same as "nothing does this".
+///
+/// The earlier instance is lapsed rather than parked because parking it would
+/// leave a block in the list offering an answer to a connection nothing can route
+/// to.
+///
+/// The wall-clock bound is what separates lapse from park: a lapsed waiter returns
+/// the moment it is displaced, a parked one only via its own 5s deadline.
+@MainActor @Test func aRetryOfTheSameQuestionIdReplacesAndReleasesTheEarlierOne() async throws {
+    let m = AppModel(socketPath: "/tmp/unused.sock")
+    let first = Task.detached { m.ingest(questionEvent("q1", session: "s")) }
     try await Task.sleep(for: .milliseconds(50))
     let start = Date()
-    let second = Task.detached { m.ingest(q("q2")) }
+    let second = Task.detached { m.ingest(questionEvent("q1", session: "s")) }
     try await Task.sleep(for: .milliseconds(50))
-    #expect(m.pending?.id == "q2")
-    #expect(await first.value == nil, "the displaced question did not fail open")
-    // Loose bound against the 5s deadline, not a fitted number: correct code
-    // wakes `first` the moment `second` displaces it (well under 1s); a
-    // missing `lapse()` only resolves `first` via its own 5s timeout, which
-    // this bound is tight enough to catch and loose enough not to flake.
+
+    #expect(m.questions.count == 1, "a retried question was held twice")
+    #expect(await first.value == nil, "the replaced instance did not fail open")
     #expect(Date().timeIntervalSince(start) < 1.0,
-            "the first question was not woken by the displacement — it fell through to its own 5s deadline instead")
-    m.answer(Reply(id: "q2", choice: "allow"))
+            "the replaced instance was parked, not lapsed — it fell through to its own 5s deadline")
+
+    m.answer(Reply(id: "q1", choice: "allow"))
     #expect(await second.value?.choice == "allow")
 }
 
