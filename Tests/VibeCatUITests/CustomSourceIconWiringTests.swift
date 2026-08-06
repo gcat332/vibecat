@@ -107,6 +107,33 @@ private func row(_ s: Session) throws -> Raster {
         .frame(width: 388))
 }
 
+/// **Renders until the icon's own loader has actually loaded, bounded.**
+///
+/// `SourceIcon`'s read is deliberately capped at 50ms on a dedicated thread, and its
+/// documented timeout branch draws `CLIMark`'s geometric fallback while the background
+/// read keeps going and caches when it finishes (`SourceIcon.swift:198-220`). So a
+/// *single* render immediately after writing a fresh PNG is a bet on winning that race
+/// against a cold page cache — and one render is exactly what
+/// `anIconFromACustomSourceReachesARenderedRow` used to make.
+///
+/// **This was a latent defect, not a new one.** On the tree before Plan 9's Task 7 that
+/// test passed in the full suite and failed on its own; adding nine tests elsewhere
+/// changed what ran before it and it began failing in the suite too. Widening the pixel
+/// threshold would have hidden a race rather than removed one; asserting against the
+/// second render honours the loader's actual contract, which is "the cache is warm once
+/// the read lands", not "the first frame has the icon".
+///
+/// Bounded at 40 attempts (~2s), so a genuinely broken icon path still fails rather than
+/// hanging — the failure this helper must not swallow.
+@MainActor private func rowOnceIconIsLoaded(_ s: Session, expecting colour: RGBA) throws -> Raster {
+    var last = try row(s)
+    for _ in 0..<40 where last.pixelCount(near: colour) <= 20 {
+        Thread.sleep(forTimeInterval: 0.05)
+        last = try row(s)
+    }
+    return last
+}
+
 // MARK: - The whole loop, in one test
 
 /// **The test this task exists for.** A definition on disk (here: in the store
@@ -136,7 +163,7 @@ private func row(_ s: Session) throws -> Raster {
     #expect(session.icon == path,
             "`Session.icon` is \(session.icon ?? "<nil>") — the app resolved no icon for a cli its own registry has a definition for, which is the exact defect this task closed")
 
-    let drawn = try row(session)
+    let drawn = try rowOnceIconIsLoaded(session, expecting: iconMagenta)
     #expect(drawn.pixelCount(near: iconMagenta) > 20,
             "the rendered row drew \(drawn.pixelCount(near: iconMagenta)) pixels of the icon's own magenta — a real custom-source icon is not reaching the drawn row")
 }

@@ -1,5 +1,6 @@
 import Foundation
 import VibeCatCore
+import VibeCatTransport
 
 /// One question the island is showing and a socket thread is waiting on.
 ///
@@ -12,9 +13,16 @@ import VibeCatCore
 public final class PendingQuestion: @unchecked Sendable {
     public let id: String
     public let event: VibeEvent
-    /// When the *hook* gives up. Mirrored here so the island can close a
-    /// question that nobody is listening to any more.
-    public let expiry: Date
+    /// When the *hook* gives up, or `nil` for `Never`. Mirrored here so the island can
+    /// close a question that nobody is listening to any more.
+    ///
+    /// **`nil` is the absence of an instant, not a very late one** (Plan 9 Task 7).
+    /// Spelling `Never` as `Date.distantFuture` would make `expiry.timeIntervalSinceNow`
+    /// about 6e10 seconds, and `DispatchTime.now() + 6e10` **saturates** rather than
+    /// trapping — so the accidental forever and the deliberate one would be
+    /// indistinguishable from here. `waitInstant(until:)` is the one place either is
+    /// produced.
+    public let expiry: Date?
 
     private let gate = DispatchSemaphore(value: 0)
     private let lock = NSLock()
@@ -35,16 +43,38 @@ public final class PendingQuestion: @unchecked Sendable {
         return parked
     }
 
-    public init(event: VibeEvent, deadline: TimeInterval, now: Date = Date()) {
+    /// `deadline: nil` is `Never`: the notch holds this question for as long as the hook
+    /// lives and the terminal is never prompted. Available, and not the default — see
+    /// `Preferences.handBackToTerminalAfter`.
+    public init(event: VibeEvent, deadline: TimeInterval?, now: Date = Date()) {
         self.id = event.id
         self.event = event
-        self.expiry = now.addingTimeInterval(deadline)
+        self.expiry = deadline.map(now.addingTimeInterval)
+    }
+
+    /// The single place a `DispatchTime` is derived from an expiry, and the single place
+    /// `.distantFuture` is ever produced.
+    ///
+    /// **`Never` is spelled out; nothing is allowed to arrive at it by arithmetic.**
+    /// `DispatchTime`'s `+` saturates instead of trapping, so an expiry far enough out
+    /// silently becomes `.distantFuture` — a thread parked for the life of the process,
+    /// which is what §2.3 forbids outright. The `min` against
+    /// `SocketClient.ceilingDeadline` is what stops that: a finite expiry, however
+    /// absurd, comes back finite. `neverIsSpelledOutRatherThanArrivedAtByArithmetic`
+    /// feeds it `Date.distantFuture` and requires a finite answer.
+    ///
+    /// `internal`, not `private`: that test drives it directly, because the alternative
+    /// is observing a saturation by waiting out the life of the process.
+    static func waitInstant(until expiry: Date?) -> DispatchTime {
+        guard let expiry else { return .distantFuture }
+        let remaining = min(max(0, expiry.timeIntervalSinceNow), SocketClient.ceilingDeadline)
+        return .now() + remaining
     }
 
     /// Blocks the calling thread until answered or expired. `nil` means fail
     /// open: the hook prints nothing and the CLI falls back to its own prompt.
     public func await() -> Reply? {
-        _ = gate.wait(timeout: .now() + max(0, expiry.timeIntervalSinceNow))
+        _ = gate.wait(timeout: Self.waitInstant(until: expiry))
         lock.lock()
         defer { lock.unlock() }
         // Settle even on the timeout path, so a late answer cannot be sent
@@ -114,9 +144,16 @@ public final class PendingQuestion: @unchecked Sendable {
         parked = false
     }
 
+    /// **A `Never` question can only lapse by settling**, which is why `expiry == nil`
+    /// answers "not yet" rather than "never" here. There is no clock to lapse by, so
+    /// `resolve`/`lapse` is the only way out — and `AppModel.prune` reads this, so a
+    /// branch that answered `false` unconditionally would hold the question, and the row
+    /// it draws, for the life of the app.
     public func hasLapsed(at instant: Date) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return settled || instant >= expiry
+        if settled { return true }
+        guard let expiry else { return false }
+        return instant >= expiry
     }
 }

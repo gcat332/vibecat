@@ -68,6 +68,27 @@ public struct Preferences: Sendable, Equatable {
     /// switches, every one of which is `aria-checked="true"`.
     public var cardOptions: SessionCardOptions
 
+    /// How long the notch may hold a question before the decision goes back to the
+    /// terminal, in **minutes**. `nil` is `Never`.
+    ///
+    /// **Measured, and it is why the default is one minute rather than twenty.** While a
+    /// `PreToolUse` hook is blocked, Claude Code prints nothing at all and its own
+    /// permission prompt does not appear until the hook returns — verified against 2.1.223
+    /// with a hook that slept 3s, twice, headless. So this is not a timeout guarding
+    /// against a hang; it is the **hand-back mechanism**, and without it the terminal
+    /// never gets a prompt. Only one party can hold the decision at a time, so the notch
+    /// should not hold it for long.
+    ///
+    /// `Double?` rather than a sentinel, because `Never` is not a duration and `0` is what
+    /// a truncated or hand-edited plist holds. `UserDefaultsPreferenceStore` gives it its
+    /// own boolean key for that reason.
+    ///
+    /// **Nothing reads this yet.** Plan 6.7's Integrations row writes it and Plan 6.7's
+    /// own Task 7 teaches the hook to read it; `HookRunner` still uses
+    /// `SocketClient.defaultAnswerDeadline`. Said plainly because a preference that is
+    /// persisted and never read has shipped three times in this project.
+    public var handBackToTerminalAfter: Double?
+
     public init(soundEnabled: Bool = true, volume: Double = 0.60,
                 quietDuringDoNotDisturb: Bool = true, selectedPage: String = "general",
                 alerts: AlertPolicy = AlertPolicy(), pack: SoundPack = .chiptune,
@@ -79,7 +100,8 @@ public struct Preferences: Sendable, Equatable {
                 followsSystemReduceMotion: Bool = true,
                 rightFlank: RightFlank = .sessionCount,
                 coat: Coat = .tabby,
-                cardOptions: SessionCardOptions = SessionCardOptions()) {
+                cardOptions: SessionCardOptions = SessionCardOptions(),
+                handBackToTerminalAfter: Double? = 1.0) {
         self.soundEnabled = soundEnabled
         self.volume = volume
         self.quietDuringDoNotDisturb = quietDuringDoNotDisturb
@@ -95,5 +117,6 @@ public struct Preferences: Sendable, Equatable {
         self.rightFlank = rightFlank
         self.coat = coat
         self.cardOptions = cardOptions
+        self.handBackToTerminalAfter = handBackToTerminalAfter
     }
 }

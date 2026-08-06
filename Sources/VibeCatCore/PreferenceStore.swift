@@ -47,6 +47,15 @@ public struct UserDefaultsPreferenceStore: PreferenceStoring {
             prefs.volume = Self.clampedVolume(defaults.double(forKey: key("volume")),
                                               fallback: fallback.volume)
         }
+        // The flag is checked first and wins: with it set, any number left in the other
+        // key is stale and must not resurrect a duration.
+        if defaults.bool(forKey: key("handBackNever")) {
+            prefs.handBackToTerminalAfter = nil
+        } else if defaults.object(forKey: key("handBackToTerminalAfter")) != nil {
+            prefs.handBackToTerminalAfter =
+                Self.clampedHandBack(defaults.double(forKey: key("handBackToTerminalAfter")),
+                                     fallback: fallback.handBackToTerminalAfter)
+        }
         if let page = defaults.string(forKey: key("selectedPage")),
            SettingsPageKey.isKnown(page) {
             prefs.selectedPage = page
@@ -148,6 +157,17 @@ public struct UserDefaultsPreferenceStore: PreferenceStoring {
     public func save(_ preferences: Preferences) {
         defaults.set(preferences.soundEnabled, forKey: key("soundEnabled"))
         defaults.set(preferences.volume, forKey: key("volume"))
+        // **Two keys, because `UserDefaults` cannot hold `nil` and a sentinel number
+        // would be unsafe.** `Never` has to be distinguishable from "nobody ever wrote
+        // this key", and `0` is exactly what a truncated or hand-edited plist holds —
+        // reading garbage as `Never` would hold a question, and the hook's thread,
+        // indefinitely. So the flag is the only path to `Never` and every number clamps
+        // to a real duration. `neverRoundTripsAndNoGarbageNumberCanMeanIt` fails if this
+        // is ever re-encoded as a sentinel.
+        defaults.set(preferences.handBackToTerminalAfter == nil, forKey: key("handBackNever"))
+        if let minutes = preferences.handBackToTerminalAfter {
+            defaults.set(minutes, forKey: key("handBackToTerminalAfter"))
+        }
         defaults.set(preferences.quietDuringDoNotDisturb, forKey: key("quietDuringDoNotDisturb"))
         defaults.set(preferences.selectedPage, forKey: key("selectedPage"))
         defaults.set(preferences.alerts.onNeedsAnswer, forKey: key("alerts.onNeedsAnswer"))
@@ -173,6 +193,20 @@ public struct UserDefaultsPreferenceStore: PreferenceStoring {
         defaults.set(preferences.cardOptions.worktree, forKey: key("cardOptions.worktree"))
         defaults.set(preferences.cardOptions.model, forKey: key("cardOptions.model"))
         defaults.set(preferences.cardOptions.effort, forKey: key("cardOptions.effort"))
+    }
+
+    /// **The person's bound, which is not the wire's.** `SocketClient.clamped` allows
+    /// `0.02…3600` *seconds* because its only job is to reject the absurd; this allows
+    /// `0.5…60` **minutes**, because that is what a Settings control may offer. A plist is
+    /// a file anything running as this user can edit, and Plan 6.7's row writes this key.
+    ///
+    /// NaN takes the fallback rather than an edge, exactly like `clampedVolume` and for
+    /// exactly the same reason: NaN fails every comparison, so `min(max(x, 0.5), 60)`
+    /// passes it straight through and it becomes a `Date` arithmetic result of NaN
+    /// downstream. Infinity does clamp, because it compares.
+    static func clampedHandBack(_ value: Double, fallback: Double?) -> Double? {
+        guard !value.isNaN else { return fallback }
+        return min(max(value, 0.5), 60)
     }
 
     static func clampedVolume(_ value: Double, fallback: Double) -> Double {

@@ -754,9 +754,15 @@ import VibeCatCore
         if pending == nil {
             model.drawerOpen = false
         }
-        if let pending {
+        // **`expiry`, not `pending` — a `Never` question arms no lapse check at all**
+        // (Plan 9 Task 7). There is no instant to fire at, and a `Task` that slept on
+        // `nil`-shaped arithmetic would either fire immediately or saturate. Such a
+        // question leaves only by being answered or dismissed, which is what `Never`
+        // means; `AppModel.prune` still clears it once it settles, because
+        // `hasLapsed(at:)` reads `settled` before it reaches the clock.
+        if let pending, let expiry = pending.expiry {
             lapseCheck = Task { [weak self] in
-                let remaining = max(0, pending.expiry.timeIntervalSinceNow)
+                let remaining = max(0, expiry.timeIntervalSinceNow)
                 try? await Task.sleep(for: .seconds(remaining))
                 guard !Task.isCancelled, let self else { return }
                 // Whole-branch review minor: `self.currentPending === pending`,

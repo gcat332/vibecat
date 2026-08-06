@@ -221,3 +221,59 @@ private func question(id: String = "q1") -> VibeEvent {
     #expect(p.hasLapsed(at: Date()),
             "a settled question has lapsed however long remains on the clock")
 }
+
+// MARK: - Never (Plan 9 Task 7)
+//
+// `nil` means the notch holds this question for as long as the hook lives and the
+// terminal is never prompted. The hazard the three tests below exist for is that
+// `Never` and "a very long time" are indistinguishable *after* the arithmetic:
+// `DispatchTime`'s `+` saturates instead of trapping, so `.now() + 6e10` — which is
+// what `Date.distantFuture.timeIntervalSinceNow` would hand it — silently becomes
+// `.distantFuture`. Deliberate in one named place is the opposite of that bug.
+
+/// The one named place, and the proof nothing computes its way there.
+///
+/// The third assertion is the load-bearing one: it feeds `waitInstant` the exact
+/// value someone would reach for if they spelled `Never` as an instant instead of
+/// as its absence, and requires that it still comes back *finite*. Delete the
+/// `min` against `ceilingDeadline` and it turns into `.distantFuture` — a thread
+/// parked for the life of the process, which is what §2.3 forbids outright.
+@Test func neverIsSpelledOutRatherThanArrivedAtByArithmetic() {
+    #expect(PendingQuestion.waitInstant(until: nil) == .distantFuture,
+            "the deliberate forever is not being produced")
+    #expect(PendingQuestion.waitInstant(until: Date().addingTimeInterval(30)) < .distantFuture)
+    #expect(PendingQuestion.waitInstant(until: .distantFuture) < .distantFuture,
+            "a finite expiry saturated DispatchTime into .distantFuture — the accidental forever")
+}
+
+/// **A `Never` question must still be able to lapse, or `AppModel.prune` holds it
+/// — and the row it draws — for the life of the app.** There is no clock to lapse
+/// by, so settling is the only way out, and this is the assertion that fails if
+/// `hasLapsed(at:)` grows a `nil`-expiry branch that answers "no" unconditionally.
+///
+/// A year out, not five seconds out, so no plausible wall-clock drift could be
+/// what satisfies the first expectation.
+@Test func aQuestionThatNeverHandsBackLapsesOnlyWhenItSettles() {
+    let now = Date()
+    let p = PendingQuestion(event: question(), deadline: nil, now: now)
+    #expect(p.expiry == nil, "Never was stored as an instant rather than as no instant")
+    #expect(!p.hasLapsed(at: now.addingTimeInterval(365 * 24 * 3600)),
+            "a Never question lapsed by the clock, so the hook was let go while the notch still held its question")
+    p.lapse()
+    #expect(p.hasLapsed(at: now), "a settled Never question is unreclaimable — prune would keep it forever")
+}
+
+/// The wait itself, end to end: a `Never` question parks its waiter on
+/// `.distantFuture` and is released by the answer alone. Distinct from
+/// `anAnsweredQuestionHandsTheReplyBackToTheWaiter` at the top of this file, which
+/// has a 5-second deadline that would also release the waiter on its own if the
+/// gate signal went missing; here nothing but the signal can end the wait, so a
+/// `park()`-shaped bug that failed to signal would hang this test rather than pass
+/// it late.
+@Test func aNeverQuestionIsReleasedByItsAnswerAndNothingElse() async throws {
+    let p = PendingQuestion(event: question(), deadline: nil)
+    let waiter = Task.detached { p.await() }
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(p.resolve(Reply(id: "q1", choice: "allow")))
+    #expect(await waiter.value?.choice == "allow")
+}

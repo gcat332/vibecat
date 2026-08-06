@@ -84,12 +84,45 @@ private func tempSocketPath(_ name: String) -> String {
 
 /// The clamp arithmetic itself, isolated from any socket, deadline object,
 /// or wait — pure and deterministic, so this runs in sub-millisecond time
-/// instead of needing an end-to-end run past the 60s ceiling to observe the
+/// instead of needing an end-to-end run past the ceiling to observe the
 /// unbounded-wait failure mode the clamp exists to prevent.
 @Test func theClampPassesInRangeValuesThroughAndBoundsTheRest() {
     #expect(SocketClient.clamped(9999) == SocketClient.ceilingDeadline)
     #expect(SocketClient.clamped(-1) == SocketClient.floorDeadline)
     #expect(SocketClient.clamped(5) == 5)
+}
+
+/// **The bound itself, not just that there is one (Plan 9, Task 7).** Every
+/// assertion above compares against `ceilingDeadline` by name, so all of them
+/// would keep passing against a ceiling of any size — including one raised to
+/// `.infinity`, which is the change that reintroduces the unbounded wait §2.3
+/// forbids. This pins the number, and pins *why* it is that number: the hand-back
+/// is a value a person sets in **minutes** (`Preferences
+/// .handBackToTerminalAfter`, `0.5…60`), and the top of that range is 3600
+/// seconds. Against the old ceiling of 60 a chosen hour would have silently
+/// become one minute.
+@Test func theCeilingLeavesAnHourLongHandBackReachable() {
+    #expect(SocketClient.ceilingDeadline == 3600)
+    #expect(SocketClient.clamped(3600) == 3600, "an hour is inside the range, not on the wrong side of it")
+    #expect(SocketClient.clamped(3601) == 3600)
+    #expect(SocketClient.clamped(86_400) == 3600, "a day-long hold was honoured verbatim")
+}
+
+/// The floor did **not** move with the ceiling, and this is the assertion that
+/// catches someone raising it to "long enough for a person to read a sentence".
+/// It is a wire-level bound, not a product one: `timeval{0,0}` means *no timeout*
+/// to `setsockopt` and a negative value is rejected outright, so both ends of a
+/// hung terminal live just below 0.02. The product bound is a different clamp in a
+/// different module (`UserDefaultsPreferenceStore.clampedHandBack`, in minutes).
+///
+/// It is also what keeps this suite fast: `PendingQuestionTests` and
+/// `NotchControllerTests` observe a real answer timeout at 0.05s and 0.6s. A floor
+/// of 30 seconds would not make those tests slower, it would make them impossible.
+@Test func theFloorStaysAtTheWireLevelSoAShortDeadlineIsStillObservable() {
+    #expect(SocketClient.floorDeadline == 0.02)
+    #expect(SocketClient.clamped(0.05) == 0.05)
+    #expect(SocketClient.clamped(0.6) == 0.6)
+    #expect(SocketClient.clamped(0.001) == 0.02, "a value below the floor must still be a real timeout")
 }
 
 /// The mechanism, not just the constant: a server that never answers must

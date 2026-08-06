@@ -167,6 +167,81 @@ import Foundation
     }
 }
 
+// MARK: - the hand-back deadline (Plan 9, Task 7)
+
+@Test func aFreshStoreHandsBackAfterAMinuteRatherThanNever() {
+    // Ruling C: available, but not the default. A fresh install must hand the
+    // decision back, because measured, the terminal shows nothing at all while a
+    // hook is blocked — so a default of `Never` would look like a hung agent.
+    withFreshDefaults { defaults, prefix in
+        let loaded = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix).load()
+        #expect(loaded.handBackToTerminalAfter == 1.0)
+    }
+}
+
+/// **`Never` is carried by its own boolean key, and no number can mean it.**
+///
+/// `UserDefaults` cannot hold `nil`, so `Never` has to be distinguishable from
+/// "nobody ever wrote this key" some other way. A sentinel number would not be:
+/// `0` is exactly what a truncated, zeroed or hand-edited plist holds, and reading
+/// garbage as `Never` would hold a question — and the hook's thread — indefinitely,
+/// the one thing §2.3 forbids outright. So the flag is the only path to `Never`,
+/// and every number clamps to a real duration.
+///
+/// The second half is the assertion that fails if someone re-encodes this as a
+/// sentinel: `0` must come back as the floor, not as `nil`.
+@Test func neverRoundTripsAndNoGarbageNumberCanMeanIt() {
+    withFreshDefaults { defaults, prefix in
+        let store = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
+        var p = store.load()
+        p.handBackToTerminalAfter = nil
+        store.save(p)
+        #expect(store.load().handBackToTerminalAfter == nil, "Never did not survive the round trip")
+
+        // Switching back off Never must give a real duration again, not stay nil.
+        p.handBackToTerminalAfter = 12
+        store.save(p)
+        #expect(store.load().handBackToTerminalAfter == 12)
+
+        defaults.set(0.0, forKey: prefix + "handBackToTerminalAfter")
+        #expect(UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
+                    .load().handBackToTerminalAfter == 0.5,
+                "a zero in the plist read as Never — a garbage value must never park a hook forever")
+    }
+}
+
+/// The *person's* bound, which is not the wire's. `SocketClient.clamped` allows
+/// `0.02…3600` seconds because its only job is to reject the absurd; this one
+/// allows `0.5…60` **minutes**, because that is what a Settings control may offer.
+/// A plist is a file anything running as this user can edit, and Plan 6.7's row
+/// will write this key.
+@Test func anAbsurdHandBackInThePlistIsClampedToWhatAPersonCouldChoose() {
+    withFreshDefaults { defaults, prefix in
+        defaults.set(9999.0, forKey: prefix + "handBackToTerminalAfter")
+        #expect(UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
+                    .load().handBackToTerminalAfter == 60)
+        defaults.set(-4.0, forKey: prefix + "handBackToTerminalAfter")
+        #expect(UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
+                    .load().handBackToTerminalAfter == 0.5,
+                "a negative hand-back would hand back before the question was drawn")
+    }
+}
+
+@Test func aNonFiniteHandBackIsReplacedByTheDefaultRatherThanClampedToAnEdge() {
+    // Exactly `volume`'s NaN branch, for exactly the same reason: NaN fails every
+    // comparison, so `min(max(x, 0.5), 60)` passes it straight through and it
+    // becomes a `Date` arithmetic result of NaN downstream.
+    withFreshDefaults { defaults, prefix in
+        defaults.set(Double.nan, forKey: prefix + "handBackToTerminalAfter")
+        let m = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
+            .load().handBackToTerminalAfter
+        #expect(m == 1.0, "expected the default, got \(String(describing: m))")
+        defaults.set(Double.infinity, forKey: prefix + "handBackToTerminalAfter")
+        #expect(UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
+                    .load().handBackToTerminalAfter == 60)
+    }
+}
+
 @Test func anUnknownSelectedPageFallsBackToGeneralRatherThanOpeningNothing() {
     // A page key that no longer exists — a renamed pane, a hand-edited plist —
     // must not open a window with no pane selected.
@@ -250,7 +325,10 @@ private func withFreshDefaults(_ body: (UserDefaults, String) throws -> Void) re
                      "rightFlank", "coat",
                      "cardOptions.activity", "cardOptions.lastMessage", "cardOptions.tasks",
                      "cardOptions.agents", "cardOptions.subagents", "cardOptions.project",
-                     "cardOptions.worktree", "cardOptions.model", "cardOptions.effort"] {
+                     "cardOptions.worktree", "cardOptions.model", "cardOptions.effort",
+                     // Two keys for one field — `handBackNever` is how `Never` is told
+                     // apart from an absent key without a sentinel number. Plan 9 Task 7.
+                     "handBackToTerminalAfter", "handBackNever"] {
             defaults.removeObject(forKey: prefix + name)
         }
         defaults.synchronize()
@@ -371,7 +449,12 @@ private let sharedTestSuite = "vibecat.tests"
         // the simplest value that guarantees that is every flag flipped.
         cardOptions: SessionCardOptions(activity: false, lastMessage: false, tasks: false,
                                         agents: false, subagents: false, project: false,
-                                        worktree: false, model: false, effort: false))
+                                        worktree: false, model: false, effort: false),
+        // `nil`, not another number: `Never` is the value this field's two-key
+        // encoding can get wrong (see `neverRoundTripsAndNoGarbageNumberCanMeanIt`),
+        // and it differs from the `Optional(1.0)` default under
+        // `String(describing:)` just as well as a number would.
+        handBackToTerminalAfter: nil)
 
     withFreshDefaults { defaults, prefix in
         let store = UserDefaultsPreferenceStore(defaults: defaults, keyPrefix: prefix)
@@ -382,10 +465,11 @@ private let sharedTestSuite = "vibecat.tests"
             Mirror(reflecting: Preferences()).children.map { ($0.label ?? "?", String(describing: $0.value)) })
         let readChildren = Mirror(reflecting: read).children.map { ($0.label ?? "?", String(describing: $0.value)) }
 
-        // Was 12. Plan 6.6's Task 1 added `coat` and `cardOptions`, so this is
-        // the assertion the plan predicted would fail before any production
-        // code existed — it did, and updating the number is the fix.
-        #expect(readChildren.count == 15, "Preferences grew or shrank — update both round-trip tests")
+        // Was 12, then 15. Plan 6.6's Task 1 added `coat` and `cardOptions` and
+        // Plan 9's Task 7 added `handBackToTerminalAfter`, so this is the assertion
+        // each of those plans predicted would fail before any production code
+        // existed — it did, and updating the number is the fix.
+        #expect(readChildren.count == 16, "Preferences grew or shrank — update both round-trip tests")
         for (label, value) in readChildren {
             #expect(value != defaultChildren[label],
                     "`\(label)` came back as its default, so it is not persisted in both directions")

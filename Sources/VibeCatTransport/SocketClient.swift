@@ -15,6 +15,16 @@ public struct SocketClient: Sendable {
     /// Never zero: timeval{0,0} means "no timeout" to setsockopt, which would
     /// let a wedged app hang the terminal. Never negative: setsockopt rejects
     /// it and the socket silently keeps its default of no timeout.
+    /// **Stays at the wire level, deliberately, while the ceiling rose.** `timeval{0,0}`
+    /// means *no timeout at all* to `setsockopt` and a negative value is rejected
+    /// outright, so both ends of a hung terminal live just below this. The bound a
+    /// *person* may choose is a different clamp in a different module —
+    /// `UserDefaultsPreferenceStore.clampedHandBack`, in minutes.
+    ///
+    /// It is also what keeps the suite fast: `PendingQuestionTests` and
+    /// `NotchControllerTests` observe a real answer timeout at 0.05s and 0.6s. A floor
+    /// of "long enough for a person to read a sentence" would not make those tests
+    /// slower, it would make them impossible.
     static let floorDeadline: TimeInterval = 0.02
     /// Never unbounded: Int(deadline) traps on infinity and on overflow, and a
     /// hook that traps is a hook that failed closed.
@@ -24,7 +34,19 @@ public struct SocketClient: Sendable {
     /// in a different module and target, needs this bound to assert against
     /// directly rather than repeating the literal `60` as a second, driftable
     /// copy.
-    public static let ceilingDeadline: TimeInterval = 60
+    /// **Raised 60 → 3600 by Plan 9 Task 7, and the ceiling is a wire bound, not a
+    /// product one.** Its only job is to reject the absurd: `AppModel.ingest` decodes
+    /// `answerDeadline` off a `0600` socket reachable by anything running as this
+    /// user, and a value near `Int64.max` nanoseconds saturates `DispatchTime.now()
+    /// + …` into `.distantFuture`, parking a thread for the life of the process.
+    ///
+    /// An hour is now inside the range because the hand-back a person may choose is
+    /// expressed in **minutes** (`Preferences.handBackToTerminalAfter`, `0.5…60`) and
+    /// the top of that range is 3600 seconds. Against the old ceiling a chosen hour
+    /// would silently have become one minute.
+    ///
+    /// **The floor did not move with it** — see `floorDeadline`.
+    public static let ceilingDeadline: TimeInterval = 3600
 
     /// The one clamp, shared by every place a caller-supplied interval
     /// becomes a deadline: both `init` parameters, `sendExpectingReply`'s

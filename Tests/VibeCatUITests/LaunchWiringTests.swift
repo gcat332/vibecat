@@ -225,6 +225,16 @@ private func fixtureMetrics() -> ScreenMetrics {
         "coat": "NotchController.init → IslandModel.coat (IslandView already reads model.coat into ResolvedCat)",
         "cardOptions": "NotchController.init → IslandModel.cardOptions (SessionRow.Options(_:)) → " +
                         "IslandView's DrawerView(options:) → SessionListFace → SessionRow — Plan 6.6's Task 4",
+        // **Nothing reads this yet, and saying so is what this guard is for.** Plan 9's
+        // Task 7 added the field, the clamp and the `Never` encoding; Plan 6.7's
+        // Integrations row writes it and Plan 6.7's own Task 7 teaches `HookRunner` to
+        // read it, which today still uses `SocketClient.defaultAnswerDeadline`.
+        //
+        // The guard's own instruction is "either wire it up or record here what reads
+        // it", and this is the record. It has already done its job: it failed the moment
+        // the field existed and forced the gap to be stated rather than discovered later
+        // as a fourth persisted-but-never-read preference.
+        "handBackToTerminalAfter": "NOTHING YET — Plan 6.7 wires the Settings row and the hook's read",
     ]
 
     let fields = Mirror(reflecting: Preferences()).children.map { $0.label ?? "?" }
