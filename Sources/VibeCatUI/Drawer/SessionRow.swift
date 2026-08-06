@@ -333,6 +333,32 @@ struct SessionRow: View {
     /// `.rstate` carries the mockup's own `margin-left:auto` (line 354), so
     /// whatever sits after the `Spacer` and before it shares that same
     /// right-hand edge rather than displacing it.
+    ///
+    /// **Why this split is structural rather than gesture-priority-dependent.**
+    /// `.onTapGesture` here is scoped to `headline`'s own `HStack`; `ForEach
+    /// (questions)`/`SessionBlocks` are its *siblings* inside `body`'s outer
+    /// `VStack`, never its descendants. So a tap inside a question block has no
+    /// ancestor in common with this gesture to propagate through in the first
+    /// place — the header and every block simply do not share a container that
+    /// carries a jump gesture. That is a stronger guarantee than getting an
+    /// inner-consumes-outer priority right (which is what `dismissControl(for:)`
+    /// below still needs, since `Dismiss` *is* nested inside this same header).
+    ///
+    /// **Recorded rather than proven by test, and that gap is real.** This
+    /// project has no ViewInspector and cannot deliver a synthetic tap through a
+    /// headless render (`QuestionFaceTests.swift`'s own doc comment establishes
+    /// this), so every assertion in `RowHitRegionTests.swift` calls a private
+    /// method directly rather than rendering and tapping. Tried and confirmed:
+    /// attaching a second `.onTapGesture { headerTapped() }` to the whole row
+    /// (this file's own `.contentShape(Self.corner)`, matching the prototype's
+    /// undivided `.row`) leaves every test in that file green, because none of
+    /// them exercises where in the tree a gesture actually attaches — only
+    /// that the right closures call the right other closures. The sibling
+    /// structure above is what actually defends the live app against that
+    /// mutant; a reviewer moving this modifier onto the outer `VStack` is a
+    /// one-line, visually obvious diff, which is the check this repo accepts in
+    /// place of a test it cannot yet write (same reasoning `QuestionFaceTests`
+    /// gives for `QuestionFace.rows`/`.sendRow`'s own wiring).
     private var headline: some View {
         HStack(spacing: 10) {
             // `${card.project ? s.proj : s.term}` — a substitution, not a

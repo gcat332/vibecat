@@ -1657,6 +1657,58 @@ private final class ReplyBox: @unchecked Sendable {
     c.dismiss()
 }
 
+/// **The wiring `IslandModel.onDismiss` exists for, driven end to end.** Task 6's
+/// first round threaded `onDismiss` up through `SessionListFace`/`DrawerView`/
+/// `IslandView` to `IslandModel` and stopped there — `model.onDismiss` was `nil`
+/// in every real launch, so a tap on a row's `Dismiss` reached a control that
+/// looked finished and did nothing. `AppModel.dismissQuestion(id:)` already
+/// existed and worked; the missing piece was this file's own `present()` never
+/// assigning `model.onDismiss` the way it already assigns `model.onAnswer`.
+///
+/// **`#expect(m.questions.isEmpty)` alone would pass against a dismiss that only
+/// dropped the question from the list without lapsing it** — a hook released
+/// that way is not released at all, and it would ride out its own deadline for
+/// nothing, which is exactly the fail-open §2.3 exists to prevent. So this
+/// bounds the waiter's own wall clock from *below*, the same shape
+/// `escapeParksTheQuestionInsteadOfFailingItOpen` uses just above for the
+/// opposite claim: a genuinely released waiter returns long before its
+/// deadline; one merely dropped from a list rides it out in full.
+///
+/// Mutation-verified: commenting out this file's own `model.onDismiss = { ... }`
+/// line in `present()` makes `c.model.onDismiss` `nil`, so the call below is a
+/// silent no-op — `m.questions.isEmpty` and the elapsed-time bound both fail,
+/// and `await waiter.value` only returns once the full 0.6s deadline lapses it
+/// instead of this test's own release. Restored after.
+@MainActor @Test func dismissingFromTheRowActuallyReleasesTheHook() async throws {
+    let (c, m) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s",
+                          cwd: "/tmp/proj", choices: [Choice(id: "allow", label: "Allow")],
+                          wantsReply: true, answerDeadline: 0.6)
+    let start = Date()
+    let waiter = Task.detached { m.ingest(event) }
+    try await Task.sleep(for: .milliseconds(50))
+    m.parkQuestion()
+    c.render()
+    #expect(m.questions.first?.isParked == true, "setup: the question never actually parked")
+
+    // The exact closure a real tap on the row's `Dismiss` control calls — see
+    // `IslandView`'s own `DrawerView(onDismiss:)` wiring.
+    c.model.onDismiss?("q1")
+
+    #expect(m.questions.isEmpty, "the dismissed question stayed in AppModel.questions")
+    #expect(await waiter.value == nil,
+            "the hook received an answer it was never actually given")
+    #expect(Date().timeIntervalSince(start) < 0.3,
+            "Dismiss did not release the hook — it rode out its own 0.6s deadline instead")
+
+    let key = SessionKey(cli: "claude-code", session: "s")
+    c.render()
+    #expect(c.model.questions[key] == nil, "a dismissed question stayed in the rendered model too")
+    c.dismiss()
+}
+
 /// **The same `QuestionModel` instance across renders**, which is what makes a
 /// multi-select answer possible from the list at all: rebuilding it every render would
 /// discard `selected` on the first redraw after the first checkbox. `render()` runs on

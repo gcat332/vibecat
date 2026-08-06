@@ -109,13 +109,17 @@ import VibeCatCore
     /// see those types' own doc comments — and, like `onAnswer`, wiring for
     /// `@ObservationIgnored`: this is a callback, not content a view redraws for.
     ///
-    /// **Not yet wired by `NotchController`.** This plan's own Task 6 threads the
-    /// closure up to here and stops; `AppModel.dismissQuestion(id:)` exists for
-    /// whichever task wires `NotchController.present()` to it, the same
-    /// unwired-for-now shape `onOpenSettings` had between Plan 6.4's Task 4 and
-    /// Task 5. Unlike `SessionRow.onJump` — which this plan's own "Out of scope,
-    /// deliberately" table says stays uncalled for good — this one is meant to
-    /// end up wired; it just is not yet.
+    /// **Wired by `NotchController.present()`**, to `dismissQuestion(id:)`
+    /// there, mirroring `onAnswer`'s own line. This is *not* the same shape as
+    /// `SessionRow.onJump`, which stays uncalled on purpose: §13's jump has no
+    /// implementation anywhere yet, so a closure with no caller is an honest
+    /// placeholder for it. `AppModel.dismissQuestion(id:)` already exists and
+    /// does something, so an `onDismiss` left at `nil` would not be a
+    /// placeholder — it would be a control that looks finished and silently
+    /// does nothing, the exact defect this project has shipped three times
+    /// before (`Session.lastUserMessage`, three write-only preferences, Plan
+    /// 7's whole icon mechanism). Fixed after the first round of Task 6 review
+    /// caught it unwired.
     @ObservationIgnored
     public var onDismiss: (@MainActor (String) -> Void)?
 

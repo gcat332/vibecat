@@ -344,6 +344,16 @@ import VibeCatCore
         // number key are the same ending, so they go through the same method
         // rather than each remembering to release on its own.
         model.onAnswer = { [weak self] reply in self?.answer(reply) }
+        // Ruling B's `Dismiss` (Plan 9 Task 6), the fourth ending — a tap on a
+        // session row's header, for whichever question that row names. Wired
+        // here, unlike `SessionRow.onJump`: `onJump` has no implementation
+        // anywhere yet (§13's jump is a later plan's), so a closure with no
+        // caller is an honest placeholder for it. `dismissQuestion(id:)` below
+        // already exists and does something, so leaving `model.onDismiss` at
+        // `nil` would not be a placeholder — it would be a control that looks
+        // finished and silently does nothing, the exact defect this project
+        // has shipped three times before (see that method's own doc comment).
+        model.onDismiss = { [weak self] id in self?.dismissQuestion(id: id) }
         // The footer's mute button — see `toggleMute()` and
         // `onSoundEnabledChanged`'s own doc comments.
         model.onToggleMute = { [weak self] in self?.toggleMute() }
@@ -449,6 +459,7 @@ import VibeCatCore
         appModel.onQuestion = nil
         model.onIslandClick = nil
         model.onAnswer = nil
+        model.onDismiss = nil
         model.onToggleMute = nil
         bloomEnd?.cancel()
         bloomEnd = nil
@@ -669,6 +680,20 @@ import VibeCatCore
     /// directly, the same as `click()`/`setHovering(_:)`/`toggleMute()`.
     func answer(_ reply: Reply) {
         appModel.answer(reply)
+        releaseKeyStatus()
+    }
+
+    /// The fourth ending — Ruling B's `Dismiss`, wired to `model.onDismiss` in
+    /// `present()`. Same shape as `answer(_:)` above, deliberately mirrored
+    /// rather than special-cased: whichever question this names, parked or
+    /// (vanishingly unlikely, per `AppModel.dismissQuestion(id:)`'s own doc
+    /// comment) frontmost, giving it up is one of the ways a question ends,
+    /// and every one of them gives key status back the same way — a mouse tap
+    /// on a row's `Dismiss` is no different from a mouse tap on a choice.
+    ///
+    /// `internal`, not `private`: same reasoning as `answer(_:)`.
+    func dismissQuestion(id: String) {
+        appModel.dismissQuestion(id: id)
         releaseKeyStatus()
     }
 
