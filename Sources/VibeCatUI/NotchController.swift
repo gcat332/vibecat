@@ -890,7 +890,22 @@ import VibeCatCore
         // What Task 6 actually had to change was one thing, not two: nothing made
         // the panel key without a question, so a real Escape was never delivered
         // to the list at all. See `takeKeyStatusIfADrawerIsOpen`.
-        appModel.dismissQuestion()
+        // **Parks, since Plan 9 Task 4 — it used to dismiss.** The difference is
+        // whether the hook waiting on this question is released. Escape means "not
+        // now", and dismissing meant "never": the agent was let go, the CLI asked in
+        // its own terminal, and a question someone had merely glanced away from was
+        // gone. `parkQuestion()` keeps the hook waiting and leaves the question in
+        // `AppModel.questions`, where §11's list draws it.
+        //
+        // Everything the comment above says about one line closing *both* faces still
+        // holds, and now depends on `parkQuestion()` too: it deliberately carries no
+        // `guard let pending`, so a question-less Escape still reaches
+        // `clearQuestion()` and still closes the list. See that method's own comment.
+        //
+        // Giving up on purpose is the row header's `Dismiss` (Plan 9 ruling B), not a
+        // keystroke — the control carries the meaning (§10.2), and a hidden second
+        // Escape press would be the opposite of that rule.
+        appModel.parkQuestion()
         // The second of the three endings — see the lapse `Task`'s own comment
         // on why this is not folded into `setQuestion(nil)`. Since Task 6 it is
         // also the release for a closed session list, which is not one of the

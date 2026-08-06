@@ -388,9 +388,18 @@ import VibeCatTransport
     /// drawer that swapped a different question in under the cursor invites
     /// answering the wrong one by reflex, and choosing among several is what the
     /// session list is for.
+    /// **No `guard let pending else { return }`, and that absence is load-bearing.**
+    /// `NotchController.dismissOnEscape` routes Escape through here for *both* drawer
+    /// faces, and §11's session list has no question to park at all. It closes anyway
+    /// because `clearQuestion()` fires `onQuestion?(nil)` unconditionally, which
+    /// `setQuestion(_:)` turns into `model.drawerOpen = false`. Adding the obvious
+    /// guard would silently stop Escape closing the list —
+    /// `theSessionListTakesKeyStatusSoEscapeCanCloseIt` and
+    /// `parkingWithNoQuestionStillClosesTheDrawer` both fail on it. Same coupling
+    /// `dismissQuestion()` above already depends on, for the same reason, and it is
+    /// named in both places rather than in neither.
     @MainActor public func parkQuestion() {
-        guard let pending else { return }
-        pending.park()
+        pending?.park()
         clearQuestion()
     }
 

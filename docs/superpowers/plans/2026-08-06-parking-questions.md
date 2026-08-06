@@ -536,9 +536,19 @@ test; do not assume `waitingCount` or `badge` exist under those spellings.
 call, not the guard. Read `:836` and `:874`'s existing comments first — they
 explain why one line sufficed and that reasoning is about to stop holding.
 
-Collapsing the notch (mouse leave, outside click, whatever `:719-746` already
-routes) must park too, for the same reason: the person moved on, they did not
-answer.
+**Correction, made while implementing: there is no collapse-on-mouse-leave path to
+change.** This plan said `:719-746` routed one; it does not — that range is the
+`lapseCheck` `Task`. Grepped: exactly three things close the drawer, and
+`model.drawerOpen = false` appears once, inside `setQuestion(nil)`. The other two
+callers are this method and the expiry `Task`. Auto-collapse on mouse leave is a
+Plan 6.7 *preference* with nothing behind it yet (its declared-inert list), so
+there is nothing here to park from. **So Task 4 is Escape only.**
+
+**The expiry `Task` at `:737` is deliberately left calling `dismissQuestion()`.**
+That is the hand-back path, and ruling C changes what it should do — keep the
+question, do not forget it — together with the second block state that draws it.
+Both are Task 5's, so that they can be reviewed as one change rather than as a lone
+edit whose reason lives in another task.
 
 **The deliberate-dismiss path is a control, not a key** (ruling B), so it is
 Task 5's — not this task's. Nothing here dismisses anything: after this task,

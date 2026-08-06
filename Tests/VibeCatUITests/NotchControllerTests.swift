@@ -754,13 +754,22 @@ private let externalDisplay = ScreenMetrics(
     #expect(c.keyMonitorForTesting == nil, "dismiss() did not remove the local keyDown monitor")
 }
 
-/// Escape while the drawer is open dismisses the question without answering
-/// it. Driven directly through `dismissOnEscape`, the same way
-/// `QuestionFaceTests` calls `tapped(_:)` directly rather than through a
-/// synthesised `NSEvent` — there is no window server in `swift test`, and
-/// this is exactly what a real Escape `keyDown` would eventually call (see
-/// `present()`'s own local monitor installation).
-@MainActor @Test func escapeDismissesTheOpenDrawerWithoutAnswering() {
+/// Escape while the drawer is open closes it without answering. Driven directly
+/// through `dismissOnEscape`, the same way `QuestionFaceTests` calls `tapped(_:)`
+/// directly rather than through a synthesised `NSEvent` — there is no window server
+/// in `swift test`, and this is exactly what a real Escape `keyDown` would
+/// eventually call (see `present()`'s own local monitor installation).
+///
+/// **Renamed from `escapeDismissesTheOpenDrawerWithoutAnswering` in Plan 9 Task 4**,
+/// because "dismiss" now names the opposite action: the row header's `Dismiss`
+/// control releases the hook, and Escape specifically does not. What this test still
+/// proves is unchanged — the drawer closes, nothing is answered. It drives
+/// `setQuestion` directly, so `AppModel` holds no question and there is nothing here
+/// to park; the parking half is `escapeParksTheQuestionInsteadOfFailingItOpen`.
+///
+/// It is also one of four tests that fail if `parkQuestion()` gains a `guard let
+/// pending` — see that method's comment.
+@MainActor @Test func escapeClosesTheOpenDrawerWithoutAnsweringIt() {
     let c = makeController()
     c.setQuestion(aQuestion())
     c.click()
@@ -1553,4 +1562,69 @@ private final class ReplyBox: @unchecked Sendable {
     _ = m.ingest(VibeEvent(id: "e2", cli: "claude-code", kind: .running, session: "s", cwd: "/tmp/proj"))
     c.render()
     #expect(c.model.state == .running, "the island stayed amber after the agent moved on")
+}
+
+// MARK: - Escape parks (Plan 9 Task 4)
+
+/// **Escape used to fail a question open, and that was the behaviour, not a bug to
+/// route around.** `dismissOnEscape` called `appModel.dismissQuestion()`, which
+/// lapses: the agent is released, the CLI asks in its own terminal, and the question
+/// a person had merely glanced away from is gone. Escape now parks it.
+///
+/// The wall-clock bound from *below* is the assertion that matters, the same shape
+/// `parkingDoesNotReleaseTheWaitingHook` uses in `PendingQuestionTests`: a released
+/// waiter returns the instant Escape lands, a parked one only when its own deadline
+/// runs out. `#expect(isParked)` alone would pass against a `park()` that also
+/// lapsed.
+@MainActor @Test func escapeParksTheQuestionInsteadOfFailingItOpen() async throws {
+    let (c, m) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s",
+                          cwd: "/tmp/proj", choices: [Choice(id: "allow", label: "Allow")],
+                          wantsReply: true, answerDeadline: 0.6)
+    let start = Date()
+    let waiter = Task.detached { m.ingest(event) }
+    try await Task.sleep(for: .milliseconds(50))
+    c.click()
+    #expect(c.model.face == .question, "setup: the question never reached the drawer")
+
+    #expect(c.handleKeyDown(charactersIgnoringModifiers: "\u{1b}"),
+            "Escape must report the keystroke as handled while a question is open")
+    #expect(c.model.tier == .rest, "Escape did not close the drawer")
+    #expect(m.questions.count == 1, "Escape discarded the question")
+    #expect(m.questions.first?.isParked == true)
+    #expect(m.pending == nil)
+
+    // The hook is still blocked: it must ride out its own 0.6s deadline rather than
+    // being woken by the keystroke.
+    #expect(await waiter.value == nil)
+    #expect(Date().timeIntervalSince(start) > 0.5,
+            "Escape released the hook — the agent was answered by a keypress")
+    c.dismiss()
+}
+
+/// **The coupling `dismissOnEscape`'s own comment warns about, now load-bearing for
+/// a second method.** Escape closes §11's session list through the same call, because
+/// `clearQuestion()` fires `onQuestion?(nil)` unconditionally whether or not a
+/// question was there. So `parkQuestion()` cannot carry a `guard let pending else
+/// { return }` — with one, Escape would silently stop closing the list.
+///
+/// `theSessionListTakesKeyStatusSoEscapeCanCloseIt` above already fails on that
+/// mutation and is the real net. This test states the reason at the layer where the
+/// guard would be added, so the next person to reach for it finds the objection in
+/// `AppModel`'s own tests rather than only in a controller test three files away.
+@MainActor @Test func parkingWithNoQuestionStillClosesTheDrawer() {
+    let (c, m) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+    _ = m.ingest(VibeEvent(id: "e1", cli: "claude-code", kind: .running,
+                           session: "s", cwd: "/tmp/proj"))
+    c.click()
+    #expect(c.model.face == .sessionList, "setup: this must be the list, not a question")
+    #expect(c.model.tier != .rest, "setup: the drawer never opened")
+
+    m.parkQuestion()
+    #expect(c.model.tier == .rest, "parkQuestion() with nothing pending did not close the list")
+    c.dismiss()
 }
