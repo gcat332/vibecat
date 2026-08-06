@@ -74,6 +74,43 @@ public final class QuestionModel {
     }
 
     /// Only ever consulted for multi select — a single select has no Send.
+    /// **What a tap on a choice row means, in one place.** Returns a `Reply` if the tap
+    /// completes the answer, `nil` if it only changed state.
+    ///
+    /// Lifted out of `QuestionFace.tapped(_:)` when Plan 9 gave choice rows a second
+    /// drawing site: `QuestionBlock`, under a session's own row. Two copies of this
+    /// would be two places for §10.3's second ask to be forgotten, and a review that
+    /// flags verbatim duplication of a logic block would be right to.
+    ///
+    /// The order matters and is `QuestionFace`'s: a *re-tap* on an already-selected
+    /// permissive choice is the confirmation, and a tap on a different row is a fresh
+    /// pick that restarts it.
+    public func tap(_ id: String) -> Reply? {
+        if isMulti {
+            toggle(id)
+            return nil
+        }
+        if selected.contains(id) && needsConfirmation {
+            confirm()
+        } else {
+            pick(id)
+        }
+        return reply()
+    }
+
+    /// Multi select's own "the click is the answer" moment — checkboxes only toggle, so
+    /// this is the one gesture that can finish a multi-select answer. Same extraction
+    /// and same reason as `tap(_:)`.
+    ///
+    /// `canSend`'s guard here is redundant with `reply()`'s own `!selected.isEmpty`
+    /// (confirmed: deleting it alone changes no test's outcome) and is kept so a reader
+    /// sees "a disabled Send does nothing" without tracing into `reply()`.
+    public func send() -> Reply? {
+        guard canSend else { return nil }
+        if needsConfirmation { confirm() }
+        return reply()
+    }
+
     public var canSend: Bool { isMulti && !selected.isEmpty }
 
     public var tally: Int { selected.count }

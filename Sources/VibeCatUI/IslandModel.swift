@@ -164,6 +164,35 @@ import VibeCatCore
         }
     }
 
+    /// One outstanding question as a row draws it: the model that holds its selection,
+    /// plus whether its hook has already gone.
+    ///
+    /// **A pair rather than two parallel collections**, so the flag and the question it
+    /// describes cannot drift apart. `isHandedBack` is derived in `NotchController
+    /// .render()` from `PendingQuestion.hasLapsed(at:)` — the view has no clock and
+    /// should not grow one.
+    public struct RowQuestion: Identifiable, Sendable {
+        public let model: QuestionModel
+        public let isHandedBack: Bool
+        public var id: String { model.event.id }
+        public init(model: QuestionModel, isHandedBack: Bool) {
+            self.model = model
+            self.isHandedBack = isHandedBack
+        }
+    }
+
+    /// §11's rows draw these under themselves — Plan 9's whole point.
+    ///
+    /// Keyed by session because that is the question a row has to answer ("which of
+    /// these are mine?"), and a session can hold more than one: parallel tool calls each
+    /// fire their own hook. See `AppModel.questions`.
+    ///
+    /// **Set from `NotchController.render()`, which owns the `QuestionModel` cache.**
+    /// The models must be the *same instances* across renders or a half-made
+    /// multi-select selection is discarded by the next unrelated store change —
+    /// `aQuestionsSelectionSurvivesARerender` is the assertion.
+    public var questions: [SessionKey: [RowQuestion]] = [:]
+
     /// Which face the drawer shows. A pending question always wins: §4.2's own
     /// reasoning is that a waiting agent is idling on you *right now*, so a
     /// question must never be buried under a list.

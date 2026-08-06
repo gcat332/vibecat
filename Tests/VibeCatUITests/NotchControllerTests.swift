@@ -1628,3 +1628,86 @@ private final class ReplyBox: @unchecked Sendable {
     #expect(c.model.tier == .rest, "parkQuestion() with nothing pending did not close the list")
     c.dismiss()
 }
+
+/// **The wiring that closes Plan 9's regression.** Tasks 1–4 gave a question somewhere
+/// to live and a gesture to put it there; until this, nothing read
+/// `AppModel.questions`, so a parked question was invisible — worse than the
+/// fail-open it replaced, because the terminal was not prompting either.
+@MainActor @Test func aParkedQuestionReachesTheIslandModelUnderItsOwnSession() async throws {
+    let (c, m) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "alpha",
+                          cwd: "/tmp/proj", choices: [Choice(id: "allow", label: "Allow")],
+                          wantsReply: true, answerDeadline: 5)
+    let waiter = Task.detached { m.ingest(event) }
+    try await Task.sleep(for: .milliseconds(50))
+    m.parkQuestion()
+    c.render()
+
+    let key = SessionKey(cli: "claude-code", session: "alpha")
+    let rowQuestions = try #require(c.model.questions[key], "the parked question never reached the model")
+    #expect(rowQuestions.count == 1)
+    #expect(rowQuestions[0].isHandedBack == false, "a parked question is answerable, not handed back")
+
+    m.answer(Reply(id: "q1", choice: "allow"))
+    _ = await waiter.value
+    c.render()
+    #expect(c.model.questions[key] == nil, "an answered question stayed in the list")
+    c.dismiss()
+}
+
+/// **The same `QuestionModel` instance across renders**, which is what makes a
+/// multi-select answer possible from the list at all: rebuilding it every render would
+/// discard `selected` on the first redraw after the first checkbox. `render()` runs on
+/// every store change, so this is not a hypothetical.
+@MainActor @Test func aQuestionsSelectionSurvivesARerender() async throws {
+    let (c, m) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "alpha",
+                          cwd: "/tmp/proj",
+                          choices: [Choice(id: "a", label: "A"), Choice(id: "b", label: "B")],
+                          multi: true, wantsReply: true, answerDeadline: 5)
+    let waiter = Task.detached { m.ingest(event) }
+    try await Task.sleep(for: .milliseconds(50))
+    m.parkQuestion()
+    c.render()
+
+    let key = SessionKey(cli: "claude-code", session: "alpha")
+    let model = try #require(c.model.questions[key]?.first?.model)
+    _ = model.tap("a")
+    #expect(model.selected == ["a"])
+
+    // A second, unrelated event forces a re-render.
+    _ = m.ingest(VibeEvent(id: "e2", cli: "claude-code", kind: .running, session: "beta", cwd: "/tmp/b"))
+    c.render()
+    let again = try #require(c.model.questions[key]?.first?.model)
+    #expect(again === model, "the model was rebuilt, so a half-made selection was discarded")
+    #expect(again.selected == ["a"])
+
+    m.answer(Reply(id: "q1", choices: ["a"]))
+    _ = await waiter.value
+    c.dismiss()
+}
+
+/// A handed-back question reaches the model too, flagged, so the row can draw the
+/// state that has no controls in it.
+@MainActor @Test func aHandedBackQuestionReachesTheModelFlagged() async throws {
+    let (c, m) = controller { mbp14 }
+    c.refreshGeometry()
+    c.present()
+    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "alpha",
+                          cwd: "/tmp/proj", choices: [Choice(id: "allow", label: "Allow")],
+                          wantsReply: true, answerDeadline: 0.05)
+    let waiter = Task.detached { m.ingest(event) }
+    _ = await waiter.value                          // let the hook time out
+    m.handBackQuestion()
+    c.render()
+
+    let key = SessionKey(cli: "claude-code", session: "alpha")
+    let rowQuestions = try #require(c.model.questions[key])
+    #expect(rowQuestions.count == 1)
+    #expect(rowQuestions[0].isHandedBack, "the block would draw choices for a hook that is gone")
+    c.dismiss()
+}

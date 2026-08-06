@@ -72,9 +72,10 @@ struct QuestionBlock: View {
     /// that could disagree — see `handedBackTo`'s use below.
     var isHandedBack: Bool = false
     var handedBackTo: String?
-    /// Fires with a choice's id. Defaulted so a rendering-only test or preview keeps
-    /// compiling; `SessionRow` passes a real one.
-    var onPick: (String) -> Void = { _ in }
+    /// Fires with the `Reply` a tap actually produced — never for a tap that only
+    /// picks, toggles, or triggers §10.3's second ask. Defaulted so a rendering-only
+    /// test or preview keeps compiling; `SessionRow` passes a real one.
+    var onAnswer: (Reply) -> Void = { _ in }
 
     /// The category label, matching `Tasks`/`Agents`' grammar rather than restating
     /// the row's own `Needs you`.
@@ -105,6 +106,22 @@ struct QuestionBlock: View {
                 handedBackLine
             } else {
                 choices
+                // §10.3, and it is not optional here. A parked question is *more*
+                // likely to be answered inattentively than one a person just opened,
+                // not less, so the destructive second ask has to bind at this drawing
+                // site too. The text is `QuestionFace.confirmationBannerText` rather
+                // than a second string: one wording, and §10.3's own copy lives with
+                // the rule.
+                if question.needsConfirmation {
+                    Text(QuestionFace.confirmationBannerText(isMulti: question.isMulti))
+                        .font(.system(size: 11))
+                        .foregroundStyle(accent)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 3)
+                }
+                if question.isMulti {
+                    sendRow
+                }
             }
         }
     }
@@ -157,9 +174,58 @@ struct QuestionBlock: View {
                           isSelected: question.selected.contains(choice.id),
                           isRecommended: false,
                           accent: accent,
-                          onTap: { onPick(choice.id) })
+                          onTap: {
+                              // `QuestionModel.tap(_:)`, not a second copy of the tap
+                              // semantics — see that method's own comment on why it was
+                              // lifted out of `QuestionFace` when this view appeared.
+                              if let reply = question.tap(choice.id) { onAnswer(reply) }
+                          })
             }
         }
+    }
+
+    /// §10.2: "Send is disabled at zero", and disabled has to look disabled. Compact
+    /// rather than `QuestionFace.sendRow`'s capsule: that one is a call-to-action filling
+    /// a 288pt face, and the same treatment inside a nested block in a scrolling list
+    /// would be the loudest thing on the page — §10.1's argument against a filled
+    /// recommendation, applied to a button.
+    ///
+    /// **A written divergence from the face, not an accident.** The two send controls now
+    /// look different, and the reason is that they sit in different amounts of space.
+    private var sendRow: some View {
+        HStack(spacing: 8) {
+            Text("\(question.tally) selected")
+                .font(.system(size: 10.5))
+                .foregroundStyle(Color(hazeColour))
+            Spacer(minLength: 0)
+            Text("Send")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(question.canSend ? accent : Color(dimColour))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(question.canSend ? accent : Color(dimColour), lineWidth: 1)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .onTapGesture {
+                    if let reply = question.send() { onAnswer(reply) }
+                }
+        }
+        .padding(.top, 5)
+    }
+
+    /// Invokes exactly what a tap on a choice row does, for tests — this project has no
+    /// ViewInspector and nothing headless can prove which closure a real
+    /// `.onTapGesture` is bound to. Same shape and same reasoning as
+    /// `SettingsButton.actionForTesting`. No production behaviour is exposed that a
+    /// release build lacks.
+    func tapForTesting(_ id: String) {
+        if let reply = question.tap(id) { onAnswer(reply) }
+    }
+
+    func sendForTesting() {
+        if let reply = question.send() { onAnswer(reply) }
     }
 }
 

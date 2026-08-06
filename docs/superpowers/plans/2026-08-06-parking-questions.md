@@ -580,6 +580,24 @@ Escape parks and only parks.
 
 ### Task 5: `QuestionBlock` — the question under its own row
 
+> **Done, in four commits.** `RBlock`/`RBlockHeader` extracted so the container's
+> metrics have one home; `QuestionBlock` with ruling C's two states;
+> `handBackQuestion()` plus `prune`'s new rule; then the wiring
+> `AppModel.questions` → `IslandModel.questions` → `SessionRow` → `QuestionBlock`.
+>
+> **Two more plan overstatements found while implementing.**
+> `DrawerFace.sessionList`'s 420pt does **not** need to become a floor —
+> `SessionListFace` already scrolls, so a taller row scrolls inside a fixed drawer
+> and `IslandGeometry` is untouched. And the answering semantics did not need
+> duplicating: `QuestionModel.tap(_:)`/`send()` were lifted out of `QuestionFace`
+> so both views share one implementation, which is what keeps §10.3's second ask
+> from being forgotten in one of them.
+>
+> **`QuestionModel` instances are cached in `NotchController`, by question id.**
+> Rebuilding them per `render()` would discard a half-made multi-select selection
+> on the next unrelated store change, and `render()` runs on every store change.
+> `aQuestionsSelectionSurvivesARerender` asserts identity with `===`.
+
 **Files:**
 - Create: `Sources/VibeCatUI/Drawer/QuestionBlock.swift`
 - Test: `Tests/VibeCatUITests/Drawer/QuestionBlockTests.swift`

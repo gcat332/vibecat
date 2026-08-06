@@ -873,3 +873,86 @@ private let iconMagenta = RGBA(r: 1, g: 0, b: 1)
     #expect(withIcon.height == withMark.height,
             "a row drawing a real icon rendered \(withIcon.height)pt tall against \(withMark.height)pt for the geometric mark — an icon taller than the mark grew the row")
 }
+
+// MARK: - a question under the row (Plan 9 Task 5)
+
+@MainActor private func rowQuestion(_ id: String = "q1", handedBack: Bool = false,
+                                    multi: Bool = false) -> IslandModel.RowQuestion {
+    IslandModel.RowQuestion(
+        model: QuestionModel(event: VibeEvent(
+            id: id, cli: "claude-code", kind: .permission, session: "s", cwd: "/tmp/proj",
+            title: "Allow this command?", body: "rm -rf build/",
+            choices: [Choice(id: "allow", label: "Allow once"), Choice(id: "deny", label: "Deny")],
+            multi: multi, wantsReply: true)),
+        isHandedBack: handedBack)
+}
+
+/// **The assertion that closes Plan 9's regression, at the pixel level.** Tasks 1–4
+/// gave a question somewhere to live and a gesture to put it there; if the row does not
+/// actually draw it, a parked question is invisible — worse than the fail-open it
+/// replaced, because the terminal is not prompting either.
+///
+/// This project has shipped "built but never populated" three times —
+/// `Session.lastUserMessage`, three write-only preferences, and Plan 7's whole icon
+/// mechanism — so a render, not a property read: a `ForEach` over an empty default is
+/// exactly what a broken wiring looks like from the outside.
+@MainActor @Test func aQuestionForThisSessionIsDrawnUnderIt() throws {
+    let s = session(.permission)
+    let without = try rasterise(SessionRow(session: s, now: t0, options: .all)
+        .frame(width: 388))
+    let with = try rasterise(SessionRow(session: s, now: t0, options: .all,
+                                        questions: [rowQuestion()])
+        .frame(width: 388))
+    #expect(with.height > without.height, "the row drew nothing for its own question")
+}
+
+/// A question belonging to *this* row only. `SessionListFace` keys by `SessionKey` and
+/// hands each row its own slice, so a row is never given someone else's — but the row
+/// draws whatever it is handed, and this pins that two questions produce two blocks
+/// rather than one being silently dropped by a `first`.
+@MainActor @Test func twoQuestionsForOneSessionDrawTwoBlocks() throws {
+    let s = session(.permission)
+    let one = try rasterise(SessionRow(session: s, now: t0, options: .all,
+                                       questions: [rowQuestion("q1")]).frame(width: 388))
+    let two = try rasterise(SessionRow(session: s, now: t0, options: .all,
+                                       questions: [rowQuestion("q1"), rowQuestion("q2")])
+        .frame(width: 388))
+    #expect(two.height > one.height, "a second question for the same session was dropped")
+}
+
+/// Ruling C's two states reach the row, not just `QuestionBlock`'s own tests: the flag
+/// has to survive being threaded through `IslandModel.RowQuestion` and `SessionRow`.
+@MainActor @Test func theHandedBackFlagSurvivesBeingThreadedToTheRow() throws {
+    let s = session(.permission)
+    let answerable = try rasterise(SessionRow(session: s, now: t0, options: .all,
+                                              questions: [rowQuestion(handedBack: false)])
+        .frame(width: 388))
+    let handedBack = try rasterise(SessionRow(session: s, now: t0, options: .all,
+                                              questions: [rowQuestion(handedBack: true)])
+        .frame(width: 388))
+    #expect(handedBack.height < answerable.height,
+            "the row drew choices for a question whose hook had gone")
+}
+
+/// **§4.2, at this drawing site.** A question block gets no hue of its own — it is
+/// tinted by the row's accent, and `SessionRow.accent` is derived from the session's
+/// own state, not passed in.
+///
+/// `differingPixelCount` would be trivially satisfied here, because changing the state
+/// also changes the state label and the pip. The assertion that means something is the
+/// *absence*: a `.failed` row must contain no amber anywhere, which a `QuestionBlock`
+/// with a hardcoded waiting accent could not manage.
+@MainActor @Test func theQuestionBlockTakesItsTintFromTheRowsStateAndHasNoHueOfItsOwn() throws {
+    let waiting = try rasterise(SessionRow(session: session(.permission), now: t0,
+                                           options: .all, questions: [rowQuestion()])
+        .frame(width: 388))
+    let failed = try rasterise(SessionRow(session: session(.failed), now: t0,
+                                          options: .all, questions: [rowQuestion()])
+        .frame(width: 388))
+    #expect(waiting.pixelCount(near: IslandState.waiting.accent) > 0,
+            "setup: a waiting row should be drawing amber somewhere")
+    #expect(failed.pixelCount(near: IslandState.waiting.accent) == 0,
+            "a failed row drew the waiting accent — the block has a hue of its own")
+    #expect(failed.pixelCount(near: IslandState.failed.accent) > 0,
+            "the block was not tinted by the row's own state")
+}

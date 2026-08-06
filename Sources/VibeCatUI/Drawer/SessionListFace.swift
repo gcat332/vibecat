@@ -25,6 +25,12 @@ import VibeCatCore
 /// (`LaunchWiringTests`) drives that whole path end to end and checks a
 /// rendered pixel, not just that the property changed.
 struct SessionListFace: View {
+    /// Plan 9's parked and handed-back questions, keyed the way `IslandModel` publishes
+    /// them. Defaulted so `HookLoopProbe` and every golden keeps compiling and rendering
+    /// unchanged.
+    var questions: [SessionKey: [IslandModel.RowQuestion]] = [:]
+    var onAnswer: (Reply) -> Void = { _ in }
+
     let sessions: [Session]
     /// Forwarded straight to every `SessionRow`. Defaulted to `.all` so the
     /// existing call sites in this file's own tests, none of which cares about
@@ -128,7 +134,9 @@ struct SessionListFace: View {
             // at once.
             VStack(alignment: .leading, spacing: 1) {
                 ForEach(sessions) { session in
-                    SessionRow(session: session, now: now, options: options)
+                    SessionRow(session: session, now: now, options: options,
+                               questions: questions[session.id] ?? [],
+                               onAnswer: onAnswer)
                 }
             }
             .padding(.top, 2)

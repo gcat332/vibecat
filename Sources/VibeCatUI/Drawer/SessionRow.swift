@@ -133,6 +133,13 @@ struct SessionRow: View {
     /// as line 1's leading field when `.project` is off.
     private var terminalName: String? { session.origin.app.map(originName) }
 
+    /// The outstanding questions for *this* session — Plan 9. Defaulted so every
+    /// existing call site (goldens, previews, `HookLoopProbe`) keeps compiling and
+    /// keeps rendering exactly what it rendered before.
+    var questions: [IslandModel.RowQuestion] = []
+    /// Fires with the `Reply` a tap in one of those blocks produced.
+    var onAnswer: (Reply) -> Void = { _ in }
+
     var body: some View {
         // The mark sits *outside* the three lines and they indent past it —
         // `.row{display:flex;align-items:flex-start;gap:10px}` with
@@ -184,6 +191,20 @@ struct SessionRow: View {
                 secondLine
                 if options.contains(.lastMessage), let asked = session.lastUserMessage {
                     lastMessageLine(asked)
+                }
+                // **Before `SessionBlocks`, deliberately.** §4.2's own reasoning is
+                // that a waiting agent is idling on you *right now*, so a question
+                // must never be buried under a list — and Tasks and Agents are
+                // exactly that list. The mockup gives no ordering for a question
+                // block because it never rendered one (`island-motion.html:832`
+                // anticipates it in a comment), so this is a decision, not a
+                // reading.
+                ForEach(questions) { row in
+                    QuestionBlock(question: row.model,
+                                  accent: accent,
+                                  isHandedBack: row.isHandedBack,
+                                  handedBackTo: terminalName,
+                                  onAnswer: onAnswer)
                 }
                 SessionBlocks(session: session, options: options)
             }

@@ -23,6 +23,10 @@ struct DrawerView: View {
     /// reason `sessions` is: every existing call site keeps compiling and
     /// rendering exactly as it always has.
     var options: SessionRow.Options = .all
+    /// Plan 9's parked and handed-back questions, for §11's rows to draw under
+    /// themselves. Defaulted for the same reason `sessions` is: every golden and preview
+    /// that predates this keeps rendering exactly what it rendered before.
+    var rowQuestions: [SessionKey: [IslandModel.RowQuestion]] = [:]
     let accent: RGBA
     let width: CGFloat
     /// The bottom corner radius, `IslandGeometry.openBottomRadius` (20) in
@@ -140,7 +144,8 @@ struct DrawerView: View {
                             QuestionFace(question: question, accent: accentColor, onAnswer: onAnswer)
                                 .transition(.faceCrossfade)
                         } else {
-                            SessionListFace(sessions: sessions, options: options)
+                            SessionListFace(questions: rowQuestions, onAnswer: onAnswer,
+                                            sessions: sessions, options: options)
                                 .transition(.faceCrossfade)
                         }
                     }

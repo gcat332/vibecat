@@ -199,17 +199,12 @@ struct QuestionFace: View {
     /// `QuestionFaceTests` calls directly to verify tap semantics without a
     /// real gesture — see that file's own doc comment on why a synthesised
     /// `NSEvent` cannot reach a SwiftUI `.onTapGesture` in this test suite.
+    /// **The semantics moved to `QuestionModel.tap(_:)` in Plan 9**, when
+    /// `QuestionBlock` became a second view drawing choice rows. This stays as the entry
+    /// point this file's tests drive; what it decides is now one implementation shared
+    /// by both, so §10.3's second ask cannot be forgotten in one of them.
     func tapped(_ id: String) {
-        if question.isMulti {
-            question.toggle(id)
-            return
-        }
-        if question.selected.contains(id) && question.needsConfirmation {
-            question.confirm()
-        } else {
-            question.pick(id)
-        }
-        if let reply = question.reply() {
+        if let reply = question.tap(id) {
             onAnswer(reply)
         }
     }
@@ -225,11 +220,7 @@ struct QuestionFace: View {
         // for multi select (deleting this line alone changes no test's
         // outcome) — kept anyway so a reader sees "disabled Send does
         // nothing" here directly, without tracing into reply()'s internals.
-        guard question.canSend else { return }
-        if question.needsConfirmation {
-            question.confirm()
-        }
-        if let reply = question.reply() {
+        if let reply = question.send() {
             onAnswer(reply)
         }
     }

@@ -993,12 +993,50 @@ import VibeCatCore
         return answerOnNumberKey(charactersIgnoringModifiers: charactersIgnoringModifiers)
     }
 
+    /// One `QuestionModel` per outstanding question, by question id.
+    ///
+    /// **A cache, because identity is the requirement.** `QuestionModel` holds
+    /// `selected`, `isWritingOther` and `isConfirming`; rebuilding one on every
+    /// `render()` would discard a half-made multi-select selection the first time any
+    /// unrelated session changed state, and `render()` runs on every store change. Kept
+    /// here rather than in `IslandModel` because this is wiring — the model publishes
+    /// what a view reads, it does not own a lifecycle.
+    private var rowQuestionModels: [String: QuestionModel] = [:]
+
+    /// Rebuilds `model.questions` from `appModel.questions`, reusing each question's
+    /// existing `QuestionModel` and dropping the ones whose questions have gone.
+    ///
+    /// `isHandedBack` is computed here, from `PendingQuestion.hasLapsed(at:)`: a settled
+    /// question still in `AppModel.questions` means the terminal has it now (see
+    /// `AppModel.handBackQuestion`). The view gets a flag rather than a clock.
+    ///
+    /// **Not guarded on "did anything change".** Unlike `model.state` and friends this
+    /// writes a dictionary every render, which `@Observable` notifies on regardless —
+    /// but `render()` is only called from `reflow()`, which itself only runs on a real
+    /// change, so the guard would sit inside something already guarded. `sessions` above
+    /// is assigned the same way and for the same reason.
+    @MainActor private func syncRowQuestions() {
+        let now = Date()
+        var models: [String: QuestionModel] = [:]
+        var bySession: [SessionKey: [IslandModel.RowQuestion]] = [:]
+        for pending in appModel.questions {
+            let existing = rowQuestionModels[pending.id] ?? QuestionModel(event: pending.event)
+            models[pending.id] = existing
+            let key = SessionKey(cli: pending.event.cli, session: pending.event.session)
+            bySession[key, default: []].append(
+                IslandModel.RowQuestion(model: existing, isHandedBack: pending.hasLapsed(at: now)))
+        }
+        rowQuestionModels = models
+        model.questions = bySession
+    }
+
     /// `internal`, not `private`: `anIdenticalEventDoesNotRewriteTheModel` drives
     /// this directly, the same way this file's tests already drive `click()` and
     /// `setHovering(_:)` — there is no window server in `swift test`, so a render
     /// triggered any other way cannot be observed.
     func render() {
         let now = Date()
+        syncRowQuestions()
         model.state = appModel.islandState
         model.sessionCount = appModel.sessionCount
         // The reveal names the same session the island's own state summary is
