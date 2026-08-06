@@ -67,10 +67,33 @@ Three ways out, and a recommendation:
   the prototype pixel for pixel and lies to the user.
 - **(c) Draw the switch and wire it.** Matches the prototype and breaks §2.3.
 
-**Recommended: (a).** The prototype is the authority on appearance; §2.3 is a
-Global Constraint, and where they collide the constraint wins and the divergence
-gets written down. That is this repo's own stated rule for a prototype
-divergence: a fix or a written decision, never a silent third thing.
+**Recommended: (a)** — and read this paragraph before ruling, because it is the
+deciding fact and it is not obvious from the prototype's caption.
+
+**Fail open here means "hand the decision back to the terminal", not "allow
+it".** `HookRunner.run` returns `nil` on every failure path — dead socket, slow
+reply, crossed id, bad JSON (`HookRunner.swift:28-51`) — and `nil` means the hook
+prints nothing at all. With no `permissionDecision` on stdout, claude-code does
+what it did before VibeCat existed: it prompts in the terminal. Nothing is
+auto-approved and no destructive command slips past unattended.
+
+That kills the only argument for the switch. The plausible case for wanting it
+off is *"VibeCat is my gate on dangerous commands; if it crashes I don't want
+`rm -rf` waved through"* — which would be right if fail-open answered `allow`.
+It does not answer at all. So turning this off protects nothing; the only thing
+it can accomplish is hanging a terminal, which is the one outcome §2.3 exists to
+make impossible.
+
+**The prototype's caption is therefore half wrong**, and the divergence record
+should say so: *"A crashed island must never be able to hang your terminal"* is
+correct, and *"Turning this off is not recommended"* is not — there is nothing to
+recommend for or against, because the alternative has no benefit to trade
+against its cost.
+
+The prototype is the authority on appearance; §2.3 is a Global Constraint, and
+where they collide the constraint wins and the divergence gets written down. That
+is this repo's own stated rule for a prototype divergence: a fix or a written
+decision, never a silent third thing.
 
 **2. `Hook reply timeout` (`settings.html:290-292`) exposes a deadline to a text
 field.** The prototype's field holds `300` with a `ms` suffix, which is the
