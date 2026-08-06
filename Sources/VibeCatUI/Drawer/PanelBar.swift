@@ -138,7 +138,7 @@ private struct GearIcon: View {
     var body: some View {
         ZStack {
             GearRingShape().stroke(Color(hazeColour), style: StrokeStyle(lineWidth: 1.7))
-            GearSpokesShape().stroke(Color(hazeColour), style: StrokeStyle(lineWidth: 1.7, lineCap: .round))
+            GearToothShape().stroke(Color(hazeColour), style: StrokeStyle(lineWidth: 1.7, lineCap: .round))
         }
     }
 }
@@ -223,21 +223,39 @@ struct SlashShape: Shape {
 }
 
 /// `<circle cx="12" cy="12" r="3.1"/>` — the gear's hub.
-private struct GearRingShape: Shape {
+/// **A written divergence from the prototype, and the prototype is the one that is
+/// wrong.** `island-motion.html:526-527` draws `#pgear` as a `r=3.1` circle plus eight
+/// *detached* radial ticks — which is the classic **brightness** glyph, not a gear. A
+/// gear's teeth are attached to a ring; ticks floating around a small hub read as rays.
+/// The owner looked at the running app and called it a brightness icon before knowing
+/// what the SVG said, which is the whole evidence needed.
+///
+/// §10.2's rule is that the control carries the meaning, so a Settings button that reads
+/// as "adjust screen brightness" has lost the only job the glyph has. **Fixed rather
+/// than reproduced**, and the fix is minimal: the ticks already run from `r 8.80` to
+/// `r 6.50` (measured off the prototype's own path data), so adding the ring they should
+/// have been attached to at `6.5` turns rays into teeth and changes nothing else. The
+/// hub stays at the prototype's `3.1`.
+struct GearRingShape: Shape {
     func path(in rect: CGRect) -> Path {
         let s = rect.width / 24
+        let centre = svgPoint(12, 12, in: rect)
         var p = Path()
-        p.addEllipse(in: CGRect(center: svgPoint(12, 12, in: rect), radius: 3.1 * s))
+        p.addEllipse(in: CGRect(center: centre, radius: 3.1 * s))
+        // The tooth root. `6.5` is where every tick in `GearSpokesShape` ends, so the
+        // teeth meet it exactly rather than hovering a fraction clear of it.
+        p.addEllipse(in: CGRect(center: centre, radius: 6.5 * s))
         return p
     }
 }
 
-/// The gear's eight spokes, `island-motion.html:526-527`:
+/// The gear's eight **teeth** — `island-motion.html:526-527` calls them nothing, and
+/// they were `spokes` here until they gained the ring that makes them teeth:
 /// `M12 3.2v2.3M12 18.5v2.3M20.8 12h-2.3M5.5 12H3.2M18.2 5.8l-1.6 1.6M7.4
 /// 16.6l-1.6 1.6M18.2 18.2l-1.6-1.6M7.4 7.4 5.8 5.8` — four cardinal, four
 /// diagonal, each its own `moveTo`/`lineTo` pair the way the source SVG
 /// draws four independent subpaths sharing one `<path>` element.
-private struct GearSpokesShape: Shape {
+struct GearToothShape: Shape {
     func path(in rect: CGRect) -> Path {
         let spokes: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
             (12, 3.2, 12, 5.5),

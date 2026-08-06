@@ -298,3 +298,39 @@ struct PanelBarTests {
     }
 }
 
+/// **The Settings glyph is a gear, and it was not until the owner said so.**
+///
+/// `island-motion.html:526-527` draws `#pgear` as an `r=3.1` circle plus eight *detached*
+/// radial ticks — the classic brightness glyph. We reproduced it faithfully, and the
+/// owner opened the running app and called it a brightness icon without having seen the
+/// SVG. §10.2's rule is that the control carries the meaning, so a Settings button that
+/// reads as "adjust brightness" has lost its only job; the divergence is recorded on
+/// `GearRingShape`.
+///
+/// **Nothing tested this shape before**, which is how a rays-not-teeth glyph survived
+/// four plans. What makes teeth teeth is the ring they attach to, so that is the
+/// assertion: the ring must paint ink at the radius where every tooth ends. Derived from
+/// the path data rather than eyeballed — the ticks run `r 8.80 → 6.50`, so `6.5` is the
+/// tooth root and a point on it must be inked.
+@MainActor @Test func theSettingsGlyphHasARingItsTeethAttachTo() throws {
+    let side: CGFloat = 16, scale: CGFloat = 8
+    let ring = try rasterise(GearRingShape().stroke(Color.white, lineWidth: 1.7)
+        .frame(width: side, height: side), scale: scale)
+
+    // The tooth root, in the SVG's 24-unit space mapped into the raster.
+    let unit = Double(ring.width) / 24
+    let cx = 12.0 * unit, cy = 12.0 * unit
+    func inked(atRadius r: Double) -> Bool {
+        // Straight up from the centre, where a tooth also sits — so this cannot pass on
+        // some unrelated stroke elsewhere in the glyph.
+        let y = Int((cy - r * unit).rounded())
+        let x = Int(cx.rounded())
+        for dx in -2...2 where ring[min(max(0, x + dx), ring.width - 1), min(max(0, y), ring.height - 1)].a > 128 {
+            return true
+        }
+        return false
+    }
+    #expect(inked(atRadius: 6.5), "no ring at the tooth root — the teeth are detached rays, not a gear")
+    #expect(inked(atRadius: 3.1), "the hub the prototype does specify is missing")
+    #expect(!inked(atRadius: 5.0), "ink between the hub and the tooth root — the ring is filled, not stroked")
+}

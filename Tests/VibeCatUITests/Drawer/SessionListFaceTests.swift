@@ -227,3 +227,45 @@ private func inkDistance(_ r: Raster, row y: Int, from x0: Int, to x1: Int) -> I
     #expect(model.face == .question,
             "a pending question was buried under the session list")
 }
+
+/// **The whole list at its real size, with parked questions in it** — what no assertion
+/// in this file can judge: whether a row carrying a question still *reads* beside rows
+/// that do not.
+///
+/// `rasteriseHosted`, because `ImageRenderer` paints nothing for a `ScrollView` (see this
+/// file's own note above), and at `DrawerFace.sessionList`'s real 560×420 so the fold
+/// lands where it really lands.
+///
+///     VIBECAT_LIST_SHEET=/tmp/list.png Scripts/test.sh --filter listSheet
+@Test(.enabled(if: ProcessInfo.processInfo.environment["VIBECAT_LIST_SHEET"] != nil))
+@MainActor func listSheet() throws {
+    let out = try #require(ProcessInfo.processInfo.environment["VIBECAT_LIST_SHEET"])
+    let width = DrawerFace.sessionList.width
+    let height = DrawerFace.sessionList.height
+
+    var sessions = sessionsOf(4)
+    // Two of the four are waiting on an answer, which is the case the layout had to be
+    // rebalanced for — one used to fill the page on its own at 406pt.
+    var questions: [SessionKey: [IslandModel.RowQuestion]] = [:]
+    for i in [0, 2] {
+        let e = VibeEvent(id: "q\(i)", cli: "claude-code", kind: .permission,
+                          session: sessions[i].id.session, cwd: "/tmp/p\(i)",
+                          title: "Allow this command?",
+                          body: "rm -rf /Users/dev/projects/vibecat/.build/debug/ModuleCache/tmp",
+                          choices: [Choice(id: "allow", label: "Allow once"),
+                                    Choice(id: "always", label: "Allow every Bash call this session"),
+                                    Choice(id: "deny", label: "Deny")],
+                          wantsReply: true)
+        questions[sessions[i].id] = [
+            IslandModel.RowQuestion(model: QuestionModel(event: e),
+                                    // The second one handed back, so both block states
+                                    // appear side by side in one sheet.
+                                    isHandedBack: i == 2, onDismiss: {})
+        ]
+    }
+    let view = DrawerView(question: nil, sessions: sessions, rowQuestions: questions,
+                          accent: IslandState.waiting.accent, width: width)
+    _ = try rasteriseHosted(view, size: CGSize(width: width, height: height))
+        .writePNG(to: out)
+    print("\nlist -> \(out)  (rows 1 and 3 waiting; row 3's hook has already handed back)")
+}
