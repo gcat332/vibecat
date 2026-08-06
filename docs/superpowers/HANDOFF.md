@@ -12,6 +12,12 @@ have to rediscover the hard way.
 
 `main`, clean, **942 tests**, MIT licensed. **Plans 1–5, 6.1–6.6, 7 and 9 done.**
 
+**Plan 8's scope was widened on 2026-08-06** to put motion *fidelity* to the prototype in
+front of motion *cost* — see its section in `plans/README.md`. The reason is item 1 below:
+a 259pt asymmetry survived a plan that closed as "the island's shape and its motion",
+because every geometry test asserted the behaviour we had implemented rather than the one
+the prototype specifies. Assume there are more.
+
 ```bash
 Scripts/test.sh                              # 942, ~32s — serial, and that is not optional
 Scripts/build-app.sh && open .build/VibeCat.app
@@ -35,24 +41,31 @@ VIBECAT_SOCKET=/tmp/vibecat-dev.sock Scripts/replay.sh permission   # | stop | n
 These came from the owner running the app on 2026-08-06 and are the most valuable
 items in this file, because nothing headless found them.
 
-### 1. Hover should grow the notch *downward*, not sideways — and one question blocks it
+### 1. Expansion — one half fixed, one half is 6.7, and a third thing was never real
 
-**Ruled by the owner:** the cat (left) and the count (right) must not move; the notch's
-background should expand **downward, symmetrically**, instead of widening to the right.
+Three separate things got tangled here over several rounds. Untangled:
 
-Today hover widens rightward because §5.3 holds `LW = 58pt` constant — that is what pins
-the island's left edge, since the centring shift cancels `RW` out. `:382` records the
-alternative having been observed: the left edge crept `599.5 → 605.0` across six rows
-while the right sat still. So *keeping the cat still* and *growing rightward* are the same
-decision, and reversing it is a real geometry change, not a tweak.
+**Fixed (`0ac2064`): an open drawer now centres on the cutout.** It grew entirely rightward
+— 58pt left of a 185pt notch and 317pt right — because §5.3's reasoning was applied one
+state too far. The prototype centres it: `resize()` (`island-motion.html:948`) returns
+**early** for every expanded state, leaving `.island-wrap{left:50%;transform:translateX(-50%)}`
+(`:80`) and `.flank{flex:1}` (`:118`), and `:945` says *"every **collapsed** state"* in so
+many words. The cat moves when a drawer opens, in the prototype and now here.
 
-**The question that has to be answered before any code moves:** the hover reveal currently
-*shows the most urgent session's detail text* in the width it gains. If the island stops
-widening, that text either moves into the new space below or stops existing. Those are
-different features. Ask the owner which; do not pick one.
+**Still to build: expansion-on-hover is a *preference*, and it is 6.7's.** `settings.html:221`
+has "Expand notch on hover" as a switch with a `0.30s` duration beside it — so "hover or
+click" is a setting, not a redesign. The fields are already in 6.7's plan
+(`expandOnHover`, `hoverDuration`) with those line numbers cited.
 
-`IslandGeometry`, `IslandMotion.hoverRevealDuration`, `IslandModel.revealed` and §9.1's
-reveal are the surfaces. Expect golden churn.
+**Not real: "the mockup has no hover reveal".** It does —
+`island-motion.html:122-130` plus `:470-472`, `.detail` on the right face with
+`max-width:150px`. Acting on that belief would delete a feature the prototype specifies.
+
+**A caution about how these three got confused, because it will happen again.** Two of the
+three were settled by reading one line of the prototype and not following what it led to.
+`:948`'s early return was quoted as evidence *for* the behaviour it disproves. When a
+prototype rule ends in a `return`, a `@media`, or a class that CSS elsewhere overrides,
+read what happens after it before citing it.
 
 ### 2. The session list could not be found in the running app
 
@@ -104,7 +117,7 @@ Read it before proposing work — "what remains" has had to be re-derived from t
 | **6.7** | The **General and Integrations** Settings pages | **plan written 2026-08-06, not started** |
 | 6.8 | The Display controls with no behaviour anywhere — Clean/Detailed, Meter/Dot, the four panel-size sliders, the two notch offsets, the display picker, editable state colours | not written |
 | 6 | Jump (§13) and §16's AppleScript hint | not written |
-| 8 | Matching motion cost to motion content | not written |
+| 8 | **Motion — fidelity first, then cost.** Every animation diffed against `island-motion.html` and made to match it, then matching motion cost to motion content | not written — scope widened 2026-08-06 |
 
 **Two of the four Settings pages are still empty**, each showing an owner note naming
 6.7 — that is why Settings looks unfinished. 6.4 built the shell, 6.5 Notifications,
@@ -211,6 +224,18 @@ Say so rather than writing a test that appears to cover them:
 3. **AppKit finishes window teardown inside `NSApplication.run()`**, which `swift test`
    never calls — so a weak-reference test for window release cannot work. Assert
    window-list membership by identity instead.
+
+### `swift run` holds the `.build` lock, and a blocked build says nothing
+
+`swift run vibecat` keeps SwiftPM's lock on `.build` for as long as the app is up. A
+concurrent `swift build` or `Scripts/test.sh` then **waits indefinitely with no output and
+no timeout** — observed, 32 minutes, while the app had been up for 42. Nothing in either
+process says what it is waiting for.
+
+So: quit the app before building, or drive it from a bundle instead —
+`Scripts/build-app.sh && open .build/VibeCat.app` does not hold the lock, because `swift`
+is not in the picture at all. `swift run` is still the faster way to test anything that
+needs no TCC grant; just do not build underneath it.
 
 ### Measure with `getrusage(RUSAGE_SELF)`, never `ps %cpu`
 
