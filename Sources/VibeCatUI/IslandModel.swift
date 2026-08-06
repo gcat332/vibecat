@@ -103,6 +103,22 @@ import VibeCatCore
     @ObservationIgnored
     public var onAnswer: (@MainActor (Reply) -> Void)?
 
+    /// Ruling B's `Dismiss` (Plan 9 Task 6), fired with the id of whichever
+    /// answerable question a row's own header names. Threaded down to
+    /// `DrawerView`/`SessionListFace`/`SessionRow` exactly as `onAnswer` is —
+    /// see those types' own doc comments — and, like `onAnswer`, wiring for
+    /// `@ObservationIgnored`: this is a callback, not content a view redraws for.
+    ///
+    /// **Not yet wired by `NotchController`.** This plan's own Task 6 threads the
+    /// closure up to here and stops; `AppModel.dismissQuestion(id:)` exists for
+    /// whichever task wires `NotchController.present()` to it, the same
+    /// unwired-for-now shape `onOpenSettings` had between Plan 6.4's Task 4 and
+    /// Task 5. Unlike `SessionRow.onJump` — which this plan's own "Out of scope,
+    /// deliberately" table says stays uncalled for good — this one is meant to
+    /// end up wired; it just is not yet.
+    @ObservationIgnored
+    public var onDismiss: (@MainActor (String) -> Void)?
+
     /// Whether the drawer's own footer should show the muted glyph. **The
     /// same setting as `Preferences.soundEnabled`** — `island-motion.html:1060`
     /// states the coupling explicitly: "the panel's mute button and the

@@ -30,6 +30,10 @@ struct SessionListFace: View {
     /// unchanged.
     var questions: [SessionKey: [IslandModel.RowQuestion]] = [:]
     var onAnswer: (Reply) -> Void = { _ in }
+    /// Ruling B's `Dismiss`, threaded straight through to every row exactly as
+    /// `onAnswer` is. Defaulted for the same reason: every golden and preview
+    /// that predates Plan 9 Task 6 keeps compiling and rendering unchanged.
+    var onDismiss: (String) -> Void = { _ in }
 
     let sessions: [Session]
     /// Forwarded straight to every `SessionRow`. Defaulted to `.all` so the
@@ -136,7 +140,7 @@ struct SessionListFace: View {
                 ForEach(sessions) { session in
                     SessionRow(session: session, now: now, options: options,
                                questions: questions[session.id] ?? [],
-                               onAnswer: onAnswer)
+                               onAnswer: onAnswer, onDismiss: onDismiss)
                 }
             }
             .padding(.top, 2)

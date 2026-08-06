@@ -27,6 +27,10 @@ struct DrawerView: View {
     /// themselves. Defaulted for the same reason `sessions` is: every golden and preview
     /// that predates this keeps rendering exactly what it rendered before.
     var rowQuestions: [SessionKey: [IslandModel.RowQuestion]] = [:]
+    /// Ruling B's `Dismiss`, forwarded straight to `SessionListFace` exactly as
+    /// `onAnswer` is. Defaulted for the same reason: every existing call site
+    /// (none of which cares) keeps compiling and rendering unchanged.
+    var onDismiss: (String) -> Void = { _ in }
     let accent: RGBA
     let width: CGFloat
     /// The bottom corner radius, `IslandGeometry.openBottomRadius` (20) in
@@ -145,6 +149,7 @@ struct DrawerView: View {
                                 .transition(.faceCrossfade)
                         } else {
                             SessionListFace(questions: rowQuestions, onAnswer: onAnswer,
+                                            onDismiss: onDismiss,
                                             sessions: sessions, options: options)
                                 .transition(.faceCrossfade)
                         }
