@@ -106,37 +106,35 @@ forever — the unbounded wait §2.3 forbids outright."*
 
 ---
 
-## Open decisions for the owner
+## The two rulings, given 2026-08-06
 
-**A. Scope: one parked question, or one per session?**
+### A. Scope: **one parked question per session**
 
-- **(a) One at a time.** Small — Tasks 1, 3, 4, 5, 6 only. A second question
-  still displaces the first, so the session list shows at most one question and
-  the "pick who to answer first" benefit does not arrive.
-- **(b) One per session.** Task 2 as written. This is what a *list* of questions
-  means, and it fixes the silent-discard defect above.
+Task 2 is in. `AppModel.pending` becomes one slot per session, and the
+silent-discard defect at `AppModel.swift:280-281` goes with it.
 
-**Recommended: (b).** The whole reason to put a question in the session list is
-to choose among several; with one at a time the list adds a location and no
-capability. It is the larger half of the work and it touches the repo's most
-concurrency-sensitive object, so it deserves being named as a cost rather than
-absorbed quietly.
+The owner was told this is the larger half of the work and that it touches the
+repo's most concurrency-sensitive object, and chose it anyway. The reason it is
+right: the point of putting a question in the session list is to choose among
+several. With one at a time the list gives a new location and no new capability.
 
-**B. How does a person give up on purpose?**
+### B. Giving up on purpose: **a `Dismiss` in the session list**
 
-After this plan ESC parks instead of dismissing, so the deliberate fail-open
-gesture disappears. Something must replace it or the only way to release an
-agent early is to answer it. Neither prototype has an affordance for this.
+Not a second ESC press. The control carries the meaning (§10.2) and a hidden
+second-press is the opposite of that rule.
 
-- **(a) A `Dismiss` control inside the question block.** Explicit, discoverable,
-  costs a row of space. §10.2's rule applies: the control carries the meaning.
-- **(b) ESC parks; ESC again on an already-parked question dismisses.** No new
-  pixels, and undiscoverable.
-- **(c) Nothing — parked questions only leave by being answered or by expiring.**
+**Where it lands:** in the question block's `.bh` header line, right-aligned, in
+`--dim` — quiet and present. The block is rendered inside the session list under
+its own row and is always visible, so "in the session list" and "in the block's
+header" are the same place; there is no expand step between them.
 
-**Recommended: (a).** This repo's own rule is that the control carries the
-meaning and not a label; a hidden second-press is the opposite of that. Put it in
-the block's `.bh` header line, right-aligned, in `--dim` — quiet, present.
+Recorded because the owner's words were *"Dismiss ให้กดที่ session list"* and a
+later reader could reasonably ask whether that meant a control on the **row**,
+outside the block. It does not: one Dismiss, in the block that shows the question
+it dismisses, so the thing being given up on is on screen when you give up on it.
+Putting it on the row would let someone dismiss a question they had not read,
+which is the same failure `.truncationMode(.middle)` exists to prevent — being
+asked to decide about something you cannot see.
 
 ---
 
@@ -277,7 +275,7 @@ git commit -m "feat: a question can be parked without releasing the hook waiting
   ordered shape — see below), `parkQuestion(id:)`, `resumeQuestion(id:)`, and a
   changed `onQuestion` contract.
 
-**Do this task only if the owner ruled (b) on decision A.**
+**Ruled in: one pending question per session** (ruling A).
 
 **The current shape and what has to change.** `AppModel.swift:157` is
 `public private(set) var pending: PendingQuestion?`, and `:280-281` lapses the old
@@ -427,8 +425,9 @@ Collapsing the notch (mouse leave, outside click, whatever `:719-746` already
 routes) must park too, for the same reason: the person moved on, they did not
 answer.
 
-**Whatever decision B ruled becomes the deliberate-dismiss path**, wired here if
-it is a key and in Task 5 if it is a control in the block.
+**The deliberate-dismiss path is a control, not a key** (ruling B), so it is
+Task 5's — not this task's. Nothing here dismisses anything: after this task,
+Escape parks and only parks.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -466,6 +465,11 @@ it is a key and in Task 5 if it is a control in the block.
   re-deriving the chrome; `ChoiceRow` (`:92` already has `onTapGesture`);
   `DestructiveGuard`; `QuestionModel`.
 - Produces: `QuestionBlock(question:, onAnswer:, onDismiss:)`.
+
+**`onDismiss` is ruling B's control** — right-aligned in the `.bh` header
+(`island-motion.html:371-372`), `--dim`. It is the only way to fail a question
+open on purpose once Task 4 makes Escape park, so it is not optional and it is
+not a follow-up.
 
 **This is the visual task and the prototype is the authority.**
 `.rblock` `:370` — `margin-top:6px`, `rgba(255,255,255,.035)`, `border-radius:7px`,
