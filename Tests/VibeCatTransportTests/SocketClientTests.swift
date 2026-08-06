@@ -75,11 +75,23 @@ private func tempSocketPath(_ name: String) -> String {
 
 /// Bounded, still. A hook that waits forever is a hook that hangs a terminal,
 /// which is the one thing §2.3 forbids outright.
-@Test func theAnswerDeadlineIsClampedLikeTheOther() {
+/// **The property this pins is unchanged; only which ceiling applies moved.** It read
+/// `== ceilingDeadline` until the clamp was split by provenance, and what it was
+/// guarding is that `answerDeadline` is clamped *at all* rather than stored raw — a
+/// deadline reaching `DispatchTime` unbounded is the saturation §2.3 forbids. That still
+/// holds. A value arriving through `init` came from this app's own preferences, so it is
+/// bounded by `chosenCeilingDeadline`; the wire's stricter bound belongs to
+/// `AppModel.ingest`. Updated deliberately, not retyped to match: see
+/// `anHourIsReachableForAPersonsChoiceAndNotForWireInput`.
+@Test func theAnswerDeadlineIsClampedRatherThanStoredRaw() {
     #expect(SocketClient(path: "/tmp/x.sock", answerDeadline: 9999).answerDeadline
-            == SocketClient.ceilingDeadline)
+            == SocketClient.chosenCeilingDeadline)
     #expect(SocketClient(path: "/tmp/x.sock", answerDeadline: -1).answerDeadline
             == SocketClient.floorDeadline)
+    // And the delivery deadline keeps the wire's bound: nothing about the hand-back
+    // touches how long reaching the app may take.
+    #expect(SocketClient(path: "/tmp/x.sock", deadline: 9999).deadline
+            == SocketClient.ceilingDeadline)
 }
 
 /// The clamp arithmetic itself, isolated from any socket, deadline object,
@@ -101,11 +113,34 @@ private func tempSocketPath(_ name: String) -> String {
 /// .handBackToTerminalAfter`, `0.5…60`), and the top of that range is 3600
 /// seconds. Against the old ceiling of 60 a chosen hour would have silently
 /// become one minute.
-@Test func theCeilingLeavesAnHourLongHandBackReachable() {
-    #expect(SocketClient.ceilingDeadline == 3600)
-    #expect(SocketClient.clamped(3600) == 3600, "an hour is inside the range, not on the wrong side of it")
-    #expect(SocketClient.clamped(3601) == 3600)
-    #expect(SocketClient.clamped(86_400) == 3600, "a day-long hold was honoured verbatim")
+/// **Rewritten after a test-premise audit, and the rewrite is the point.** This first
+/// asserted `ceilingDeadline == 3600` and `clamped(3600) == 3600`, which shipped a
+/// sixtyfold widening of a fail-open bound in exchange for a benefit nothing could
+/// reach: no production code reads `Preferences.handBackToTerminalAfter` yet, while
+/// `clamped` takes effect today through `AppModel.ingest`, which bounds a value decoded
+/// off a `0600` socket.
+///
+/// So the clamp is split by the value's **provenance**, and this pins both halves plus
+/// the gap between them. An hour must be reachable for a person's own choice and must
+/// **not** be reachable for anything that merely arrived on the wire — a single number
+/// serving both is what the audit caught.
+@Test func anHourIsReachableForAPersonsChoiceAndNotForWireInput() {
+    #expect(SocketClient.chosenCeilingDeadline == 3600)
+    #expect(SocketClient.clampedChosenByPerson(3600) == 3600, "a chosen hour was cut short")
+    #expect(SocketClient.clampedChosenByPerson(86_400) == 3600, "a day-long hold was honoured verbatim")
+
+    #expect(SocketClient.ceilingDeadline == 60)
+    #expect(SocketClient.clamped(3600) == 60,
+            "an hour arriving off the socket was honoured — the wire bound is the strict one")
+    #expect(SocketClient.clamped(86_400) == 60)
+}
+
+/// The floor is shared by both, so widening one bound did not quietly move the other.
+@Test func bothClampsShareTheSameFloor() {
+    #expect(SocketClient.clamped(0.001) == SocketClient.floorDeadline)
+    #expect(SocketClient.clampedChosenByPerson(0.001) == SocketClient.floorDeadline)
+    #expect(SocketClient.clampedChosenByPerson(0.05) == 0.05,
+            "a chosen value inside the range must pass through untouched")
 }
 
 /// The floor did **not** move with the ceiling, and this is the assertion that

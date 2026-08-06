@@ -105,59 +105,73 @@ private let blockWidth: CGFloat = 500
     #expect(unnamed.differingPixelCount(from: named) > 0, "the terminal's name was never drawn")
 }
 
-/// §10.2's rule, at this drawing site: **a number badge means the click is the
-/// answer, a checkbox means it is not.** `ChoiceRow` already implements both and
-/// picks on `isMulti`; this asserts the block passes the question's own `isMulti`
-/// through rather than hardcoding one. A block that always drew badges would let a
-/// multi-select question be committed by a single reflex click.
-@MainActor @Test func aMultiSelectQuestionDrawsCheckboxesRatherThanBadges() throws {
-    let single = try render(QuestionBlock(question: question(body: "cmd", multi: false),
-                                          accent: .orange))
-    let multi = try render(QuestionBlock(question: question(body: "cmd", multi: true),
-                                         accent: .orange))
-    #expect(single.differingPixelCount(from: multi) > 0,
-            "isMulti was not passed through — both states drew the same control")
-}
-
-/// A person has to look at this: the tests above compare renders against each other
-/// and none of them can say whether a `.rblock` full of choices actually *reads* at
-/// this size inside a row. Env-gated, like the repo's other preview tools.
+/// §10.2's rule, at this drawing site: **a number badge means the click is the answer, a
+/// checkbox means it is not.** A block that always drew badges would let a multi-select
+/// question be committed by one reflex click.
 ///
-///     VIBECAT_QUESTION_BLOCK=/tmp/qb.png Scripts/test.sh --filter questionBlockSheet
-@Test(.enabled(if: ProcessInfo.processInfo.environment["VIBECAT_QUESTION_BLOCK"] != nil))
-@MainActor func questionBlockSheet() throws {
-    let out = try #require(ProcessInfo.processInfo.environment["VIBECAT_QUESTION_BLOCK"])
-    let long = "rm -rf /Users/dev/projects/vibecat/.build/arm64-apple-macosx/debug/ModuleCache/artifacts/tmp"
-    let sheet = VStack(alignment: .leading, spacing: 14) {
-        QuestionBlock(question: question(body: "rm -rf build/"), accent: Color(IslandState.waiting.accent))
-        QuestionBlock(question: question(body: long), accent: Color(IslandState.waiting.accent))
-        QuestionBlock(question: question(body: "rm -rf build/", multi: true),
-                      accent: Color(IslandState.waiting.accent))
-        QuestionBlock(question: question(body: long), accent: Color(IslandState.waiting.accent),
-                      handedBackTo: "iTerm2")
-        QuestionBlock(question: question(body: "rm -rf build/"), accent: Color(IslandState.waiting.accent),
-                      handedBackTo: nil)
-    }
-    .frame(width: blockWidth)
-    .padding(16)
-    .background(Color(islandGroundColour))
-    _ = try rasterise(sheet, scale: 2).writePNG(to: out)
-    print("\nsheet -> \(out)  (single, single+long, multi, handed back, handed back unnamed)")
+/// **Rewritten after a test-premise audit caught it passing for the wrong reason.** It
+/// used to rasterise the whole block at both `isMulti` values and require the renders to
+/// differ. They do — but at `sendRow`, which only a multi-select block draws. Forcing
+/// `isMulti: false` on the `ChoiceRow` call, the actual §10.2 violation, left the suite
+/// **entirely green**, and the failure message ("both states drew the same control")
+/// would have been a lie.
+///
+/// So this asserts on the model instead of on pixels. `QuestionModel.tap(_:)` is the one
+/// implementation both drawing sites share, and its behaviour *is* the rule: a
+/// single-select tap produces a `Reply` because the click is the answer, and a
+/// multi-select tap produces none because a checkbox only toggles. That distinction
+/// cannot be satisfied by a difference somewhere else on screen.
+@MainActor @Test func aSingleSelectTapAnswersWhileAMultiSelectTapOnlyToggles() {
+    let single = question(body: "cmd", multi: false)
+    #expect(single.tap("c0") != nil, "a single-select tap did not answer — §10.2's badge promises it does")
+    #expect(single.selected == ["c0"])
+
+    let multi = question(body: "cmd", multi: true)
+    #expect(multi.tap("c0") == nil, "a multi-select tap answered on its own — a checkbox must only toggle")
+    #expect(multi.selected == ["c0"])
+    #expect(multi.tap("c1") == nil)
+    #expect(multi.selected == ["c0", "c1"], "the second tick replaced the first instead of adding to it")
+    #expect(multi.send()?.choices == ["c0", "c1"], "Send is the only gesture that finishes a multi-select")
 }
 
-/// **A measurement, not an assertion — the number is here so a later reader does not
-/// have to re-derive it.** A three-choice block is tall relative to the drawer it
-/// sits in, because `ChoiceRow` was designed for the 288pt `.question` face and
-/// carries that face's own type size and row height into a nested 11pt block.
-@Test(.enabled(if: ProcessInfo.processInfo.environment["VIBECAT_QUESTION_BLOCK"] != nil))
-@MainActor func questionBlockHeights() throws {
-    for (label, block) in [
-        ("answerable, 3 choices", QuestionBlock(question: question(body: "rm -rf build/"), accent: .orange)),
-        ("answerable, 1 choice", QuestionBlock(question: question(body: "rm -rf build/", choices: 1), accent: .orange)),
-        ("handed back", QuestionBlock(question: question(body: "rm -rf build/"), accent: .orange, handedBackTo: "iTerm2")),
-    ] {
-        let r = try rasterise(block.frame(width: blockWidth), scale: 1)
-        print("  \(label.padding(toLength: 24, withPad: " ", startingAt: 0)) \(r.height)pt")
+/// And the block passes the question's own `isMulti` through to its `ChoiceRow`s, which
+/// is the wiring half the model test above cannot see.
+///
+/// **This needs a crop, and the reason is the whole lesson of the audit that found the
+/// first version.** `isMulti` legitimately drives *two* things — the control's shape and
+/// whether `sendRow` exists — so comparing whole renders proves only that one of them
+/// changed. The first version did exactly that, and hardcoding `isMulti: false` on the
+/// `ChoiceRow` call, the actual §10.2 violation, left the whole suite green because
+/// `sendRow` still differed.
+///
+/// **Measured with `qbProbe` below, at `scale: 2` and one choice** (kept env-gated so the
+/// numbers are reproducible rather than remembered): the two renders are byte-identical
+/// above `y = 84` — header and command — differ by 140 pixels between 84 and 104, which
+/// is the control itself, and by 548 by `y = 124`, where `sendRow` has begun. So 104 is
+/// the last row that still separates the control from everything else, and it is a
+/// measurement rather than a derivation.
+@MainActor @Test func theBlockPassesIsMultiThroughToItsChoiceRows() throws {
+    let badge = try render(QuestionBlock(question: question(body: "cmd", choices: 1, multi: false),
+                                        accent: .orange))
+    let box = try render(QuestionBlock(question: question(body: "cmd", choices: 1, multi: true),
+                                       accent: .orange))
+    var differing = 0
+    for y in 0..<104 {
+        for x in 0..<badge.width where badge[x, y] != box[x, y] { differing += 1 }
     }
-    print("  DrawerFace.sessionList is \(DrawerFace.sessionList.height)pt tall in total")
+    #expect(differing > 0,
+            "above sendRow the two renders are identical, so isMulti never reached ChoiceRow")
+}
+
+
+@Test(.enabled(if: ProcessInfo.processInfo.environment["VIBECAT_QB_PROBE"] != nil))
+@MainActor func qbProbe() throws {
+    let a = try render(QuestionBlock(question: question(body: "cmd", choices: 1, multi: false), accent: .orange))
+    let b = try render(QuestionBlock(question: question(body: "cmd", choices: 1, multi: true), accent: .orange))
+    print("\n  single \(a.width)x\(a.height)   multi \(b.width)x\(b.height)")
+    for cut in [a.height - 20, a.height - 40, a.height - 60] {
+        var d = 0
+        for y in 0..<max(0, cut) { for x in 0..<a.width where a[x, y] != b[x, y] { d += 1 } }
+        print("  cut at \(cut): differing = \(d)")
+    }
 }

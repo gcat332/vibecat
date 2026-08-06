@@ -46,7 +46,12 @@ struct RBlockHeader: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(title).font(.system(size: 10.5, weight: .semibold))
+            // `.bh` (`island-motion.html:371`) sets no `font-weight`, so the title is
+            // regular. It was `.semibold` here until a fidelity pass read the rule: the
+            // two ink tiers below carry the difference between a field you read and a
+            // summary you refer back to, and weight was a third signal the prototype
+            // never asked for.
+            Text(title).font(.system(size: 10.5))
                 .foregroundStyle(Color(hazeColour))
             Text(detail).font(.system(size: 10.5)).foregroundStyle(Color(dimColour))
         }

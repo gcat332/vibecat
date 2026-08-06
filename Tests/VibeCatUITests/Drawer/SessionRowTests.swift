@@ -956,3 +956,53 @@ private let iconMagenta = RGBA(r: 1, g: 0, b: 1)
     #expect(failed.pixelCount(near: IslandState.failed.accent) > 0,
             "the block was not tinted by the row's own state")
 }
+
+/// **A measurement, not an assertion**, kept so the numbers behind Plan 9's layout
+/// decision stay reproducible instead of living only in a commit message. The fidelity
+/// pass measured one waiting row at 406pt against the session list's real 376pt viewport
+/// (`DrawerFace.sessionList.height` less `DrawerView`'s footer reservation), which is
+/// what a single session filling the whole page looks like.
+///
+///     VIBECAT_ROW_HEIGHTS=1 Scripts/test.sh --filter rowHeights
+@Test(.enabled(if: ProcessInfo.processInfo.environment["VIBECAT_ROW_HEIGHTS"] != nil))
+@MainActor func rowHeights() throws {
+    // `richSession` — three tasks and two agents, the prototype's own `SESSIONS[0]`
+    // shape. The bare `session(_:)` fixture has neither, so it cannot show the trade.
+    let s = richSession()
+    func h(_ v: some View) throws -> Int { try rasterise(v.frame(width: 560)).height }
+    print("\n  no question, tasks+agents shown    \(try h(SessionRow(session: s, now: t0, options: .all)))pt")
+    print("  one question (tasks+agents yield)  \(try h(SessionRow(session: s, now: t0, options: .all, questions: [rowQuestion()])))pt")
+    print("  two questions                      \(try h(SessionRow(session: s, now: t0, options: .all, questions: [rowQuestion("q1"), rowQuestion("q2")])))pt")
+    print("  list viewport                      376pt  (420 less the footer)")
+}
+
+/// **The trade, as an assertion rather than a measurement.** A row carrying a question
+/// must be *no taller* than the same row showing Tasks and Agents without one — that is
+/// the whole claim, and it is what makes a waiting session fit a 376pt viewport at all.
+///
+/// Two renders differing in exactly one input, and the direction matters: a row that
+/// simply appended the question block to Tasks and Agents would be strictly taller, which
+/// is what this catches. `blockOptions` returning `options` unchanged reddens it.
+@MainActor @Test func aRowWithAQuestionYieldsItsTasksAndAgentsRatherThanStacking() throws {
+    let s = richSession()
+    let context = try rasterise(SessionRow(session: s, now: t0, options: .all)
+        .frame(width: 560))
+    let asking = try rasterise(SessionRow(session: s, now: t0, options: .all,
+                                          questions: [rowQuestion()]).frame(width: 560))
+    #expect(asking.height <= context.height,
+            "a question stacked on top of Tasks and Agents instead of replacing them: \(asking.height)pt against \(context.height)pt")
+}
+
+/// And a row with **no** question is untouched, which is why every golden that predates
+/// Plan 9 still renders what it rendered. Without this the test above is satisfied by a
+/// row that dropped Tasks and Agents unconditionally.
+@MainActor @Test func aRowWithNoQuestionStillShowsItsTasksAndAgents() throws {
+    let s = richSession()
+    let all = try rasterise(SessionRow(session: s, now: t0, options: .all).frame(width: 560))
+    let stripped = try rasterise(SessionRow(session: s, now: t0,
+                                            options: SessionRow.Options.all
+                                                .subtracting([.tasks, .agents, .subagents]))
+        .frame(width: 560))
+    #expect(all.height > stripped.height,
+            "Tasks and Agents were suppressed on a row that had no question to make room for")
+}

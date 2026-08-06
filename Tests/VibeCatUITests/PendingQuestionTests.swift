@@ -204,11 +204,17 @@ private func question(id: String = "q1") -> VibeEvent {
     p.unpark()
     #expect(!p.isParked)
 
+    // **`isParked`, not `hasLapsed` — the audit caught this asserting something
+    // `unpark()` cannot move.** `hasLapsed` returns true from `settled` before it ever
+    // looks at `parked`, so deleting `unpark()`'s own `guard !settled` left the suite
+    // green: the regression this line names could not fail it. `isParked` is the value
+    // the guard actually protects.
     let dead = PendingQuestion(event: question(), deadline: 5)
     dead.park()
     dead.lapse()
     dead.unpark()
-    #expect(dead.hasLapsed(at: Date()), "unpark() revived a settled question")
+    #expect(dead.isParked, "unpark() un-parked a settled question, so the list would drop a row the hook has moved on from")
+    #expect(dead.hasLapsed(at: Date()), "and it stays lapsed regardless")
 }
 
 /// aLapsedQuestionStopsBeingAnswerable only ever calls hasLapsed() after

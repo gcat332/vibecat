@@ -174,6 +174,7 @@ struct QuestionBlock: View {
                           isSelected: question.selected.contains(choice.id),
                           isRecommended: false,
                           accent: accent,
+                          compact: true,
                           onTap: {
                               // `QuestionModel.tap(_:)`, not a second copy of the tap
                               // semantics — see that method's own comment on why it was

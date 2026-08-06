@@ -61,7 +61,8 @@ struct SessionRow: View {
     /// this comment is the reason it is worth explaining twice: `now:` was here
     /// under Plan 5, was **never read**, and was removed on the grounds that
     /// "none of §11's three lines is a duration". The mockup says otherwise —
-    /// `SESSIONS` (line 788) gives a running session `state:'2m 14s'`, not the
+    /// `SESSIONS` (line **797**, the `codex` record — `:788` is the `'Needs you'` one, and
+    /// this comment cited it for four plans) gives a running session `state:'2m 14s'`, not the
     /// word "Running" — so line 1's state field *is* a duration for exactly one
     /// of the four states.
     ///
@@ -109,7 +110,7 @@ struct SessionRow: View {
     private var accent: Color { Color(IslandState(session.state).accent) }
 
     /// The mockup's `s.state`: a word for three of the four states and an
-    /// elapsed time for the fourth (`SESSIONS`, line 788 — `state:'2m 14s'`
+    /// elapsed time for the fourth (`SESSIONS`, line 797 — `state:'2m 14s'`
     /// with `live:true`). Measured from `updatedAt`, which is what
     /// `RevealContent` measures and for §1's reason: time *in the current
     /// state* is the number that matters.
@@ -195,6 +196,23 @@ struct SessionRow: View {
                       handedBackTo: terminalName, onAnswer: onAnswer)
     }
 
+    /// **Tasks and Agents step aside for a question.** Measured: one waiting row came to
+    /// 406pt against the session list's real 376pt viewport, so a single session filled
+    /// the page and every other row fell below the fold. `ChoiceRow`'s compact scale
+    /// recovers part of that; this recovers the rest, and it is the half with a reason
+    /// beyond arithmetic — Tasks and Agents are *context* for a session, and a question
+    /// is the one thing on the row asking a person to act.
+    ///
+    /// **The mockup licenses exactly this trade.** `island-motion.html:832`, inside
+    /// `agentsHTML`: *"hidden subagents collapse to a count — approvals and questions
+    /// would stay."* Questions stay; the internals are what yields.
+    ///
+    /// A row with no question is untouched, which is why every existing golden still
+    /// renders what it rendered before.
+    private var blockOptions: SessionRow.Options {
+        questions.isEmpty ? options : options.subtracting([.tasks, .agents, .subagents])
+    }
+
     var body: some View {
         // The mark sits *outside* the three lines and they indent past it —
         // `.row{display:flex;align-items:flex-start;gap:10px}` with
@@ -255,7 +273,7 @@ struct SessionRow: View {
                 // anticipates it in a comment), so this is a decision, not a
                 // reading.
                 ForEach(questions) { row in questionBlock(for: row) }
-                SessionBlocks(session: session, options: options)
+                SessionBlocks(session: session, options: blockOptions)
             }
         }
         // `.row{padding:8px 10px}`. The horizontal half is new with the hover
@@ -490,6 +508,22 @@ struct SessionRow: View {
             guard inside != hoveringHeader else { return }
             hoveringHeader = inside
             if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        // **The teardown, and it is not symmetry for its own sake.** `NSCursor`'s stack is
+        // process-wide: a row that leaves the view tree while the pointer is inside its
+        // header — answering a question removes it, and `prune` removes whole rows —
+        // never receives `onHover(false)`, so the pushed `pointingHand` outlives the row
+        // and every window in the app keeps a hand cursor until something else pops it.
+        //
+        // **Unmeasured**, and labelled as such: a stuck cursor is app-wide state no
+        // headless test in this suite can observe, so this is reasoned from `NSCursor`'s
+        // push/pop contract rather than from an observation. It is also why the guard
+        // above exists — `onDisappear` must not pop a push that never happened.
+        .onDisappear {
+            if hoveringHeader {
+                hoveringHeader = false
+                NSCursor.pop()
+            }
         }
     }
 

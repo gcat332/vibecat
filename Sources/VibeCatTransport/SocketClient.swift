@@ -40,13 +40,31 @@ public struct SocketClient: Sendable {
     /// user, and a value near `Int64.max` nanoseconds saturates `DispatchTime.now()
     /// + …` into `.distantFuture`, parking a thread for the life of the process.
     ///
-    /// An hour is now inside the range because the hand-back a person may choose is
-    /// expressed in **minutes** (`Preferences.handBackToTerminalAfter`, `0.5…60`) and
-    /// the top of that range is 3600 seconds. Against the old ceiling a chosen hour
-    /// would silently have become one minute.
+    /// **The bound for an untrusted value, and it is back to 60 after a test-premise
+    /// audit.** Plan 9 Task 7 raised it to 3600 so a person could choose an hour, and
+    /// that was the wrong lever: nothing reads `Preferences.handBackToTerminalAfter`
+    /// yet, while this ceiling takes effect *today* through `AppModel.ingest`, which
+    /// clamps a value decoded off the socket. So the change widened a fail-open bound
+    /// sixtyfold for a benefit that was not reachable — a real finding, and the fix is
+    /// to split the clamp by the value's **provenance** rather than to pick one number
+    /// for both.
     ///
-    /// **The floor did not move with it** — see `floorDeadline`.
-    public static let ceilingDeadline: TimeInterval = 3600
+    /// This one is for input nobody vouches for. `chosenCeilingDeadline` below is for a
+    /// value the person running the app chose themselves.
+    ///
+    /// **The floor is shared** — see `floorDeadline`.
+    public static let ceilingDeadline: TimeInterval = 60
+
+    /// The bound for a value **the person chose**, which may be an hour: the hand-back
+    /// is expressed in minutes (`Preferences.handBackToTerminalAfter`, `0.5…60`) and the
+    /// top of that range is 3600 seconds. Against the wire ceiling a chosen hour would
+    /// silently have become one minute.
+    ///
+    /// The distinction is provenance, not magnitude. `ingest` cannot tell a hook-written
+    /// event from one any process running as this user wrote to a `0600` socket, so it
+    /// gets `clamped`. A deadline arriving through `init` came from this app's own
+    /// preferences, so it gets `clampedChosenByPerson`.
+    public static let chosenCeilingDeadline: TimeInterval = 3600
 
     /// The one clamp, shared by every place a caller-supplied interval
     /// becomes a deadline: both `init` parameters, `sendExpectingReply`'s
@@ -66,6 +84,17 @@ public struct SocketClient: Sendable {
     /// Exposing this lets the untrusted value be clamped again on the way in,
     /// rather than duplicating the same two-line expression a second time in
     /// a different module.
+    /// A value the person chose, bounded by `chosenCeilingDeadline` rather than by
+    /// `ceilingDeadline`. Same floor.
+    ///
+    /// **Deliberately the longer name.** `clamped` is what a reader reaches for, and the
+    /// stricter bound is the safer thing to reach for by accident — so the unqualified
+    /// name is the wire's and anything wider has to be asked for explicitly, naming whose
+    /// choice it is honouring.
+    public static func clampedChosenByPerson(_ value: TimeInterval) -> TimeInterval {
+        min(max(value, floorDeadline), chosenCeilingDeadline)
+    }
+
     public static func clamped(_ value: TimeInterval) -> TimeInterval {
         Swift.min(ceilingDeadline, Swift.max(floorDeadline, value))
     }
@@ -97,7 +126,8 @@ public struct SocketClient: Sendable {
                 answerDeadline: TimeInterval = defaultAnswerDeadline) {
         self.path = path
         self.deadline = Self.clamped(deadline)
-        self.answerDeadline = Self.clamped(answerDeadline)
+        // The person's own choice, not wire input — see `clampedChosenByPerson`.
+        self.answerDeadline = Self.clampedChosenByPerson(answerDeadline)
     }
 
     public func send(_ line: Data) {
@@ -119,7 +149,7 @@ public struct SocketClient: Sendable {
         // value there is a wall clock with no upper bound, and a peer that
         // trickles at least one byte before every SO_RCVTIMEO window closes
         // can ride that forever — the unbounded wait §2.3 forbids outright.
-        let readTimeout = Self.clamped(deadline ?? self.deadline)
+        let readTimeout = Self.clampedChosenByPerson(deadline ?? self.deadline)
         let writeExpiry = Date().addingTimeInterval(self.deadline)
         let readExpiry = Date().addingTimeInterval(readTimeout)
         // readTimeout, not self.deadline: SO_RCVTIMEO bounds each read()

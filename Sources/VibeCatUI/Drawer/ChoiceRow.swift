@@ -23,6 +23,24 @@ struct ChoiceRow: View {
     /// decides which row this is; never true for more than one row at once.
     let isRecommended: Bool
     let accent: Color
+
+    /// **A nested block is not the 288pt face, and the same row cannot serve both.**
+    /// `QuestionBlock` draws these inside an `.rblock` whose own ink is 10.5–11pt, and
+    /// the face's scale carried in there made the *deepest* thing in a session row the
+    /// biggest: measured against the prototype, a choice marker was 20×20 beside
+    /// `.tk i`'s 9×9 (`island-motion.html:374`) and `.ag i`'s 6×6 (`:379`). It also cost
+    /// height a scrolling list does not have — one waiting row measured **406pt** against
+    /// the list's real **376pt** viewport, so a single session filled the page and
+    /// everything else fell below the fold.
+    ///
+    /// `compact` is that second scale. Nothing else about the row changes: §10.2's rule
+    /// that the control carries the meaning is about badge-versus-checkbox, not about
+    /// size, so both shapes are still drawn — just smaller.
+    ///
+    /// Declared above `onTap` because the memberwise initialiser takes them in
+    /// declaration order and every existing call site passes `onTap` last.
+    var compact = false
+
     /// `Other…`: §10.1 lists it right after "a number badge marks each row,"
     /// but §10.2 is the rule that actually settles what it looks like —
     /// "a number badge means the click is the answer... a checkbox means it
@@ -38,7 +56,15 @@ struct ChoiceRow: View {
     /// compiling unchanged; `QuestionFace.rows` passes a real one per row.
     var onTap: () -> Void = {}
 
-    private static let controlSize: CGFloat = 20
+    private var controlSize: CGFloat { compact ? 13 : 20 }
+    private var labelSize: CGFloat { compact ? 11 : 12.5 }
+    private var verticalPadding: CGFloat { compact ? 2.5 : 8 }
+    /// Zero inside a block, because `RBlock` already pads 9 and the prototype gives
+    /// `.rblock`'s own items no horizontal padding at all (`.tk` `:373`, `.ag` `:378`).
+    /// With both, the choices sat 10pt right of the header and command they belong to —
+    /// the same misalignment `RBlock`'s doc comment records fixing in the other
+    /// direction, reintroduced mirrored.
+    private var horizontalPadding: CGFloat { compact ? 0 : 10 }
     private static let cornerRadius: CGFloat = 8
 
     var body: some View {
@@ -58,7 +84,7 @@ struct ChoiceRow: View {
             // 12.5px, not 13: `.label`/`.choice` is the prototype's most common
             // size, used nine times.
             Text(choice.label)
-                .font(.system(size: 12.5))
+                .font(.system(size: labelSize))
                 .foregroundStyle(Color(isRecommended ? boneColour : hazeColour))
                 // A label like "Allow all pnpm commands in ~/dev/api for
                 // this session" (§10.1) must wrap onto its own row instead
@@ -70,8 +96,8 @@ struct ChoiceRow: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
+        .padding(.vertical, verticalPadding)
+        .padding(.horizontal, horizontalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Self.cornerRadius)
@@ -107,7 +133,7 @@ struct ChoiceRow: View {
                             .foregroundStyle(Color.black)
                     }
                 }
-                .frame(width: Self.controlSize, height: Self.controlSize)
+                .frame(width: controlSize, height: controlSize)
         } else if isOther {
             // Neither a numeral nor a checkbox, and deliberately not
             // accent-tinted either — colour means state (§4.3), and this
@@ -120,7 +146,7 @@ struct ChoiceRow: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Color(hazeColour))
                 )
-                .frame(width: Self.controlSize, height: Self.controlSize)
+                .frame(width: controlSize, height: controlSize)
         } else {
             // `isSelected` used to go unread on this branch entirely: a
             // single-select pick recorded correctly in the model but never
@@ -141,7 +167,7 @@ struct ChoiceRow: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(isSelected ? Color.black : accent)
                 )
-                .frame(width: Self.controlSize, height: Self.controlSize)
+                .frame(width: controlSize, height: controlSize)
         }
     }
 }
