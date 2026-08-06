@@ -1432,3 +1432,125 @@ private final class ReplyBox: @unchecked Sendable {
 
     #expect(c.holdsKeyStatus == false, "a torn-down controller still believes it holds key status")
 }
+
+// MARK: - parking (Plan 9 Task 3)
+//
+// These live here, not in the `ParkedQuestionTests.swift` the plan named, because
+// they are integration tests through a real `NotchController` and this file owns
+// the `controller(_:)` and `mbp14` fixtures. Duplicating a controller fixture to
+// honour a filename would be the worse trade.
+
+/// **Task 3 required no production change, and that is the finding — but it needs
+/// this test more than a hand-written change would.**
+///
+/// `IslandModel.face` is `question?.face ?? .sessionList` (`IslandModel.swift:170`),
+/// and `AppModel.parkQuestion()` sets `pending = nil` and fires `onQuestion?(nil)`,
+/// which `NotchController.setQuestion(nil)` turns into `model.question = nil`. So
+/// the drawer already falls through to the session list when a question parks; the
+/// design made it free. What nothing enforces is that it *stays* free, and this is
+/// the assertion that notices if a later edit routes parking anywhere else.
+@MainActor @Test func parkingSendsTheDrawerToTheSessionList() async throws {
+    let (c, m) = controller { mbp14 }
+    c.refreshGeometry()
+    // `present()`, not just `refreshGeometry()`: `appModel.onQuestion` is wired
+    // *in* `present()` (`NotchController.swift:334`), so without it this drives a
+    // controller that `AppModel` cannot reach — which is what the first run of
+    // this test measured, reading `.sessionList` before anything was parked.
+    c.present()
+    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s",
+                          cwd: "/tmp/proj", choices: [Choice(id: "allow", label: "Allow")],
+                          wantsReply: true, answerDeadline: 5)
+    // `Task.detached`: `ingest` blocks its calling thread on `PendingQuestion
+    // .await()`, which on the main actor is a deadlock rather than a test — see
+    // `aQuestion(deadline:)`'s own doc comment above.
+    let waiter = Task.detached { m.ingest(event) }
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(c.model.face == .question, "the question never reached the drawer")
+
+    m.parkQuestion()
+    #expect(c.model.question == nil)
+    #expect(c.model.face == .sessionList, "a parked question still owns the drawer")
+
+    m.answer(Reply(id: "q1", choice: "allow"))
+    _ = await waiter.value
+}
+
+/// **§4.2: the session list is a view, not a state.** Parking moves a question
+/// into the list, and the tempting mistake is to let the island go calm because
+/// the drawer is showing something else now. It must not: the session is still
+/// waiting, so the cat, the badge and the count must all read exactly as they did.
+///
+/// Structurally this is already safe — `render()` takes `state` and `sessionCount`
+/// from `appModel.islandState`/`sessionCount`, which are derived from `store`, and
+/// parking never touches `store`. The test is the guard against an edit that
+/// changes that, which is the only way this invariant can break.
+///
+/// Compares the reported values, not a rendered colour count: a render with the
+/// badge emptied still produces eighty-odd colours from everything else and would
+/// pass a count.
+@MainActor @Test func parkingChangesWhereAQuestionIsDrawnAndNothingElse() async throws {
+    let (c, m) = controller { mbp14 }
+    c.refreshGeometry()
+    // `present()`, not just `refreshGeometry()`: `appModel.onQuestion` is wired
+    // *in* `present()` (`NotchController.swift:334`), so without it this drives a
+    // controller that `AppModel` cannot reach — which is what the first run of
+    // this test measured, reading `.sessionList` before anything was parked.
+    c.present()
+    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s",
+                          cwd: "/tmp/proj", choices: [Choice(id: "allow", label: "Allow")],
+                          wantsReply: true, answerDeadline: 5)
+    let waiter = Task.detached { m.ingest(event) }
+    try await Task.sleep(for: .milliseconds(50))
+    c.render()
+
+    let state = c.model.state
+    let count = c.model.sessionCount
+    let badge = c.model.badge
+    let mood = c.model.mood
+    let revealed = c.model.revealed?.id
+    #expect(state == .waiting, "the fixture is not exercising the case this test is about")
+
+    m.parkQuestion()
+    c.render()
+
+    #expect(c.model.state == state, "the island's state changed because a question was parked")
+    #expect(c.model.sessionCount == count, "the session count changed")
+    #expect(c.model.badge == badge, "the badge changed")
+    #expect(c.model.mood == mood, "the cat's mood changed")
+    #expect(c.model.revealed?.id == revealed, "the hover reveal moved to a different session")
+
+    m.answer(Reply(id: "q1", choice: "allow"))
+    _ = await waiter.value
+}
+
+/// The other half of the pair, and the reason the one above is not vacuous:
+/// **answering** a question *does* change what the island reports, once the agent's
+/// next event lands. Without this, a `parkQuestion()` that silently discarded the
+/// question would satisfy the §4.2 test — nothing changed, after all.
+@MainActor @Test func aParkedQuestionIsStillCountedAsWaitingByTheIsland() async throws {
+    let (c, m) = controller { mbp14 }
+    c.refreshGeometry()
+    // `present()`, not just `refreshGeometry()`: `appModel.onQuestion` is wired
+    // *in* `present()` (`NotchController.swift:334`), so without it this drives a
+    // controller that `AppModel` cannot reach — which is what the first run of
+    // this test measured, reading `.sessionList` before anything was parked.
+    c.present()
+    let event = VibeEvent(id: "q1", cli: "claude-code", kind: .permission, session: "s",
+                          cwd: "/tmp/proj", choices: [Choice(id: "allow", label: "Allow")],
+                          wantsReply: true, answerDeadline: 5)
+    let waiter = Task.detached { m.ingest(event) }
+    try await Task.sleep(for: .milliseconds(50))
+    m.parkQuestion()
+    c.render()
+    #expect(c.model.state == .waiting, "a parked question stopped being reported as waiting")
+
+    // The agent proceeding is what calms the island — not the UI moving a question
+    // around. Derived from the rule rather than measured: `render()` reads
+    // `appModel.islandState`, which is `IslandState(store:)`, and only an event
+    // changes `store`.
+    m.answer(Reply(id: "q1", choice: "allow"))
+    _ = await waiter.value
+    _ = m.ingest(VibeEvent(id: "e2", cli: "claude-code", kind: .running, session: "s", cwd: "/tmp/proj"))
+    c.render()
+    #expect(c.model.state == .running, "the island stayed amber after the agent moved on")
+}

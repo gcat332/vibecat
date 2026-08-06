@@ -450,6 +450,20 @@ the wrong lesson to draw from the first.
 
 ### Task 3: `IslandModel.face` respects parking — and the island's report does not change
 
+> **Done. It required no production change — the design made it free.**
+> `IslandModel.face` is `question?.face ?? .sessionList` and `parkQuestion()` already
+> fires `onQuestion?(nil)`, so the drawer falls through to the session list on its
+> own. What the task delivered is the three tests that notice if a later edit routes
+> parking anywhere else, and they live in `NotchControllerTests.swift` because that
+> file owns the `controller(_:)`/`mbp14` fixtures this needs.
+>
+> **One thing the first run caught that is worth keeping:** `appModel.onQuestion` is
+> wired inside `present()` (`NotchController.swift:334`), not in `init`. A test that
+> only called `refreshGeometry()` drove a controller `AppModel` could not reach, and
+> read `.sessionList` before anything had been parked — passing the "after" assertion
+> for the wrong reason. The `#expect(face == .question)` *before* parking is what
+> exposed it.
+
 **Files:**
 - Modify: `Sources/VibeCatUI/IslandModel.swift`
 - Test: `Tests/VibeCatUITests/ParkedQuestionTests.swift`
