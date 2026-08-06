@@ -125,6 +125,53 @@ Both are settable in Settings but default on, and the copy says turning either
 off is not recommended. Fail-open is the single most important safety property
 in the design.
 
+> **Corrected 2026-08-06, after Plan 9 measured the hook protocol.** Three things
+> above are now wrong, and the third is the one that changes the design's own
+> reasoning rather than a number.
+>
+> **1. The answer clamp's ceiling is `3600`, not `60`.** The floor stays `0.02`.
+> Those two bounds exist for one purpose — rejecting a value absurd enough to
+> saturate a `DispatchTime` — and a *person's* choice is bounded separately, by
+> `UserDefaultsPreferenceStore.clampedHandBack` at `0.5…60` **minutes**
+> (`Preferences.handBackToTerminalAfter`, default 1 minute). Two clamps, because
+> "not absurd" and "a sensible thing to offer someone" are different questions;
+> raising the wire floor to the product floor would make nine existing tests that
+> observe a real timeout at 0.05s and 0.6s impossible rather than slow.
+>
+> **2. "Every wait is bounded" now has one deliberate exception.**
+> `handBackToTerminalAfter` may be `Never`. It is the absence of an expiry, never
+> a very late one: `PendingQuestion.waitInstant(until:)` is the only place a
+> `DispatchTime` is derived from an expiry and the only place `.distantFuture` is
+> produced, and its `min` against the ceiling keeps a finite expiry finite.
+> Spelling `Never` as `Date.distantFuture` would make the accidental forever this
+> section warns about indistinguishable from the intended one. Not the default.
+>
+> **3. The sentence "the CLI would otherwise block on its own prompt indefinitely,
+> so a bounded wait is not a regression against that" is only half true, and the
+> missing half inverts what this deadline is for.** Measured against Claude Code
+> 2.1.223, twice, headless, with a `PreToolUse` hook that slept 3s and wrote to
+> stderr: the CLI **blocks** on the hook and prints nothing for the duration; the
+> hook's stderr never surfaces on `exit 0` or `exit 1`; and its own prompt appears
+> only *after* the hook returns. The payload carries no way to retract an
+> in-flight ask (`hook_event_name`, `tool_name`, `tool_input`, `tool_use_id`,
+> `transcript_path`, `prompt_id`, `session_id`, `permission_mode`, `cwd`,
+> `effort`).
+>
+> The CLI's own prompt does wait forever — but **visibly**. A blocked hook is
+> invisible: the terminal simply looks idle. Same duration, opposite
+> discoverability. So the answer deadline is **not a safety net; it is the
+> hand-back**, and without it the terminal never gets a prompt at all. What makes
+> a crashed island harmless is the other two things: the `300ms` delivery bound,
+> and socket EOF — `SocketClient.readLine` falls through to `return nil` when
+> `read()` returns 0. Those are untouched.
+>
+> A consequence worth stating: **only one party can hold the decision at a time.**
+> "Answerable in the notch and in the terminal at once" is not a preference this
+> design declined, it is unavailable, and the only route to it would be typing
+> into the terminal on the user's behalf — which this section's own framing
+> rejects, because replying through the hook is exact *because* it is not
+> simulated keystrokes.
+
 ---
 
 ## 3. Source adapters
@@ -649,6 +696,61 @@ Sort order defaults to most urgent first.
 
 ---
 
+### 11.1 Parking a question — added 2026-08-06 (Plan 9)
+
+**Escape, or collapsing the notch, sets a question aside rather than giving up on
+it.** Before this, Escape called `dismissQuestion()`, which lapses: the hook was
+released, the CLI asked in its own terminal, and a question someone had merely
+glanced away from was gone.
+
+A parked question keeps its hook waiting and renders **inline beneath its own
+session's row**, as one of §11's nested blocks — `island-motion.html:370`'s
+`.rblock`, the same container `tasksHTML` and `agentsHTML` use. That placement is
+the prototype's own intent rather than an invention: `:832`, inside `agentsHTML`,
+reads *"hidden subagents collapse to a count — approvals and questions would
+stay."* It was anticipated in the mockup's source and never rendered.
+
+**The block draws before Tasks and Agents.** §4.2's reasoning is that a waiting
+agent is idling on you right now, so a question must never be buried under a
+list — and those two blocks are exactly that list. The mockup gives no ordering
+because it never rendered a question, so this is a decision.
+
+**Parking is a position, not a state.** The session stays `waiting` and stays
+`#FFA63C`, the count still includes it, and the cat keeps its mood. §4.2's "the
+session list is a view, not a state" is what forbids the island going calm because
+the drawer happens to be showing something else now.
+
+**One question per outstanding tool call, not one per session.** Parallel tool
+calls each fire their own hook and subagents share the parent's `session_id`, so a
+row can carry more than one block and a person answers them in any order. An
+earlier draft keyed by session and silently fail-opened all but the newest.
+
+**Answered in place.** There is no gesture that brings a parked question back to
+the drawer's larger face; the choices are in the block. §10.3's destructive second
+ask binds here too — `QuestionModel.tap(_:)` is one implementation shared by both
+drawing sites precisely so it cannot be forgotten in one of them.
+
+**Giving up is a control, not a keystroke.** `Dismiss` sits in the row's header
+(`.rtop`, `:351`) and releases every answerable question for that session. §10.2's
+rule is that the control carries the meaning; a second Escape press would be the
+opposite of it. **The row's header is also the only jump target** — a deliberate
+divergence from `:345`, where the prototype makes the whole `.row` clickable — so
+that answering or dismissing can never also jump to a terminal.
+
+**When the deadline runs out the row does not change.** Still amber, still `Needs
+you`, still showing the command, because all of that remains true — the agent still
+needs a person, just somewhere else. The *block* changes: choices and `Dismiss`
+disappear, since the hook is gone and there is nothing here to answer or give up
+on, and one line takes their place naming the terminal. The command stays, per
+*never truncate away the thing being decided*: someone about to walk to a terminal
+still needs to know what they are approving. It clears itself when the session
+leaves `waiting`.
+
+See §2.3's 2026-08-06 correction for what that deadline actually is, which is not
+what its name suggests.
+
+---
+
 ## 12. Sound
 
 Synthesised with oscillators, not sampled. Nothing to ship but a few dozen lines,
@@ -763,6 +865,35 @@ Idle session cleanup · Disable click-to-jump · Number keys · Confirm destruct
 **Integrations** — CLI hooks with per-source enable and install status · Add CLI
 branch · Auto-configure new CLIs · Reply channel, hook timeout, fail-open · IDE
 extensions · Custom jump rules · Socket · Event log
+
+> **Corrected 2026-08-06 (Plan 9).** Two things in that Integrations line, and one
+> line of the prototype's copy.
+>
+> **`fail-open` is not a control and the row is not built.** The prototype draws it
+> at `settings.html:293-295` as a switch captioned *"A crashed island must never be
+> able to hang your terminal. Turning this off is not recommended."* The first
+> sentence is right; the second has nothing to recommend against. Measured, fail
+> open means the hook prints **nothing** — `HookRunner.run` returns nil on every
+> failure path — so the CLI prompts in its own terminal exactly as it did before
+> VibeCat existed. Nothing is auto-approved. The case for wanting the switch off is
+> *"VibeCat is my gate on dangerous commands; if it crashes I don't want `rm -rf`
+> waved through"*, which would hold if fail open answered `allow`. It does not
+> answer at all. So off protects nothing and the only thing it can accomplish is
+> hanging a terminal. **The owner ruled the row removed entirely**, so this group
+> has two rows where the prototype has three.
+>
+> **`hook timeout` is the *answer* deadline, not delivery, and the prototype puts
+> one deadline's number under the other's caption.** The field holds `300` with a
+> `ms` suffix (`:290-292`) — delivery's number — while its caption describes how
+> long the hook waits for a *person*. The field is
+> `Preferences.handBackToTerminalAfter`, in **minutes**, default 1, with `Never`
+> available. Delivery stays a fixed `300ms` and is not settable.
+>
+> **And that caption is false.** *"How long the hook waits before letting the agent
+> carry on without you"* — the agent does not carry on without you; measured, the
+> CLI asks you itself. The row reads **"How long the notch holds the question
+> before the terminal asks you instead."** See §2.3's correction of the same date
+> for the measurements.
 
 **Notifications** — Which events alert · Sound pack and per-event cues · Volume ·
 Do Not Disturb · System notification fallback · Permissions

@@ -103,13 +103,39 @@ so replying is exact rather than simulated keystrokes.
 These are load-bearing. Breaking one is a product failure, not a bug.
 
 - **Fail open (§2.3).** A crashed or absent island must never hang a terminal.
-  Every wait is bounded and every failure path returns the CLI's own default and
-  exits `0`. Two deadlines, bounding two different things: delivery `300ms`,
-  answer `answerDeadline` (default 20s, clamped `0.02…60` by
-  `SocketClient.clamped`). Any interval that becomes a deadline goes through that
-  one clamp — including values decoded off the wire, because the socket is
-  reachable by anything running as the same user and an absurd value saturates a
-  `DispatchTime` into `.distantFuture`, parking a thread forever.
+  Every failure path returns the CLI's own default and exits `0`. Two deadlines,
+  bounding two different things: delivery `300ms`, answer `answerDeadline`
+  (default 20s, clamped `0.02…3600` by `SocketClient.clamped`). Any interval that
+  becomes a deadline goes through that one clamp — including values decoded off
+  the wire, because the socket is reachable by anything running as the same user
+  and an absurd value saturates a `DispatchTime` into `.distantFuture`, parking a
+  thread forever.
+
+  **The ceiling was 60 until Plan 9, and *why* it moved matters more than the
+  number.** Measured against Claude Code 2.1.223: while a `PreToolUse` hook is
+  blocked the CLI prints nothing at all, and its own permission prompt does not
+  appear until the hook returns. So the answer deadline is not a safety net — it
+  is the **hand-back**, the only mechanism by which the terminal ever gets a
+  prompt. A crashed island is already harmless without it, via the 300ms delivery
+  bound and via socket EOF releasing the hook. `Preferences
+  .handBackToTerminalAfter` is that value in minutes (default 1), and an hour had
+  to fit inside the clamp for a chosen hour not to become one minute.
+
+  **The floor did not move with it, and there are now two clamps.**
+  `SocketClient.clamped`'s only job is to reject the absurd, so `floorDeadline`
+  stays `0.02` — nine tests observe a real answer timeout at 0.05s and 0.6s, and
+  a floor of "long enough for a person to read a sentence" would make them
+  impossible rather than slow. What a *person* may choose is bounded separately,
+  by `UserDefaultsPreferenceStore.clampedHandBack` at `0.5…60` minutes.
+
+  **"Every wait is bounded" now has one deliberate exception.**
+  `handBackToTerminalAfter` may be `Never`, which the owner ruled available and
+  not the default. `Never` is the *absence* of an expiry, never a very late one:
+  `PendingQuestion.waitInstant(until:)` is the single place a `DispatchTime` is
+  derived and the single place `.distantFuture` is produced, and its `min`
+  against `ceilingDeadline` keeps a finite expiry finite. Spelling `Never` as
+  `Date.distantFuture` would make the accidental forever — the saturation this
+  bullet already warned about — indistinguishable from the intended one.
 - **The notch is a hole (§5.1).** The black shape may span the cutout because
   the cutout is black too. **Content may not.** Everything sits in the flanks.
   Notch dimensions are read at runtime from `NSScreen`, never hardcoded; a
