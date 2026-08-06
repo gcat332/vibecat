@@ -219,6 +219,13 @@ private let mbp14 = ScreenMetrics(
             "the model's open body is \(open.width)pt, not the face's \(DrawerFace.sessionList.width)")
     #expect(open.height == closed.height + DrawerFace.sessionList.height,
             "the model's open body grew by \(open.height - closed.height)pt, not the face's \(DrawerFace.sessionList.height)")
-    #expect(open.minX == closed.minX,
-            "opening moved the left edge from \(closed.minX) to \(open.minX) — §5.3")
+    // Was `open.minX == closed.minX` "— §5.3". §5.3 pins a *collapsed* island's left edge;
+    // the prototype centres an expanded one on the cutout (`island-motion.html:948` returns
+    // early for every expanded state, leaving `:80`'s centring and `:118`'s even split), and
+    // `:945` says "every **collapsed** state" in so many words. Asserted as the rule, so it
+    // cannot be satisfied by whatever arithmetic the geometry happens to use.
+    #expect(open.midX == m.geometry.notch.midX,
+            "the open body's centre is \(open.midX) against a cutout centre of \(m.geometry.notch.midX)")
+    #expect(open.minX < closed.minX,
+            "a centred open drawer must reach left of the collapsed island")
 }

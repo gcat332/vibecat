@@ -24,13 +24,40 @@ private let mbp14 = ScreenMetrics(
     #expect(DrawerFace.questionWithReply.height < DrawerFace.question.height)
 }
 
-/// §5.3. The one invariant the whole layout is built on.
-@Test func openingTheDrawerDoesNotMoveTheLeftEdge() {
+/// **§5.3's real claim, and the one this test used to overstate.**
+///
+/// It was `openingTheDrawerDoesNotMoveTheLeftEdge` and asserted the open body's `minX`
+/// equalled the collapsed one's, described as "the one invariant the whole layout is built
+/// on". That is true of *collapsed* states and false of an open drawer, and the prototype
+/// is explicit about the difference: `resize()` (`island-motion.html:948`) returns **early**
+/// for every expanded state, clearing its inline width and transform, which leaves
+/// `.island-wrap{left:50%;transform:translateX(-50%)}` (`:80`) centring it and
+/// `.island[data-collapsed="false"] .flank{flex:1}` (`:118`) splitting the remainder.
+/// `:945`'s own wording is *"the cat sits in exactly the same place in every **collapsed**
+/// state"* — the word this test dropped.
+///
+/// Owner-reported from prototype screenshots: an expanded panel sits 490px either side of
+/// the camera cutout, where ours extended 58pt left and 317pt right of a 185pt notch. No
+/// test caught it, because every geometry test asserted the behaviour we had implemented.
+///
+/// Both halves are asserted here, and the open one is stated as **the rule** — centres
+/// coincide — rather than as the number our own arithmetic produces.
+@Test func aCollapsedIslandKeepsItsLeftEdgeWhileAnOpenDrawerCentresOnTheCutout() {
     let g = IslandGeometry(screen: mbp14)
-    let collapsed = g.frames(rightFlank: 35, tier: .rest)
+
+    // Collapsed: §5.3 intact. The right flank grows and the left edge does not move.
+    let narrow = g.frames(rightFlank: 35, tier: .rest)
+    let wide = g.frames(rightFlank: 150, tier: .rest)
+    #expect(wide.body.minX == narrow.body.minX,
+            "a wider right flank moved the collapsed island's left edge — the cat walks")
+    #expect(wide.panel.minX == narrow.panel.minX)
+
+    // Open: centred on the cutout, which necessarily *does* move the left edge.
     let open = g.frames(rightFlank: 35, tier: .drawer(face: .question))
-    #expect(open.body.minX == collapsed.body.minX)
-    #expect(open.panel.minX == collapsed.panel.minX)
+    #expect(open.body.midX == g.notch.midX,
+            "the open drawer's centre is \(open.body.midX) against a cutout centre of \(g.notch.midX)")
+    #expect(open.body.minX < narrow.body.minX,
+            "centring an open drawer must extend it left of the collapsed island, or it is not centred")
 }
 
 /// §5.1, at the tier that could break it: the drawer hangs below the notch

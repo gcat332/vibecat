@@ -22,7 +22,7 @@ plan files twice; it is cheaper to keep it written down.
 | 6.1 | Keyboard answering, `Other…`, the three motion defects a motion switch exposes, the duplicate tier, and §6.2's choosable right flank | §10.1, §9.3, §6.2 | **done** — [the plan](2026-08-04-keyboard-and-switches.md), 6 tasks; 686 tests. Keyboard answering verified on hardware with a TextEdit witness, including all three key releases |
 | **6** | Jump and §16's AppleScript hint — everything else that was gated on keyboard input is 6.1 | §13, §16 | not written |
 | 7 | Generic adapter and custom sources — plus `SourceAdapter.icon`, so a source can point at its own icon file | §3 | **done** — [the plan](2026-08-05-generic-adapter.md), 6 tasks; 875 tests. Proved on hardware against **Codex CLI 0.145.0**, a CLI nobody wrote code for; found a main-thread hang reading an icon out of a TCC-protected directory. Carried findings below |
-| **8** | Matching motion cost to motion content | §9.1's rates | not written |
+| **8** | **Motion — fidelity first, then cost.** Every animation diffed against `island-motion.html` and made to match it, *then* matching motion cost to motion content | §9.1's rates and its own curve table, §9.2, the prototype | not written — **scope widened 2026-08-06 on the owner's instruction**, see below |
 | 9 | Parking a question in the session list — Escape sets it aside instead of giving up on it, and it renders as a `.rblock` under its own row | new; §11.1 + dated §2.3 and §14 corrections | **done** — [the plan](2026-08-06-parking-questions.md), 8 tasks; **940 tests**. Measured the hook protocol rather than reasoning from §2.3: the CLI blocks on a hook and prints nothing for the duration, so only one party can hold a question at a time and the answer deadline is the *hand-back*, not a safety net. Fixed two defects nobody asked about — two agents asking at once fail-opened the first, and Escape threw a question away. Carried findings below |
 
 Everything that had no owner now has one. What follows is where each thing went
@@ -1085,7 +1085,59 @@ each against the very code they were written to catch).
    attached. Not a defect to fix; recorded so the next person to lose an hour to it
    does not have to.
 
-## Plan 8 — matching motion cost to motion content (§9.1)
+## Plan 8 — motion: fidelity first, then cost
+
+### The fidelity half — added 2026-08-06, and it goes first
+
+**Scope widened on the owner's instruction.** Plan 8 was only the cost exercise above.
+Motion **fidelity to the prototype** now comes in front of it, and the ordering is theirs
+and is the right way round: there is no point measuring the cost of an animation that is
+not yet the animation the design asks for.
+
+**Why the scope was widened, concretely.** Plan 6.3 closed as "the island's shape and its
+motion", and on 2026-08-06 the owner ran the app and found the expanded panel growing
+**entirely rightward** while the prototype centres it on the cutout — measured off their
+own screenshots at 490px either side of the camera against ours extending 58pt left and
+317pt right of a 185pt notch. That was not a subtle divergence and no test caught it,
+because every geometry test asserted the behaviour we had implemented rather than the one
+the prototype specifies. Assume there are more.
+
+**The specific failure to learn from, because it will recur.** The reasoning that produced
+the bug was §5.3's — hold `LW` constant, the centring shift cancels `RW`, the cat holds
+still — applied one state too far. It is correct for a *collapsed* island and the mockup
+says so in the same breath: `island-motion.html:945` reads *"the cat sits in exactly the
+same place in every **collapsed** state"*, and `resize()` at `:948` **returns early** for
+every expanded state, leaving `.island-wrap{left:50%;transform:translateX(-50%)}` (`:80`)
+and `.flank{flex:1}` (`:118`) to centre it and split the remainder. Reading the early
+return and not following what happens after it is how three separate discussions went past
+this.
+
+### What to diff, and how
+
+Every one of these is a `transition` or `@keyframes` in `island-motion.html` with a named
+duration and curve. The prototype is the authority; the spec's §9.1 table is a *summary of
+it* and has already been found lossy once.
+
+- The shape springs — width, height, and the 30ms height lag Plan 6.3 measured
+- `--ease` (`cubic-bezier(.22,.9,.28,1)`), and every place a third curve appears
+- The face crossfade, and the rule that faces fade in *inside* a shape already at the
+  right size rather than sliding in from outside
+- The hover reveal's `--t-hover` (**280ms**) and `.detail{max-width:150px}`
+- The aura (§9.2), the badge pulse, the blink — the blink being the one instantaneous
+  thing in the interface, because a blink is instantaneous
+- The collapsed↔expanded transition, including where the panel is anchored in each state
+
+**Method that would have caught the 2026-08-06 defect:** for each, assert against a number
+*read out of the prototype*, not against the number the implementation already produces.
+A test that says "the panel is where we put it" is the shape of every geometry test that
+missed this one.
+
+**Then the cost half above**, unchanged — with one number updated: the resting figure the
+first paragraph reasons from (0.35% of a core, three of five moods with no timeline) has
+since become ~12% of a core, which the owner accepted as a known cost rather than a
+target. Optimise against a measurement taken today, not against Plan 3's or Plan 5's.
+
+### The cost half — what was already recorded here (§9.1)
 
 Every animation over-samples its own artwork by 3–6×: `squares` has 4 distinct
 frames and draws 12 a cycle, `bang` has 2 and draws 13, `trot` has 3 and draws

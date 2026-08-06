@@ -600,8 +600,25 @@ private let externalDisplay = ScreenMetrics(
             "the live panel is \(panel.frame.width)pt wide around a \(face.width)pt drawer — it did not grow sideways to cover it")
     #expect(panel.frame.width > collapsedFrame.width,
             "the panel width did not move at all when the drawer opened")
-    #expect(panel.frame.minX == collapsedFrame.minX,
-            "the left edge moved — design §5.3's one fixed invariant")
+    // Was `panel.frame.minX == collapsedFrame.minX`, called "§5.3's one fixed invariant".
+    // §5.3 pins a *collapsed* island's left edge; the prototype centres an expanded panel on
+    // the cutout, which the owner measured off its own screenshots at 490px either side of
+    // the camera. `resize()` (`island-motion.html:948`) returns early for every expanded
+    // state, leaving `:80`'s centring and `:118`'s even split, and `:945` says "every
+    // **collapsed** state" explicitly.
+    let notch = try #require(c.geometry?.notch)
+    // **Half a point of slack, and it is measured rather than tuned.** `IslandGeometry`
+    // computes this exactly — probed on the `mbp14` fixture, `notch.midX`, `frames.body.midX`,
+    // `frames.panel.midX` and `maxCollapsedFrames().panel.midX` are all `755.5`. A live
+    // `NSPanel` reads `755.0`, because the cutout is an odd `185`pt wide so its centre lands
+    // on a half-point, the panel is an even `608`pt so its origin wants `451.5`, and AppKit
+    // snaps a window origin to whole points. The exact equality belongs in the geometry
+    // tests, which have it; what this one can honestly assert is that the live window
+    // follows it to within that snap.
+    #expect(abs(panel.frame.midX - notch.midX) <= 0.5,
+            "the live panel's centre is \(panel.frame.midX) against a cutout centre of \(notch.midX)")
+    #expect(panel.frame.minX < collapsedFrame.minX,
+            "a centred open panel must reach left of the collapsed one")
 
     c.setQuestion(nil)
     #expect(panel.frame == collapsedFrame,

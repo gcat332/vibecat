@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import CoreGraphics
 @testable import VibeCatUI
@@ -104,7 +105,11 @@ private let externalDisplay = ScreenMetrics(
     let f = g.frames(rightFlank: 35, tier: .drawer(face: .question))
     #expect(f.body.height == (32 + 288 as CGFloat))
     #expect(f.body.maxY == 982)
-    #expect(f.body.minX == (663 - 58 as CGFloat))   // still pinned
+    // Centred on the cutout since the anchor was corrected — see
+    // `aCollapsedIslandKeepsItsLeftEdgeWhileAnOpenDrawerCentresOnTheCutout` in
+    // `DrawerGeometryTests`. Stated as the rule rather than as `663 - 58`, which was the
+    // old anchor's own arithmetic, and whose comment read "still pinned".
+    #expect(f.body.midX == g.notch.midX)
 }
 
 /// A notchless display gets a floating pill in the same place, with no
@@ -380,6 +385,9 @@ private let externalDisplay = ScreenMetrics(
             "the panel is \(open.panel.width)pt around a \(open.body.width)pt body — the drawer's right edge is clipped")
     #expect(open.panel.width > collapsed.panel.width,
             "the panel did not grow sideways for the open drawer at all")
-    #expect(open.panel.minX == collapsed.panel.minX,
-            "growing the panel moved its left edge, which unpins §5.3")
+    // Was `open.panel.minX == collapsed.panel.minX`. §5.3 pins a *collapsed* island's left
+    // edge; an open panel is centred on the cutout, so it moves left as it grows, which is
+    // the prototype's own behaviour (`island-motion.html:948`, `:80`, `:118`).
+    #expect(open.panel.midX == g.notch.midX,
+            "the open panel's centre is \(open.panel.midX) against a cutout centre of \(g.notch.midX)")
 }

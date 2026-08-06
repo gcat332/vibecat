@@ -393,8 +393,38 @@ public struct IslandGeometry: Sendable, Equatable {
         // relative to. §5.1 says the fallback floats, so it stays centred and
         // opens symmetrically about the screen centre — pinned by
         // `theFallbackPillStaysCentredWhenTheDrawerOpens`.
-        let left = isFallbackPill ? screen.frame.midX - width / 2
-                                  : notch.minX - Self.leftFlank
+        // **An open drawer is centred on the cutout; a collapsed island is not.**
+        //
+        // This used to pin `notch.minX − LW` for both, with a comment claiming §5.3
+        // covered the open tier too — "560pt of island grows entirely to the right and
+        // the cat does not move". That was §5.3's reasoning applied one state too far,
+        // and the prototype is explicit about the difference:
+        //
+        //   `resize()` (`island-motion.html:948`) returns **early** for every expanded
+        //   state, clearing both the inline width and the inline transform. What is left
+        //   is `.island-wrap{left:50%;transform:translateX(-50%)}` (`:80`) — centred —
+        //   with `.island[data-collapsed="false"] .flank{flex:1}` (`:118`) sharing the
+        //   remainder evenly. And `:945`'s own wording is *"the cat sits in exactly the
+        //   same place in every **collapsed** state"*.
+        //
+        // So the cat does move when a drawer opens, in the prototype and now here. §5.3
+        // is not weakened: it is about a collapsed island's flanks not shifting the cat
+        // as the right side grows, which still holds — `openFace == nil` takes the same
+        // path it always did.
+        //
+        // Owner-reported, from screenshots of the prototype: an expanded panel measured
+        // 490px either side of the camera cutout, against ours extending 58pt left and
+        // 317pt right of a 185pt notch.
+        let left: CGFloat
+        if isFallbackPill {
+            // The deliberate exception, unchanged: a notchless display has no cutout to
+            // hold a place relative to, so §5.1's floating pill centres on the screen.
+            left = screen.frame.midX - width / 2
+        } else if tier.openFace != nil {
+            left = notch.midX - width / 2
+        } else {
+            left = notch.minX - Self.leftFlank
+        }
         let body = CGRect(x: left, y: screen.frame.maxY - height,
                           width: width, height: height)
 
