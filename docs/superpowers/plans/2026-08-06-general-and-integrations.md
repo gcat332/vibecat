@@ -20,9 +20,9 @@ dependencies. `SMAppService` (`ServiceManagement`) for launch at login.
 
 - **No external dependencies.** Not one package, for any reason.
 - **The prototype is the authority on appearance.**
-  `docs/superpowers/prototypes/settings.html` — General is `:210-271`,
+  `docs/superpowers/prototypes/settings.html` — General is `:210-270`,
   Integrations is `:273-320`, the CLI rows are rendered by the `CLIS` map at
-  `:540-549`, and the CSS for every control named here is at `:95-129` and
+  `:540-549`, and the CSS for every control named here is at `:95-136` and
   `:188-191`. **Open the file.** The spec's §14 is one line per page and is
   lossy; it is the authority on *which rows exist*, never on how they look.
 - **Colour tokens come from `SettingsPalette`, never from a fresh `RGBA(hex:)`
@@ -51,7 +51,7 @@ dependencies. `SMAppService` (`ServiceManagement`) for launch at login.
 
 Raised here rather than discovered mid-implementation.
 
-**1. `Carry on if VibeCat isn't running` (`settings.html:296-298`) contradicts
+**1. `Carry on if VibeCat isn't running` (`settings.html:293-295`) contradicts
 §2.3.** The prototype draws it as a switch, defaulting on, captioned *"Turning
 this off is not recommended."* But §2.3 is not a recommendation: *"A crashed or
 absent island must never hang a terminal."* Off, this switch makes the hook wait
@@ -72,7 +72,7 @@ Global Constraint, and where they collide the constraint wins and the divergence
 gets written down. That is this repo's own stated rule for a prototype
 divergence: a fix or a written decision, never a silent third thing.
 
-**2. `Hook reply timeout` (`settings.html:293-295`) exposes a deadline to a text
+**2. `Hook reply timeout` (`settings.html:290-292`) exposes a deadline to a text
 field.** The prototype's field holds `300` with a `ms` suffix, which is the
 **delivery** deadline — the 300ms bound on reaching the app at all, not the
 `answerDeadline` a person answers within. Two problems: the hook is a separate
@@ -99,7 +99,7 @@ preferences at all this becomes a declared-inert field, which is Task 7's list.
 |---|---|
 | `Sources/VibeCatUI/Settings/SettingsStepper.swift` | `.stepper` — a value with ▲▼, `settings.html:95-99` |
 | `Sources/VibeCatUI/Settings/SettingsField.swift` | `.field` — a bordered text field with an optional unit suffix, `:108-110` |
-| `Sources/VibeCatUI/Settings/SettingsSliderRow.swift` | the full-width `.slider` row: `.top b` / `.v` readout / track / `.ticks`, `:126-129` |
+| `Sources/VibeCatUI/Settings/SettingsSliderRow.swift` | the full-width `.slider` row: `.top b` / `.v` readout / track / `.ticks`, `:126-136` |
 | `Sources/VibeCatUI/Settings/SettingsNote.swift` | `.note` — the blue-ruled explanatory strip, `:188-191` |
 | `Sources/VibeCatUI/Settings/GeneralPane.swift` | §14 General: five groups, thirteen rows, plus `GeneralPaneModel` |
 | `Sources/VibeCatUI/Settings/IntegrationsPane.swift` | §14 Integrations: four groups plus `IntegrationsPaneModel` |
@@ -148,22 +148,22 @@ ever disagree:
 
 | Field | Type | Default | Prototype |
 |---|---|---|---|
-| `launchAtLogin` | `Bool` | `true` | `:213` |
-| `expandOnHover` | `Bool` | `true` | `:222` |
-| `hoverDuration` | `Double` | `0.30` | `:225` (`value="30"`, `data-scale="100"`) |
+| `launchAtLogin` | `Bool` | `true` | `:215` |
+| `expandOnHover` | `Bool` | `true` | `:221` |
+| `hoverDuration` | `Double` | `0.30` | `:224` (`value="30"`, `data-scale="100"`) |
 | `smartSuppression` | `Bool` | `true` | `:227` |
-| `hideInFullscreen` | `Bool` | `true` | `:233` |
-| `autoHideWithNoSessions` | `Bool` | `true` | `:235` |
-| `autoCollapseOnMouseLeave` | `Bool` | `false` | `:242` |
+| `hideInFullscreen` | `Bool` | `true` | `:234` |
+| `autoHideWithNoSessions` | `Bool` | `true` | `:236` |
+| `autoCollapseOnMouseLeave` | `Bool` | `false` | `:243` |
 | `autoRevealDwell` | `Int` | `5` | `:245` (`5s`) |
 | `dismissRevealOnOutsideClick` | `Bool` | `false` | `:249` |
-| `idleCleanup` | `IdleCleanup` | `.twoHours` | `:253` (`selected`) |
-| `disableClickToJump` | `Bool` | `false` | `:259` |
-| `numberKeysPickAnswers` | `Bool` | `true` | `:262` |
-| `confirmDestructiveAnswers` | `Bool` | `true` | `:265` |
-| `autoConfigureNewCLIs` | `Bool` | `true` | `:281` |
-| `replyChannel` | `ReplyChannel` | `.hook` | `:290` |
-| `hookReplyTimeout` | `Double` | `0.300` | `:294` (`value="300"`, ms) |
+| `idleCleanup` | `IdleCleanup` | `.twoHours` | `:252` (`<option selected>2 hours`) |
+| `disableClickToJump` | `Bool` | `false` | `:260` |
+| `numberKeysPickAnswers` | `Bool` | `true` | `:263` |
+| `confirmDestructiveAnswers` | `Bool` | `true` | `:266` |
+| `autoConfigureNewCLIs` | `Bool` | `true` | `:279` |
+| `replyChannel` | `ReplyChannel` | `.hook` | `:286` (`aria-pressed` on `Hook`) |
+| `hookReplyTimeout` | `Double` | `0.300` | `:290` (`value="300"`, ms) |
 
 That is sixteen rows for fifteen fields plus one: `hookReplyTimeout` ships only
 if the owner rules for wiring it (see "The two conflicts"). Implement it either
@@ -227,7 +227,7 @@ Expected: compile failure — `Preferences` has no member `launchAtLogin`.
 - [ ] **Step 3: Add the fields, the two enums, and the save/load pairs**
 
 ```swift
-/// §14 General's `Idle session cleanup` — `settings.html:252-254`.
+/// §14 General's `Idle session cleanup` — `settings.html:252-255`.
 ///
 /// A `TimeInterval?` would be the natural type and is the wrong one: the
 /// prototype offers four discrete choices and `Never` is not a duration. The
@@ -246,7 +246,7 @@ public enum IdleCleanup: String, Sendable, CaseIterable, Codable {
     }
 }
 
-/// §14 Integrations' `Send answers` — `settings.html:288-291`.
+/// §14 Integrations' `Send answers` — `settings.html:286-289`.
 public enum ReplyChannel: String, Sendable, CaseIterable, Codable {
     case hook, terminal, off
 }
@@ -263,7 +263,7 @@ both reach an animation or a timer. Clamp in `load`, beside `volume`'s existing
 clamp, and state the range's source:
 
 ```swift
-// `settings.html:225`'s range is `min="0" max="150"` at `data-scale="100"`,
+// `settings.html:224`'s range is `min="0" max="150"` at `data-scale="100"`,
 // so 0…1.5s is the prototype's own domain, not a bound invented here.
 p.hoverDuration = min(max(raw, 0), 1.5)
 // The stepper has no stated range; 1…60s bounds it to something a person
@@ -338,7 +338,8 @@ git commit -m "feat: the sixteen General and Integrations preferences, clamped o
 
 `--line2` already exists in `SettingsPalette`; read it rather than re-deriving.
 The prototype's markup is `▲` then `▼`, in that order — increase above decrease
-(`:246`), which is not the macOS convention and is what the prototype says.
+(`:248`, `aria-label="Increase"` first), which is not the macOS convention and is
+what the prototype says. The `.val` readout sits *before* both buttons (`:247`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -437,26 +438,30 @@ git commit -m "feat: .stepper and .field, the two inline controls General and In
   - `SettingsSliderRow(title: String, value: Binding<Double>, in: ClosedRange<Double>, ticks: Int, format: (Double) -> String)`
   - `SettingsNote(_ text: String)`
 
-**Prototype** (`settings.html:126-129` and `:223-226`, `:188-191`):
+**Prototype** (`settings.html:126-136` and `:223-226`, `:188-191`):
 
 ```
 .slider{display:flex;flex-direction:column;gap:7px;width:100%}
 .slider .top{display:flex;align-items:center}
 .slider .top b{flex:1;font-size:13px;font-weight:400}
 .slider .top .v{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11.5px;color:var(--haze)}
+.ticks{display:flex;justify-content:space-between;padding:0 2px}
+.ticks i{width:2px;height:2px;border-radius:50%;background:var(--dim);display:block}
 .note{display:flex;gap:9px;padding:10px 14px;font-size:11.5px;color:var(--haze);
       line-height:1.55;box-shadow:inset 0 1px 0 var(--line)}
 .note i{width:2px;border-radius:2px;background:var(--blue);flex:none}
 ```
 
+**A tick is a `2×2` round dot in `--dim`, spaced by `justify-content:space-between`
+across the track's width less `2px` of padding** — not a `1pt` line. That matters
+for the tick-count test below: at `scale: 2` a dot is 4px across, so count
+*clusters* rather than columns.
+
 The hover-duration row is `<div class="row" data-shown-by="hoverdur">` wrapping
-a `.slider` — so it is a **full-width row with no `.lab`/`.ctlarea` split**,
+a `.slider` (`:223-226`) — so it is a **full-width row with no `.lab`/`.ctlarea` split**,
 unlike the volume slider `NotificationsPane` already ships, which sits inside a
 `180pt` `.ctlarea`. That difference is the reason this is a new component rather
-than a reuse. Also read `.ticks`' CSS, which is not quoted here: grep
-`settings.html` for `.ticks`.
-
-`.note i` is a `2pt` blue rule, full height of the note, `9pt` from the text —
+than a reuse. `.note i` is a `2pt` blue rule, full height of the note, `9pt` from the text —
 and the note carries `box-shadow:inset 0 1px 0 var(--line)`, the same hairline
 `SettingsGroup`'s rows use, so it reads as a final row of the group rather than
 as a floating caption.
@@ -481,7 +486,8 @@ as a floating caption.
     #expect(!(try render(0.30).samePixels(as: render(1.20))))
 }
 
-/// `ticks: 16` is `data-ticks="16"` at `settings.html:226`. Sixteen marks and
+/// `ticks: 16` is `data-ticks="16"` at `settings.html:226`, and `.ticks`' CSS is
+/// `:135-136`. Sixteen marks and
 /// none is the assertion; a tick row that silently drew a fixed count would
 /// pass any size check and fail this.
 @Test @MainActor func theTickCountIsTheOneAsked() throws {
@@ -613,7 +619,7 @@ git commit -m "feat: a status pill for install state, and .btn's link and danger
   `protocol LoginItemControlling { var isEnabled: Bool { get } ; func setEnabled(_: Bool) throws }`
   with `SMAppServiceLoginItem` and `InMemoryLoginItem`.
 
-**Structure — the prototype's five groups, in its order** (`:210-271`):
+**Structure — the prototype's five groups, in its order** (`:210-270`):
 
 | Heading | Rows |
 |---|---|
@@ -624,12 +630,16 @@ git commit -m "feat: a status pill for install state, and .btn's link and danger
 | `Interaction` | Disable click-to-jump · Number keys pick answers `new` · Confirm destructive answers `new` |
 
 Detail strings are the prototype's `<span>`s **verbatim** — copy them, do not
-paraphrase. `Number keys pick answers` and `Confirm destructive answers` carry
-`isNew: true`; nothing else on this page does.
+paraphrase. `Number keys pick answers` (`:263`) and `Confirm destructive answers` (`:266`)
+carry `isNew: true`; nothing else on this page does — **`Disable click-to-jump`
+at `:260` does not**, which is easy to get wrong because it is the row directly
+above them.
 
 **`data-shown-by="hoverdur"` is real behaviour, not decoration.** The hover
-duration row exists only while `expandOnHover` is on (`:222-226`, and the JS at
-`:630-633`). A row that stays visible and does nothing when hover is off is a
+duration row exists only while `expandOnHover` is on — the switch at `:222`
+carries `data-reveals="hoverdur"`, the row at `:223` carries `data-shown-by`,
+and `syncReveals()` at `:628-636` sets `display:none`. It is **removed from
+layout, not hidden in place**. A row that stays visible and does nothing when hover is off is a
 divergence.
 
 **Launch at login needs a seam.** `SMAppService.mainApp.register()` throws from
@@ -706,15 +716,17 @@ tests use and reuse it.
   `SocketPath.default`, `BundledIcon.forSourceID`, `SettingsSegmented`.
 - Produces: `IntegrationsPane(model: IntegrationsPaneModel)` and the model.
 
-**Structure — the prototype's four groups** (`:273-320`):
+**Structure — the prototype's four groups** (`:273-320`), noting that `CLI
+Hooks` is *two* `.group`s — the CLI list at `:277` and `Auto-configure new CLIs`
+in its own group at `:278-282`:
 
 | Heading | Rows |
 |---|---|
-| `CLI Hooks` | one row per source, then `⊕ Add CLI Branch…` (`.btn.link`), then a `.note` |
+| `CLI Hooks` | one row per source, then `⊕ Add CLI Branch…` (`.btn.link`, `:548`), then a `.note` (`:549`) |
 | *(second group)* | Auto-configure new CLIs |
-| `Reply channel` `new` | Send answers (segmented Hook/Terminal/Off) · Hook reply timeout (field + `ms`) · Carry on if VibeCat isn't running |
-| `IDE Extensions` | VS Code (pill + `.btn.danger` Uninstall) · JetBrains (pill + `.btn` Install) · a `.note` |
-| `Developer` | Custom Jump Rules (`.btn.link` `Open ↗`) · Socket `new` (mono path + `Reveal`) · Event log `new` (`Open…`) |
+| `Reply channel` `new` | Send answers (segmented Hook/Terminal/Off, `:286`) · Hook reply timeout (field + `ms`, `:290`) · Carry on if VibeCat isn't running (`:293`) |
+| `IDE Extensions` | VS Code (pill + `.btn.danger` Uninstall) · JetBrains (pill + `.btn` Install) · a `.note` — `:298-305` |
+| `Developer` | Custom Jump Rules (`.btn.link` `Open ↗`) · Socket `new` (mono path + `Reveal`) · Event log `new` (`Open…`) — `:308-319`, heading at `:308` |
 
 **The CLI list comes off `SourceRegistry`, never from a literal.** §3's rule is
 that a source is configuration and *"nothing above this line learns their
@@ -727,7 +739,7 @@ includes a user's custom sources. `displayName` is the label,
 have **no icon**, only a bold label; do not add one.
 
 **The socket row shows `SocketPath.default`**, in mono at `10.5pt` per
-`:314`. The prototype's literal string is
+`:314`'s inline `font-size:10.5px`. The prototype's literal string is
 `~/Library/Application Support/VibeCat/vibecat.sock` — check that against what
 `SocketPath.default` actually returns and record any difference rather than
 matching the prototype's string.
@@ -904,8 +916,9 @@ it from the same array the pane's body iterates, or the test is not a test.
 
 - [ ] **Step 5: Dispatch `prototype-fidelity`.** Its brief must contain:
       `docs/superpowers/prototypes/settings.html`, the General pane at
-      `:210-271`, the Integrations pane at `:273-320`, the `CLIS` renderer at
-      `:540-549`, and the control CSS at `:95-129` / `:188-191`. Ask it to name
+      `:210-270`, the Integrations pane at `:273-320`, the `CLIS` renderer at
+      `:540-549`, the reveal JS at `:628-636`, and the control CSS at `:95-136`
+      / `:188-191`. Ask it to name
       what it compared. A review that never opened the prototype can report
       self-consistency and nothing else — that is the failure this repo wrote a
       whole CLAUDE.md section about.
