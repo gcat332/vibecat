@@ -44,8 +44,8 @@ struct SessionBlocks: View {
         // (`panel` applies it), so a stack spacing would add a second one.
         VStack(alignment: .leading, spacing: 0) {
             if options.contains(.tasks), !session.tasks.isEmpty {
-                panel {
-                    blockHeader("Tasks", detail: Self.taskSummary(session.tasks))
+                RBlock {
+                    RBlockHeader(title: "Tasks", detail: Self.taskSummary(session.tasks))
                     ForEach(Array(session.tasks.enumerated()), id: \.offset) { _, task in
                         taskLine(task)
                     }
@@ -53,8 +53,8 @@ struct SessionBlocks: View {
             }
             if options.contains(.agents), !session.agents.isEmpty {
                 if options.contains(.subagents) {
-                    panel {
-                        blockHeader("Agents", detail: "\(session.agents.count)")
+                    RBlock {
+                        RBlockHeader(title: "Agents", detail: "\(session.agents.count)")
                         ForEach(Array(session.agents.enumerated()), id: \.offset) { _, agent in
                             agentLine(agent)
                         }
@@ -70,43 +70,15 @@ struct SessionBlocks: View {
                     // A panel too — `agentsHTML`'s collapsed branch emits the same
                     // `<div class="rblock">` with only its `.bh` inside it. The
                     // collapse loses the detail, not the container.
-                    panel { blockHeader("Agents", detail: "\(running) running") }
+                    RBlock { RBlockHeader(title: "Agents", detail: "\(running) running") }
                 }
             }
         }
     }
 
-    /// `.rblock{margin-top:6px;background:rgba(255,255,255,.035);border-radius:7px;
-    /// padding:7px 9px}` — a **panel**, where this drew a `┌` and a `│` and called
-    /// it a block.
-    ///
-    /// The box-drawing characters were not merely a different look. They put the
-    /// block's own indentation inside the *text* of two different strings, so the
-    /// header's `┌ ` and an item's marker were different glyph widths and the
-    /// items landed about 5pt **left of their own header** — measured off the
-    /// rendered list. One padding on one container cannot produce that, which is
-    /// the argument for the panel over and above matching the reference.
-    private func panel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0, content: content)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.035)))
-            .padding(.top, 6)
-    }
-
-    /// `.bh{font-size:10.5px;color:var(--haze);padding-bottom:4px;gap:6px}` with
-    /// `.bh em{color:var(--dim)}` — the title is a field you read, the summary in
-    /// brackets is one you refer back to, and that is the whole difference between
-    /// the two ink tiers.
-    private func blockHeader(_ title: String, detail: String) -> some View {
-        HStack(spacing: 6) {
-            Text(title).font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(Color(hazeColour))
-            Text(detail).font(.system(size: 10.5)).foregroundStyle(Color(dimColour))
-        }
-        .padding(.bottom, 4)
-    }
+    // `.rblock` and `.bh` moved to `RBlock`/`RBlockHeader` when Plan 9 gave them a
+    // third caller — a parked question renders as one of these under its own row.
+    // The CSS and the reasoning travelled with them; see that file.
 
     private func taskLine(_ task: TaskItem) -> some View {
         HStack(spacing: 7) {
