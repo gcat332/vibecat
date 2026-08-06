@@ -149,6 +149,27 @@ On brand icons: VibeCat ships neutral geometric marks and lets a source point at
 its own icon file. Bundling third-party logos is a trademark question we do not
 need to answer to ship — and custom sources need the mechanism anyway.
 
+> **Reversed 2026-08-06, on the owner's instruction, after they were told what this
+> paragraph says.** VibeCat now **does** bundle brand marks, in
+> `Sources/VibeCatCore/Resources/Icons/` — Claude, Codex, ChatGPT/OpenAI, iTerm2 and
+> VS Code — so a session row shows the mark of the CLI that raised it without anyone
+> configuring a path first.
+>
+> **The trademark question this paragraph declined to answer is now open, and the
+> answer is "MIT does not cover it".** The repository is public under MIT, which
+> grants copyright permissions and is silent on trademarks; redistributing another
+> party's mark is not something we can license on their behalf. That is recorded here,
+> in `README.md`'s licence section and in `BundledIcon`'s doc comment, so nobody has
+> to infer it from a directory listing. A rights holder asking for a removal is a
+> normal outcome, not a surprise.
+>
+> **What did not change is the sentence before it.** The point-at-a-file mechanism is
+> still the primary path and still the only one a custom source uses: an adapter's
+> `icon` is a path, `CLIMark`'s neutral geometry still draws whenever a path resolves
+> to nothing, and Plan 7's Task 1 proved that for four separate shapes of bad input.
+> **Deleting the icons directory degrades the app to the geometry rather than breaking
+> it** — which is the property that makes the reversal cheap to reverse again.
+
 > **Corrected 2026-08-06, after Plan 7 shipped.** The sketch above is right about
 > the shape and wrong about two of its members. Both were found by building it and
 > then running it against a second CLI on real hardware.

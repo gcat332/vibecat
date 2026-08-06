@@ -53,6 +53,23 @@ cp "$BIN/vibecat" "$APP/Contents/MacOS/vibecat"
 # (where the sibling is `.build/debug/vibecat-hook`). Moving it elsewhere in the
 # bundle means teaching that function two rules.
 cp "$BIN/vibecat-hook" "$APP/Contents/MacOS/vibecat-hook"
+# The generated resource bundle carrying the source icons goes in
+# `Contents/Resources`, **not** beside the executable like `vibecat-hook`.
+#
+# Measured: a `.bundle` in `Contents/MacOS` makes `codesign` fail the whole app with
+# "bundle format unrecognized, invalid, or unsuitable" naming the subcomponent —
+# nested bundles belong in `Resources`, `Frameworks` or `PlugIns` and nowhere else.
+# That location also happens to be the first one SwiftPM's generated `Bundle.module`
+# looks in (`Bundle.main.resourceURL`), so the codesign-correct place and the
+# findable place are the same place.
+#
+# Missing it is not fatal: `BundledIcon.path` returns nil and `SourceIcon` falls back
+# to `CLIMark`'s neutral geometry, which is what shipped before the icons existed.
+mkdir -p "$APP/Contents/Resources"
+for RB in "$BIN"/*.bundle; do
+  [ -e "$RB" ] || continue
+  cp -R "$RB" "$APP/Contents/Resources/"
+done
 cp Sources/VibeCatApp/Info.plist "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 

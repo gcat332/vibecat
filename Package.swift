@@ -12,7 +12,11 @@ let package = Package(
         .executable(name: "vibecat", targets: ["VibeCatApp"]),
     ],
     targets: [
-        .target(name: "VibeCatCore"),
+        // The source icons are a `.copy`, not a `.process`: they are already
+        // 256x256 PNGs and asset-catalogue processing would rewrite them into a
+        // form only Xcode reads. `.copy` keeps a plain file a plain file, which is
+        // what `SourceIcon`'s path-based loader wants.
+        .target(name: "VibeCatCore", resources: [.copy("Resources/Icons")]),
         .target(name: "VibeCatTransport", dependencies: ["VibeCatCore"]),
         // The hook's logic lives in a library so tests can import it. An
         // executable target with a main.swift cannot be @testable imported

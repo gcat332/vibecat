@@ -103,8 +103,25 @@ socket, and edit CLI config files.
 
 ## Licence
 
-[MIT](LICENSE).
+[MIT](LICENSE) — **which covers the code and not the icons.**
 
-Third-party marks are deliberately not bundled: VibeCat ships neutral geometric
-icons and a source points at its own icon file instead (§3 of the design doc).
-That is a trademark question this licence does not answer and does not need to.
+`Sources/VibeCatCore/Resources/Icons/` contains third-party brand marks (Claude,
+Codex, ChatGPT/OpenAI, iTerm2, VS Code) so that a session shows the mark of the CLI
+that raised it. They are **not** covered by the MIT licence above: MIT grants
+copyright permissions and says nothing about trademarks, and it is not ours to grant
+on a rights holder's behalf.
+
+**If you are packaging or redistributing VibeCat, look at those files first.** If you
+are a rights holder and would rather your mark were not here, open an issue and it
+will be removed — the app is designed to work without them.
+
+That last part is the useful bit: **nothing depends on them.** §3's design is that a
+source *points at* an icon file, and VibeCat ships neutral geometric marks it draws
+whenever a path resolves to nothing — which is what it did for the first seven plans
+and still does for any CLI without a bundled mark. Bundling these added a default; it
+did not replace the mechanism, and deleting the directory degrades the app to the
+geometry rather than breaking it.
+
+*Earlier versions of this file said third-party marks were deliberately not bundled,
+which was true until 2026-08-06. See §3's dated correction in the design doc for what
+changed and why.*
