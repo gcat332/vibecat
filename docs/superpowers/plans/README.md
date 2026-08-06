@@ -23,7 +23,7 @@ plan files twice; it is cheaper to keep it written down.
 | **6** | Jump and §16's AppleScript hint — everything else that was gated on keyboard input is 6.1 | §13, §16 | not written |
 | 7 | Generic adapter and custom sources — plus `SourceAdapter.icon`, so a source can point at its own icon file | §3 | **done** — [the plan](2026-08-05-generic-adapter.md), 6 tasks; 875 tests. Proved on hardware against **Codex CLI 0.145.0**, a CLI nobody wrote code for; found a main-thread hang reading an icon out of a TCC-protected directory. Carried findings below |
 | **8** | Matching motion cost to motion content | §9.1's rates | not written |
-| 9 | Parking a question in the session list — Escape sets it aside instead of giving up on it, and it renders as a `.rblock` under its own row | new; §11.1 + dated §2.3 and §14 corrections | **done** — [the plan](2026-08-06-parking-questions.md), 8 tasks; **936 tests**. Measured the hook protocol rather than reasoning from §2.3: the CLI blocks on a hook and prints nothing for the duration, so only one party can hold a question at a time and the answer deadline is the *hand-back*, not a safety net. Fixed two defects nobody asked about — two agents asking at once fail-opened the first, and Escape threw a question away. Carried findings below |
+| 9 | Parking a question in the session list — Escape sets it aside instead of giving up on it, and it renders as a `.rblock` under its own row | new; §11.1 + dated §2.3 and §14 corrections | **done** — [the plan](2026-08-06-parking-questions.md), 8 tasks; **940 tests**. Measured the hook protocol rather than reasoning from §2.3: the CLI blocks on a hook and prints nothing for the duration, so only one party can hold a question at a time and the answer deadline is the *hand-back*, not a safety net. Fixed two defects nobody asked about — two agents asking at once fail-opened the first, and Escape threw a question away. Carried findings below |
 
 Everything that had no owner now has one. What follows is where each thing went
 and why, so a later reader does not have to reconstruct the reasoning.
@@ -1110,6 +1110,56 @@ source on 2026-08-02:
 that the idle island costs 0.35% of a core and three of five moods have no
 timeline at all. Plan 5 puts several sprites on screen at once. Optimise against
 its measurements, not against Plan 3's single-sprite ones.
+
+## Plan 9's carried findings — parking questions, and one hop that had no test
+
+[The plan](2026-08-06-parking-questions.md), 8 tasks; 940 tests. Full account,
+including the mutation-by-mutation detail, in the plan's own "Carried findings"
+section and `.superpowers/sdd/2026-08-06-parking-questions/{task-6-review,
+fidelity-report,test-premise-report}.md`.
+
+- **Two open findings.** `AppModel.dismissQuestions(forSession:)` releases every
+  question live for a session, including one that arrived since the row last
+  rendered — self-healing within a frame or two, but wider than ruling B's own
+  wording. And the narrowed pointing-hand cursor (`SessionRow.headline`'s
+  `.onHover`, with an `.onDisappear` teardown) has an **unmeasured** interaction
+  with `NotchController.dismissQuestions`'s panel churn: whether `.onHover(false)`
+  is delivered while the pointer sits over the header it just dismissed from
+  cannot be observed by any headless test in this suite and needs a hand test on
+  real hardware.
+- **One accepted surviving mutant, not a deferred one.** Moving the header's
+  `.onTapGesture` onto the whole row leaves all three hit-region tests green —
+  this project has no ViewInspector and a synthetic tap cannot reach
+  `.onTapGesture` through `ImageRenderer`'s headless path
+  (`Tests/VibeCatUITests/Drawer/QuestionFaceTests.swift:6-14` already documents
+  the same limit). What defends against the bug is structural: the header and
+  the question blocks are siblings in the view tree, never
+  ancestor/descendant, so there is no shared gesture for a tap to leak through.
+- **A gap that was Task 5's, caught by Task 6's review:** `rowQuestions` could be
+  dropped at any of three view hops with the whole UI test target still green.
+  Now pinned by `aParkedQuestionSurvivesTheWholeViewTreeIntoARenderedBlock`,
+  which had to switch from a coverage-count assertion to
+  `differingPixelCount` — the drawer's silhouette paints opaquely regardless of
+  content, so a coverage count could not see the content inside it change.
+- **Three places the plan overstated its own work, corrected rather than
+  quietly dropped.** `DrawerFace.sessionList`'s `420` never needed to become a
+  floor — `SessionListFace` already scrolls. There was no collapse-on-mouse-leave
+  path to change — that range is `lapseCheck`, the expiry `Task`, and
+  auto-collapse itself doesn't exist yet. And the answer clamp's floor was never
+  meant to move to `30s` — doing so would have made nine existing tests that
+  observe a real timeout at `0.05s`/`0.6s` impossible rather than slow.
+- **What Plan 6.7 inherits.** `Preferences.handBackToTerminalAfter` is
+  persisted and clamped and read by nothing yet — the fourth persisted-but-unread
+  preference in this project's history. The hand-back that runs today is
+  `lapseCheck` timing out on the hook's own `answerDeadline`. And the clamp
+  itself is split by provenance, closed by this plan's last commit
+  (`d2529dd`): `SocketClient.clamped` stays the wire bound at `0.02…60`
+  (raising it had gone live on the *untrusted* wire value for a benefit nothing
+  yet used); `SocketClient.clampedChosenByPerson` is the new one, `0.02…3600`,
+  for a value the app's own preferences supply.
+  `2026-08-06-general-and-integrations.md` named the wrong function
+  (`clampedAnswer`) and the wrong floor (`30`) for this — corrected alongside
+  this closeout.
 
 ## Is everything the plans promised actually built?
 

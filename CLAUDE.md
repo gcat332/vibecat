@@ -105,11 +105,10 @@ These are load-bearing. Breaking one is a product failure, not a bug.
 - **Fail open (§2.3).** A crashed or absent island must never hang a terminal.
   Every failure path returns the CLI's own default and exits `0`. Two deadlines,
   bounding two different things: delivery `300ms`, answer `answerDeadline`
-  (default 20s, clamped `0.02…3600` by `SocketClient.clamped`). Any interval that
-  becomes a deadline goes through that one clamp — including values decoded off
-  the wire, because the socket is reachable by anything running as the same user
-  and an absurd value saturates a `DispatchTime` into `.distantFuture`, parking a
-  thread forever.
+  (default 20s, clamped `0.02…3600` by `SocketClient.clampedChosenByPerson`, not
+  `clamped` — see below). Any interval that becomes a deadline goes through one
+  of two clamps split by provenance, never arithmetic, because an absurd value
+  saturates a `DispatchTime` into `.distantFuture`, parking a thread forever.
 
   **The ceiling was 60 until Plan 9, and *why* it moved matters more than the
   number.** Measured against Claude Code 2.1.223: while a `PreToolUse` hook is

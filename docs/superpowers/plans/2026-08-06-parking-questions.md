@@ -2,6 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status: done, 8/8 tasks, 940 tests.** See "Carried findings" at the foot of
+> this file for what is still open and what this plan got wrong about itself.
+> The three review passes behind that section are
+> `.superpowers/sdd/2026-08-06-parking-questions/task-6-review.md`,
+> `fidelity-report.md` and `test-premise-report.md` — read them for the
+> mutation-by-mutation detail; this file's section is the folded summary.
+
 **Goal:** Let a question be *set aside* rather than given up on. ESC or collapsing
 the notch parks it; it then renders **inline beneath its own session row** in the
 session list, where it can be answered later — and the hook keeps waiting the
@@ -934,3 +941,118 @@ consumed by nothing, which is stated there and is correct.
 actually fits and reads well inside a session row at the drawer's real width is a
 judgement about pixels, not a property. Task 5's `render-evidence` dispatch and
 Task 8's `prototype-fidelity` dispatch are that check, and neither is optional.
+
+---
+
+## Carried findings — closed 2026-08-06
+
+All 8 tasks landed, at `d2529dd`. **940 tests, 17 suites, green** (`Scripts/test.sh`).
+Three review passes sit behind this section —
+`.superpowers/sdd/2026-08-06-parking-questions/task-6-review.md` (hit-region
+review plus a scoped re-review, 7 findings, all closed),
+`fidelity-report.md` (prototype diff) and `test-premise-report.md` (assertion
+audit, 2 survivors of 30 mutations) — this is the folded summary, not a
+replacement for reading them.
+
+### Deferred, and genuinely open
+
+- **`Dismiss` releases every same-session question, including one that arrived
+  since the last render.** `AppModel.dismissQuestions(forSession:)`
+  (`AppModel.swift:408`) filters live `questions` at call time, not what the row
+  last painted — self-healing in practice (an arriving question reaches the view
+  within a frame or two via `ingest → onChange → reflow`) and nothing is
+  stranded, but it is marginally wider than ruling B's own wording, which argued
+  from *the questions a row holds on screen*.
+- **The narrowed pointing-hand cursor has a teardown, but a stuck `NSCursor` is
+  process-wide state no headless test in this suite can observe.**
+  `SessionRow.headline`'s `.onHover` (`SessionRow.swift:507-511`) pushes and pops
+  `NSCursor.pointingHand` scoped to `hoveringHeader`, and `.onDisappear`
+  (`:522-524`) pops it if the row disappears mid-hover. **Unmeasured**: whether
+  `.onHover(false)` is actually delivered across `NotchController
+  .dismissQuestions`'s panel churn (`orderOut` + `orderFrontRegardless`) while
+  the pointer sits over the header it just dismissed from — `.onHover` never
+  fires without a real pointer event, and no test here can synthesize one. Needs
+  a hand test on real hardware (`Scripts/build-app.sh && open .build/VibeCat.app`),
+  not a unit test.
+
+### Accepted, not deferred
+
+**Moving the header's tap gesture onto the whole row leaves every hit-region
+test green** — confirmed by mutation (`test-premise-report.md`'s M18: all three
+of `answeringInsideTheBlockDoesNotJump`, `dismissingFromTheHeaderDoesNotJump`,
+`theHeaderStillJumps` stay green). There is no ViewInspector in this project and
+none will be added, and a synthetic tap cannot reach a SwiftUI `.onTapGesture`
+through this suite's headless render path —
+`Tests/VibeCatUITests/Drawer/QuestionFaceTests.swift:6-14` documents that limit
+already, for the same reason (`QuestionFace.tapped(_:)` is called directly
+rather than through a rendered tap). What defends against the bug is
+structural, not tested: `headline` and the question blocks are siblings under
+one `VStack` (`SessionRow.swift:263,275`), never ancestor/descendant, so there
+is no shared gesture recognizer for a tap to leak through. This is **accepted**,
+not deferred — nobody is going to add the missing coverage, because the
+dependency it would need is the thing being declined.
+
+### A gap this plan closed that belonged to its own earlier task
+
+`rowQuestions` could be dropped at any of three view hops
+(`SessionRow → SessionListFace → DrawerView → IslandView → IslandModel`) with
+the whole `VibeCatUITests` target still green — Task 5's own wiring
+(`IslandView.swift:182` threads `rowQuestions: model.questions`), not Task 6's.
+Found during Task 6's review, not invented there. Now pinned by
+`aParkedQuestionSurvivesTheWholeViewTreeIntoARenderedBlock`
+(`Tests/VibeCatUITests/IslandGoldenTests.swift:847`), which asserts
+`differingPixelCount` rather than `opaquePixelCount` — the drawer's silhouette
+fills its panel opaquely regardless of content, so a coverage count cannot see
+content change inside it, and the first version of this test used the wrong
+instrument.
+
+### Three places this plan was wrong about itself
+
+Recording these because a plan that admits its own overstatements is worth more
+than one that reads as though it were right throughout.
+
+- **`DrawerFace.sessionList`'s `420` (`IslandGeometry.swift:98`) never needed to
+  become a floor.** `SessionListFace.list` is already a `ScrollView(.vertical)`
+  (`SessionListFace.swift:129`), so a row that grows past the drawer's height
+  scrolls inside a fixed drawer rather than needing the drawer itself to grow.
+  `IslandGeometry` is untouched by this plan.
+- **There was no collapse-on-mouse-leave path to change.** The plan's Task 4
+  named `:719-746` as a mouse-leave collapse to redirect to parking; grepped,
+  that range is `lapseCheck`, the expiry `Task` (`NotchController.swift:764`).
+  Auto-collapse on mouse leave does not exist yet — it is a Plan 6.7 preference
+  with nothing behind it — so Task 4 ended up Escape-only, which the plan's own
+  text says but is worth restating here since it is a correction, not a choice.
+- **The answer clamp was not meant to become `30…3600`.** An earlier version of
+  Task 7 (and, transitively, of `docs/superpowers/plans
+  /2026-08-06-general-and-integrations.md`) specified a floor of `30` seconds
+  alongside the `3600` ceiling. Raising the floor would have made nine existing
+  tests that observe a real answer timeout at `0.05s`/`0.6s`
+  (`PendingQuestionTests`, `NotchControllerTests`) impossible rather than slow —
+  `SocketClient.floorDeadline`'s own doc comment states this. The shipped floor
+  is unchanged at `0.02` in both clamps.
+
+### What Plan 6.7 now inherits
+
+`Preferences.handBackToTerminalAfter` is persisted and clamped
+(`UserDefaultsPreferenceStore.clampedHandBack`, `0.5…60` minutes) and **read by
+nothing** — `grep -rn handBackToTerminalAfter Sources/` finds the field, its
+clamp, and its two-key encoding, and no reader; `HookRunner` never mentions it.
+This is the fourth persisted-but-unread preference in this project's history,
+recorded as `"NOTHING YET"` in `everyPreferenceFieldHasANamedProductionReader`.
+Plan 6.7's Integrations row writes it; Plan 6.7's own Task 7 is what teaches
+`HookRunner` to read it. Until then, the hand-back that actually runs in
+production is `NotchController.lapseCheck` timing out on `answerDeadline`, i.e.
+the hook's own `SocketClient.answerDeadline` (default 20s).
+
+**The clamp this plan actually shipped, for anyone wiring that reader.**
+`d2529dd` ("split the deadline clamp by provenance") found that widening
+`SocketClient.clamped`'s ceiling to `3600` was live *today* on the untrusted
+`answerDeadline` `AppModel.ingest` decodes off the `0600` socket — a sixtyfold
+widening of a fail-open bound for a benefit (a settable hand-back) that was not
+yet reachable. So the clamp is split by the value's provenance, not by one
+number: `SocketClient.clamped` (`:98`) is the wire bound, unchanged at
+`0.02…60`; `SocketClient.clampedChosenByPerson` (`:94`) is new, for a value the
+app's own `init` supplies, `0.02…3600`. `docs/superpowers/plans
+/2026-08-06-general-and-integrations.md` named the wrong function
+(`clampedAnswer`) and the wrong floor (`30`) for this — corrected in that file
+2026-08-06, alongside this closeout, to `clampedChosenByPerson` and `0.02`.

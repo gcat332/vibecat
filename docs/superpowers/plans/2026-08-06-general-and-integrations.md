@@ -113,13 +113,27 @@ So the field is:
 | Preference | `handBackToTerminalAfter: Double?` — minutes; `nil` is `Never` |
 | Default | **1 minute** |
 | Range | `0.5…60` minutes plus `Never` |
-| Clamp | `SocketClient.clampedAnswer` — **Plan 9 Task 7 owns it**, 30…3600 seconds |
+| Clamp | `SocketClient.clampedChosenByPerson` — **Plan 9 owns it**, `0.02…3600` seconds |
 | Untouched | the delivery deadline stays a hard `300ms` |
 
 **Do not invent a clamp here.** An earlier draft of this section proposed a new
-`0.05…2.0` second bound for a delivery deadline this field never was. Plan 9 Task 7
-defines `clampedAnswer`; this plan's row binds to it. **This plan's Task 7 must not
-run before Plan 9's**, or the row has nothing valid to clamp against.
+`0.05…2.0` second bound for a delivery deadline this field never was. Plan 9
+defines `clampedChosenByPerson`; this plan's row binds to it. **This plan's Task 7
+must not run before Plan 9's**, or the row has nothing valid to clamp against.
+
+**Corrected 2026-08-06, against Plan 9's shipped code, not its own draft.** The
+name and the floor above are not what Task 7 originally proposed (`clampedAnswer`,
+floor `30`) — Plan 9's own closing commit (`d2529dd`, "split the deadline clamp by
+provenance") found that raising the wire-facing ceiling to `3600` was live *today*
+on the untrusted `answerDeadline` `AppModel.ingest` decodes off the socket, for a
+benefit (a settable hand-back) nothing yet read. It split the clamp by the value's
+provenance rather than widening one number for both: `SocketClient.clamped` stays
+the wire bound, floor `0.02`, ceiling back at `60`; `clampedChosenByPerson` is the
+new function, for a value the app's own `init` supplies, floor `0.02`, ceiling
+`3600`. The floor did not move to `30` in either — raising it would have made the
+nine existing tests that observe a real answer timeout at `0.05s`/`0.6s`
+impossible rather than slow, per `SocketClient.floorDeadline`'s own doc comment.
+This plan's row must bind to `clampedChosenByPerson`, not `clamped`.
 
 **The copy is wrong in the prototype and this plan fixes it.** Measured (Plan 9's
 own section, Claude Code 2.1.223): the agent does *not* carry on without you — the
@@ -943,15 +957,16 @@ strictly worse than one hardcoded `true`.
 `main.swift` builds a client with no preferences at all. Three changes, smallest
 first:
 
-1. **Nothing new in `SocketClient`** — Plan 9 Task 7 already added
-   `clampedAnswer` (30…3600s) and `deadlineInstant(minutes:)`. Use them. The
-   delivery deadline is not touched by this row at all.
+1. **Nothing new in `SocketClient`** — Plan 9 already added
+   `clampedChosenByPerson` (`0.02…3600s`, not `30…3600` — see the correction
+   above) and `deadlineInstant(minutes:)`. Use them. The delivery deadline is not
+   touched by this row at all.
 2. `HookRunner`/`SocketClient` take the answer deadline from a preference rather
    than from `defaultAnswerDeadline`, defaulting to the constant so nothing that
    passes no value changes behaviour.
 3. `vibecat-hook`'s `main.swift` builds a `UserDefaultsPreferenceStore` — which
    after Task 1 points at the explicit suite — reads `handBackToTerminalAfter`,
-   and passes it through `SocketClient.clampedAnswer` (Plan 9 Task 7's).
+   and passes it through `SocketClient.clampedChosenByPerson` (Plan 9's).
 
 **The cost of step 3 is on the 300ms path and must be stated.** The hook is a
 short-lived process launched on every event; reading a plist adds work before the
