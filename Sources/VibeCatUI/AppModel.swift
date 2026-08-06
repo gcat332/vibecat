@@ -154,7 +154,34 @@ import VibeCatTransport
 
     /// The question the island is showing, if any. Main actor: the UI reads it
     /// every render.
+    ///
+    /// **`nil` while every outstanding question is parked**, which is how the
+    /// drawer gets sent to the session list: `NotchController.setQuestion(nil)`
+    /// clears `model.question`, and `IslandModel.face` then resolves to
+    /// `.sessionList`. So parking needs no separate signal to the view layer.
     public private(set) var pending: PendingQuestion?
+
+    /// Every question the model is holding — one per session, in arrival order.
+    ///
+    /// **An array, not a `[SessionKey: PendingQuestion]`, and the reason is
+    /// order.** The session list is ordered and which question the drawer shows
+    /// has to be stable, or the face flickers between two of them on unrelated
+    /// redraws. A dictionary plus a parallel `[SessionKey]` for order is the
+    /// classic way to have two things that can disagree; there are never more
+    /// than a handful of outstanding questions, so a linear scan to find one by
+    /// id is cheaper than that risk.
+    ///
+    /// **The invariant:** every element is either `=== pending` or `isParked`.
+    /// A third state — held, shown nowhere, not parked — is a question nobody
+    /// can answer, and `everyHeldQuestionIsEitherTheFrontmostOrParked` is the
+    /// assertion.
+    ///
+    /// One per *session*, not one per question: a session can only be blocked on
+    /// one tool call at a time, so a second question from the same session means
+    /// the first is already gone and gets lapsed rather than parked. See
+    /// `present(_:)`.
+    public private(set) var questions: [PendingQuestion] = []
+
     public var onQuestion: (@MainActor (PendingQuestion?) -> Void)?
 
     /// Returns the reply to hand back to the hook.
@@ -275,27 +302,99 @@ import VibeCatTransport
     }
 
     @MainActor private func present(_ question: PendingQuestion) {
-        // One question at a time. The displaced one fails open rather than
-        // leaving a socket thread parked with nothing that can ever wake it.
-        pending?.lapse()
+        let key = SessionKey(cli: question.event.cli, session: question.event.session)
+
+        // **A second question from the same session lapses the first; one from a
+        // different session parks it.** The distinction is the whole of Plan 9
+        // Task 2. A session can only be blocked on one tool call at a time, so a
+        // repeat from the same session means the first call is already gone —
+        // parking it would leave a row offering an answer to a call that no
+        // longer exists. Two *different* agents asking at once is the case the
+        // old unconditional `pending?.lapse()` got wrong: it fail-opened the
+        // first without anyone ever seeing it.
+        if let i = questions.firstIndex(where: { keyOf($0) == key }) {
+            questions[i].lapse()
+            questions.remove(at: i)
+        }
+        // The displaced question, if it belongs to another session, keeps its
+        // hook waiting and moves into the list.
+        pending?.park()
+
+        questions.append(question)
         pending = question
         onQuestion?(question)
     }
 
+    /// **Answers any question the model is holding, parked or frontmost**, looked
+    /// up by the reply's own id.
+    ///
+    /// It used to require `pending?.id == reply.id`, which was right when there
+    /// was one slot and is wrong now: a parked question is answered *in place*,
+    /// from the block drawn under its session's row, with no gesture that brings
+    /// it back to the drawer first. Keeping the old guard made every parked
+    /// question unanswerable, and the way that surfaced is worth recording —
+    /// `aPruneThatDropsNoQuestionDoesNotNotify` took **60 seconds**, because its
+    /// `answer` call silently did nothing and the waiter rode out its full
+    /// deadline. A test that was merely slow, not red.
+    ///
+    /// A reply whose id matches nothing is still refused, which is what
+    /// `aMismatchedReplyIsIgnored` pins.
     @MainActor public func answer(_ reply: Reply) {
-        guard let pending, pending.id == reply.id else { return }
-        pending.resolve(reply)
-        clearQuestion()
+        guard let question = questions.first(where: { $0.id == reply.id }) else { return }
+        question.resolve(reply)
+        forget(question)
+        // Only the drawer's own question empties the drawer. Answering a parked
+        // one leaves whatever is frontmost exactly where it was.
+        if pending === question { clearQuestion() }
     }
 
     @MainActor public func dismissQuestion() {
-        pending?.lapse()
+        if let pending {
+            pending.lapse()
+            forget(pending)
+        }
         clearQuestion()
     }
+
+    /// Set the frontmost question aside — Escape, or the notch collapsing. It
+    /// keeps its place in `questions` and its hook keeps waiting; only the drawer
+    /// lets go of it.
+    ///
+    /// **No auto-promotion of the next parked question**, here or in `answer`. A
+    /// drawer that swapped a different question in under the cursor invites
+    /// answering the wrong one by reflex, and choosing among several is what the
+    /// session list is for.
+    @MainActor public func parkQuestion() {
+        guard let pending else { return }
+        pending.park()
+        clearQuestion()
+    }
+
+    // **There is deliberately no `resumeQuestion`.** An earlier draft had one, to
+    // bring a parked question back to the drawer's richer `.question` face — and
+    // nothing ever called it. The owner's design answers a parked question in
+    // place, from the block under its row, and jumping is the only thing the row
+    // header does. An unused public entry point that looks like part of the flow
+    // is worse than its absence, so `PendingQuestion.unpark()` stays (Task 1's
+    // contract, and the symmetry that makes `park` readable) with no caller in
+    // this class. If a later task needs one it arrives with its caller.
 
     @MainActor private func clearQuestion() {
         pending = nil
         onQuestion?(nil)
+    }
+
+    /// Drops a question the model is done with. Not folded into `clearQuestion`:
+    /// `answer` and `dismissQuestion` are done with theirs, `parkQuestion` is
+    /// emphatically not, and all three call `clearQuestion`. One shared removal
+    /// there would delete parked questions — the exact bug this plan exists to
+    /// prevent.
+    @MainActor private func forget(_ question: PendingQuestion) {
+        questions.removeAll { $0 === question }
+    }
+
+    @MainActor private func keyOf(_ question: PendingQuestion) -> SessionKey {
+        SessionKey(cli: question.event.cli, session: question.event.session)
     }
 
     /// Only notifies when a prune actually removed something. The timer
@@ -314,6 +413,24 @@ import VibeCatTransport
         let before = store
         store.prune(idleFor: Self.idleTTL, now: now)
         if store != before {
+            onChange?()
+        }
+
+        // **A parked question has nothing else watching its expiry.**
+        // `NotchController.setQuestion(nil)` cancels `lapseCheck`, and parking
+        // reaches exactly that path, so the per-question timer is gone the moment
+        // a question moves into the list. The hook still times out on its own —
+        // no agent is left hanging — but the *list* would keep offering an answer
+        // to a call nobody is listening to. This is where that gets cleared, at
+        // the 60s tick's granularity, which is fine for cleanup and costs nothing
+        // on an idle machine.
+        //
+        // Guarded, like `store != before` above and for the same reason:
+        // `@Observable` notifies on the write, not on the change, so an
+        // unconditional notify here is a re-render every minute forever.
+        let live = questions.filter { !$0.hasLapsed(at: now) }
+        if live.count != questions.count {
+            questions = live
             onChange?()
         }
 

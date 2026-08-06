@@ -198,8 +198,168 @@ private func event(_ kind: Kind, session: String) -> VibeEvent {
     #expect(m.pending == nil)
 }
 
-/// A second question while one is open replaces it, and the first fails open
-/// rather than being left parked forever.
+// MARK: - several questions at once (Plan 9 Task 2)
+
+private nonisolated func questionEvent(_ id: String, session: String,
+                                       deadline: TimeInterval = 5) -> VibeEvent {
+    VibeEvent(id: id, cli: "claude-code", kind: .permission, session: session, cwd: "/tmp/\(session)",
+              choices: [Choice(id: "allow", label: "Allow")],
+              wantsReply: true, answerDeadline: deadline)
+}
+
+/// **The defect this task removes.** Before Plan 9, `present(_:)` lapsed whatever
+/// question was open when a new one arrived — correct with one slot, because a
+/// displaced question's socket thread would otherwise block with nothing able to
+/// wake it. But with two *different* agents asking at once it meant the first was
+/// fail-opened without ever being seen: its terminal re-prompted and the island
+/// never showed the question at all.
+///
+/// The wall-clock bound is the half that matters. `first.value == nil` alone is
+/// satisfied by the old behaviour too — lapsing returns nil immediately. What
+/// separates park from lapse is that a parked question's waiter is *still
+/// waiting*, so it must not have returned at all yet.
+@MainActor @Test func twoAgentsAskingAtOnceBothKeepTheirQuestions() async throws {
+    let m = AppModel(socketPath: "/tmp/unused.sock")
+    let first = Task.detached { m.ingest(questionEvent("q1", session: "alpha")) }
+    try await Task.sleep(for: .milliseconds(50))
+    let second = Task.detached { m.ingest(questionEvent("q2", session: "beta")) }
+    try await Task.sleep(for: .milliseconds(50))
+
+    #expect(m.questions.count == 2, "one of the two questions was discarded")
+    #expect(m.pending?.id == "q2", "the newest question is the one the drawer shows")
+    #expect(m.questions.first { $0.id == "q1" }?.isParked == true,
+            "the displaced question was not parked")
+
+    // Nothing has been answered, so neither hook may have been released. This is
+    // the assertion that fails if `present` still lapses the displaced question.
+    m.answer(Reply(id: "q2", choice: "allow"))
+    #expect(await second.value?.choice == "allow")
+
+    // **The whole point: the parked question is answered in place**, from the
+    // block under its row, with no gesture that brings it back to the drawer
+    // first. `pending` stays nil throughout — answering a parked question must
+    // not disturb what the drawer is showing.
+    #expect(m.pending == nil)
+    m.answer(Reply(id: "q1", choice: "allow"))
+    #expect(await first.value?.choice == "allow",
+            "a parked question could not be answered where it sits")
+    #expect(m.pending == nil, "answering a parked question changed the drawer")
+    #expect(m.questions.isEmpty)
+}
+
+/// Parking empties the drawer without losing the question. `pending == nil` is
+/// what reaches `NotchController.setQuestion(nil)` and sends the drawer to the
+/// session list; `questions` is what the list draws from.
+@MainActor @Test func parkingTheOnlyQuestionEmptiesTheDrawerAndKeepsTheQuestion() async throws {
+    let m = AppModel(socketPath: "/tmp/unused.sock")
+    let waiter = Task.detached { m.ingest(questionEvent("q1", session: "alpha")) }
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(m.pending?.id == "q1")
+
+    m.parkQuestion()
+    #expect(m.pending == nil, "a parked question still owns the drawer")
+    #expect(m.questions.count == 1, "parking discarded the question")
+    #expect(m.questions[0].isParked)
+
+    m.answer(Reply(id: "q1", choice: "allow"))
+    #expect(await waiter.value?.choice == "allow")
+    #expect(m.questions.isEmpty)
+}
+
+/// **No auto-promotion, deliberately.** Answering the frontmost question leaves
+/// the drawer empty rather than pulling the next parked question forward. Two
+/// reasons: a drawer that swapped in a new question under the cursor invites
+/// answering the wrong one by reflex, and choosing among several is exactly what
+/// the session list exists for.
+@MainActor @Test func answeringOneQuestionDoesNotPullAParkedOneForward() async throws {
+    let m = AppModel(socketPath: "/tmp/unused.sock")
+    let first = Task.detached { m.ingest(questionEvent("q1", session: "alpha")) }
+    try await Task.sleep(for: .milliseconds(50))
+    let second = Task.detached { m.ingest(questionEvent("q2", session: "beta")) }
+    try await Task.sleep(for: .milliseconds(50))
+
+    m.answer(Reply(id: "q2", choice: "allow"))
+    #expect(await second.value?.choice == "allow")
+    #expect(m.pending == nil, "answering promoted a parked question into the drawer")
+    #expect(m.questions.map(\.id) == ["q1"], "the answered question stayed in the list")
+
+    m.answer(Reply(id: "q1", choice: "allow"))
+    _ = await first.value
+}
+
+/// A parked question has no lapse timer. `NotchController.setQuestion(nil)`
+/// cancels `lapseCheck`, and parking goes through exactly that path — so nothing
+/// in the UI is watching a parked question's expiry any more. The hook still
+/// times out on its own, so no agent is harmed; what would rot is the *list*,
+/// which would keep offering an answer to a question nobody is listening to.
+/// `prune` is where that gets cleared.
+@MainActor @Test func pruneDropsAParkedQuestionWhoseHookHasAlreadyGivenUp() async throws {
+    let m = AppModel(socketPath: "/tmp/unused.sock")
+    let waiter = Task.detached { m.ingest(questionEvent("q1", session: "alpha", deadline: 0.05)) }
+    try await Task.sleep(for: .milliseconds(50))
+    m.parkQuestion()
+    #expect(m.questions.count == 1)
+
+    _ = await waiter.value                        // let the hook time out
+    m.prune(now: Date().addingTimeInterval(1))
+    #expect(m.questions.isEmpty,
+            "a question its hook had abandoned stayed in the session list")
+}
+
+/// `prune` runs every 60 seconds whether or not anything is stale, and
+/// `@Observable` notifies on the write rather than on the change — so an
+/// unconditional notify here costs a re-render every minute on an idle machine.
+/// The existing `store != before` guard is the pattern; questions need their own.
+@MainActor @Test func aPruneThatDropsNoQuestionDoesNotNotify() async throws {
+    let m = AppModel(socketPath: "/tmp/unused.sock")
+    let counter = ChangeCounter()
+    let waiter = Task.detached { m.ingest(questionEvent("q1", session: "alpha", deadline: 60)) }
+    try await Task.sleep(for: .milliseconds(50))
+    m.parkQuestion()
+    m.onChange = { counter.fire() }
+
+    m.prune(now: t0)                              // nothing stale: the question has 60s left
+    #expect(counter.count == 0, "a prune that removed nothing still notified")
+    #expect(m.questions.count == 1)
+
+    m.answer(Reply(id: "q1", choice: "allow"))
+    _ = await waiter.value
+}
+
+/// The invariant that keeps `pending` and `questions` from disagreeing: every
+/// question the model holds is either the one in the drawer or parked. A third
+/// state — held, not shown, not parked — would be invisible to the list and to
+/// the drawer both, which is a question nobody can answer.
+@MainActor @Test func everyHeldQuestionIsEitherTheFrontmostOrParked() async throws {
+    let m = AppModel(socketPath: "/tmp/unused.sock")
+    let a = Task.detached { m.ingest(questionEvent("q1", session: "alpha")) }
+    try await Task.sleep(for: .milliseconds(50))
+    let b = Task.detached { m.ingest(questionEvent("q2", session: "beta")) }
+    try await Task.sleep(for: .milliseconds(50))
+    let c = Task.detached { m.ingest(questionEvent("q3", session: "gamma")) }
+    try await Task.sleep(for: .milliseconds(50))
+
+    for q in m.questions {
+        #expect(q.isParked == (q !== m.pending),
+                "\(q.id) is neither frontmost nor parked")
+    }
+
+    for id in ["q1", "q2", "q3"] {
+        m.answer(Reply(id: id, choice: "allow"))
+    }
+    _ = await (a.value, b.value, c.value)
+}
+
+/// A second question **from the same session** still replaces the first, and the
+/// first must fail open rather than being left parked forever.
+///
+/// **This is the case park does not apply to, and the distinction is
+/// load-bearing.** A session can only be blocked on one tool call at a time, so a
+/// second question from the same session means the first is gone — its hook is
+/// either already unblocked or about to be. Parking it would leave a row in the
+/// list offering an answer to a call that no longer exists. Both events here use
+/// session `"s"`; `twoAgentsAskingAtOnceBothKeepTheirQuestions` above is the
+/// different-sessions case.
 @MainActor @Test func asecondQuestionLapsesTheFirst() async throws {
     let m = AppModel(socketPath: "/tmp/unused.sock")
     // `nonisolated`: a local function nested in a @MainActor test inherits
