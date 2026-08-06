@@ -734,7 +734,12 @@ import VibeCatCore
                 // parked on it, or a no-op if it already timed out on its
                 // own — and clears appModel.pending, which reaches back here
                 // via onQuestion(nil) above.
-                self.appModel.dismissQuestion()
+                // **`handBackQuestion()`, not `dismissQuestion()`, since Plan 9 Task
+                // 5.** The difference is whether the question survives: the hook is
+                // gone either way, but the row still has something to say — the
+                // terminal has this one now, and here is the command it is about. See
+                // `QuestionBlock`'s handed-back state.
+                self.appModel.handBackQuestion()
                 // The third of the three endings. Deliberately here rather than
                 // folded into `setQuestion(nil)` — which `dismissQuestion()`
                 // above does reach — because a lapse, an answer and an Escape

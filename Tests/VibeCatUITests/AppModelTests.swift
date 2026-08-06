@@ -287,23 +287,38 @@ private nonisolated func questionEvent(_ id: String, session: String,
     _ = await first.value
 }
 
-/// A parked question has no lapse timer. `NotchController.setQuestion(nil)`
-/// cancels `lapseCheck`, and parking goes through exactly that path — so nothing
-/// in the UI is watching a parked question's expiry any more. The hook still
-/// times out on its own, so no agent is harmed; what would rot is the *list*,
-/// which would keep offering an answer to a question nobody is listening to.
-/// `prune` is where that gets cleared.
-@MainActor @Test func pruneDropsAParkedQuestionWhoseHookHasAlreadyGivenUp() async throws {
+/// **Rewritten by ruling C, and the old version asserted what Task 2 shipped.**
+///
+/// It was `pruneDropsAParkedQuestionWhoseHookHasAlreadyGivenUp`, and its reasoning was
+/// sound at the time: `NotchController.setQuestion(nil)` cancels `lapseCheck`, so a
+/// parked question has nothing watching its expiry, and a question nobody is listening
+/// to should not sit in the list offering an answer.
+///
+/// What changed is that the list gained something useful to say about it. The
+/// handed-back block draws the *command* — what someone needs to read before walking to
+/// a terminal to approve it — so the question stays, and `prune` is where a question
+/// whose wait is genuinely over gets cleared instead. That rule is
+/// `aHandedBackQuestionGoesOnceItsSessionStopsWaiting` below.
+///
+/// What this still pins is the half that did not change: `prune` is the only thing
+/// watching a parked question at all, so it must not leave one live forever either.
+@MainActor @Test func pruneIsWhatWatchesAParkedQuestionSinceNothingElseDoes() async throws {
     let m = AppModel(socketPath: "/tmp/unused.sock")
     let waiter = Task.detached { m.ingest(questionEvent("q1", session: "alpha", deadline: 0.05)) }
-    try await Task.sleep(for: .milliseconds(50))
+    try await Task.sleep(for: .milliseconds(20))
     m.parkQuestion()
     #expect(m.questions.count == 1)
 
-    _ = await waiter.value                        // let the hook time out
+    _ = await waiter.value                            // the hook times out on its own
     m.prune(now: Date().addingTimeInterval(1))
-    #expect(m.questions.isEmpty,
-            "a question its hook had abandoned stayed in the session list")
+    // Kept, because the session is still `.waiting` — the terminal has it now, and the
+    // row says so. Dropped only once that stops being true.
+    #expect(m.questions.count == 1, "a handed-back question was discarded before its wait ended")
+    #expect(m.questions[0].hasLapsed(at: Date()))
+
+    _ = m.ingest(event(.running, session: "alpha"))
+    m.prune(now: Date().addingTimeInterval(2))
+    #expect(m.questions.isEmpty, "prune never cleared a question whose wait was over")
 }
 
 /// `prune` runs every 60 seconds whether or not anything is stale, and
@@ -485,4 +500,68 @@ private nonisolated func questionEvent(_ id: String, session: String,
     // line and hard-coding a distinct canned choice in its place: this
     // exact test kept passing until the value was checked for content.
     #expect(await ingest.value?.choice == "allow")
+}
+
+// MARK: - the hand-back (Plan 9 Task 5, ruling C)
+
+/// **Ruling C reverses what Task 2 shipped, and this is the assertion that pins the
+/// reversal.** Task 2's `prune` dropped any question whose hook had given up. But the
+/// handed-back block draws that question's *command* — the thing someone needs to read
+/// before walking to a terminal to approve it — so dropping it leaves nothing to draw.
+///
+/// A question the hook has abandoned therefore stays, and `hasLapsed(at:)` is what
+/// distinguishes the block's two states. No new flag on `PendingQuestion`: settled
+/// already means "the terminal has this now".
+@MainActor @Test func aHandedBackQuestionStaysInTheListSoItsCommandCanStillBeRead() async throws {
+    let m = AppModel(socketPath: "/tmp/unused.sock")
+    let waiter = Task.detached { m.ingest(questionEvent("q1", session: "alpha", deadline: 0.05)) }
+    _ = await waiter.value                            // let the hook time out
+    m.handBackQuestion()
+
+    #expect(m.questions.count == 1, "the handed-back question was discarded")
+    #expect(m.questions[0].hasLapsed(at: Date()), "it should read as handed back, not answerable")
+    #expect(m.pending == nil, "a handed-back question still owns the drawer")
+
+    // And a prune does not undo it, which is the exact behaviour Task 2 had.
+    m.prune(now: Date().addingTimeInterval(1))
+    #expect(m.questions.count == 1, "prune dropped a handed-back question")
+}
+
+/// It does not stay forever. The session is still `.waiting` while the terminal holds
+/// the question; answering there runs the tool, `PostToolUse` fires, and the session
+/// leaves `.waiting` — which is the signal that the block has nothing left to say.
+@MainActor @Test func aHandedBackQuestionGoesOnceItsSessionStopsWaiting() async throws {
+    let m = AppModel(socketPath: "/tmp/unused.sock")
+    let waiter = Task.detached { m.ingest(questionEvent("q1", session: "alpha", deadline: 0.05)) }
+    _ = await waiter.value
+    m.handBackQuestion()
+    m.prune(now: Date())
+    #expect(m.questions.count == 1, "setup: it should still be here while the session waits")
+
+    // The agent proceeding — the person answered in the terminal.
+    _ = m.ingest(event(.running, session: "alpha"))
+    m.prune(now: Date())
+    #expect(m.questions.isEmpty, "the handed-back question outlived the wait it described")
+}
+
+/// **The safety half of that rule, and the reason it is not simply "drop questions
+/// whose session is not waiting".** A *live* question — one whose hook is still
+/// blocked — must be kept whatever the store says, because the store's state comes
+/// from whatever event arrived last and a session can be reported `.running` while one
+/// of its parallel tool calls is still blocked on a permission. Dropping that question
+/// would strand its hook with nothing able to answer it.
+@MainActor @Test func pruneKeepsALiveQuestionEvenWhenItsSessionIsNotWaiting() async throws {
+    let m = AppModel(socketPath: "/tmp/unused.sock")
+    let waiter = Task.detached { m.ingest(questionEvent("q1", session: "alpha", deadline: 30)) }
+    try await Task.sleep(for: .milliseconds(50))
+    // A second, later event puts the session into `.running` while the question's hook
+    // is still parked — exactly the parallel-tool-call case.
+    _ = m.ingest(event(.running, session: "alpha"))
+    #expect(m.store.sessions.first?.state == .running, "setup: the session must not be waiting")
+
+    m.prune(now: Date())
+    #expect(m.questions.count == 1, "a live question was dropped because its session had moved on")
+
+    m.answer(Reply(id: "q1", choice: "allow"))
+    #expect(await waiter.value?.choice == "allow")
 }

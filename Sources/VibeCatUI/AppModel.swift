@@ -403,6 +403,26 @@ import VibeCatTransport
         clearQuestion()
     }
 
+    /// The deadline ran out: the hook has gone and the terminal has the decision now.
+    ///
+    /// **Lapses like `dismissQuestion` but keeps the question like `parkQuestion`**, and
+    /// that combination is ruling C. The block under the row loses its choices — there
+    /// is nothing here to answer — and keeps the *command*, which is what someone needs
+    /// to read before walking to a terminal to approve it. Dropping the question would
+    /// leave that block nothing to draw.
+    ///
+    /// No new flag distinguishes the two block states: `hasLapsed(at:)` already does.
+    /// A settled question that is still in `questions` means exactly "the terminal has
+    /// this one".
+    ///
+    /// The `lapse()` is usually redundant — `PendingQuestion.await()` sets `settled`
+    /// itself the instant it times out, and this is called from the expiry `Task` — but
+    /// it costs nothing and makes the state true regardless of which path arrived first.
+    @MainActor public func handBackQuestion() {
+        pending?.lapse()
+        clearQuestion()
+    }
+
     // **There is deliberately no `resumeQuestion`.** An earlier draft had one, to
     // bring a parked question back to the drawer's richer `.question` face — and
     // nothing ever called it. The owner's design answers a parked question in
@@ -445,21 +465,32 @@ import VibeCatTransport
             onChange?()
         }
 
-        // **A parked question has nothing else watching its expiry.**
-        // `NotchController.setQuestion(nil)` cancels `lapseCheck`, and parking
-        // reaches exactly that path, so the per-question timer is gone the moment
-        // a question moves into the list. The hook still times out on its own —
-        // no agent is left hanging — but the *list* would keep offering an answer
-        // to a call nobody is listening to. This is where that gets cleared, at
-        // the 60s tick's granularity, which is fine for cleanup and costs nothing
-        // on an idle machine.
+        // **A question whose hook has given up is kept, not dropped — ruling C.** Task
+        // 2 dropped it here, on the reasoning that a question nobody is listening to
+        // should not stay in the list. That was wrong once the list had something useful
+        // to say about it: the handed-back block draws the *command*, which is what
+        // someone needs to read before walking to a terminal to approve it.
+        //
+        // So what this removes is a handed-back question the wait for which is over,
+        // and the signal for that is the session leaving `.waiting` — answering in the
+        // terminal runs the tool, `PostToolUse` fires, and the store moves on.
+        //
+        // **A live question is kept whatever the store says**, and that asymmetry is
+        // the safety half. The store's state is whatever the last event set, and a
+        // session can be reported `.running` while one of its parallel tool calls is
+        // still blocked on a permission — dropping that question would strand its hook
+        // with nothing able to answer it.
         //
         // Guarded, like `store != before` above and for the same reason:
-        // `@Observable` notifies on the write, not on the change, so an
-        // unconditional notify here is a re-render every minute forever.
-        let live = questions.filter { !$0.hasLapsed(at: now) }
-        if live.count != questions.count {
-            questions = live
+        // `@Observable` notifies on the write, not on the change, so an unconditional
+        // notify here is a re-render every minute forever.
+        let keep = questions.filter { question in
+            guard question.hasLapsed(at: now) else { return true }
+            let key = SessionKey(cli: question.event.cli, session: question.event.session)
+            return store.sessions.first { $0.id == key }?.state == .waiting
+        }
+        if keep.count != questions.count {
+            questions = keep
             onChange?()
         }
 
