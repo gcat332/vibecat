@@ -103,7 +103,6 @@ import VibeCatCore
     @ObservationIgnored
     public var onAnswer: (@MainActor (Reply) -> Void)?
 
-
     /// Whether the drawer's own footer should show the muted glyph. **The
     /// same setting as `Preferences.soundEnabled`** — `island-motion.html:1060`
     /// states the coupling explicitly: "the panel's mute button and the

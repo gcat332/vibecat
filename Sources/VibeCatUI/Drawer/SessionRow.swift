@@ -406,6 +406,16 @@ struct SessionRow: View {
         // the row's text down to stay centred against it, which is what a
         // fixed-height `.frame` would have had to fake by re-deriving a number
         // this alignment gets for free, from the same rule the mockup states.
+        //
+        // **Not for free alone, though, and the correction matters more than the
+        // fix did.** `theHeaderStaysOnOneBaselineWhetherOrNotDismissIsShown` also
+        // dies to `dismissControl`'s `.padding(.vertical, 0)` becoming `3`: the
+        // alignment holds the baseline, and that zero is what stops the chip's own
+        // box growing the line box around it. Two lines carry this between them.
+        // Recorded because a comment that credits one of two causes is how this
+        // repo lost its bezel fillets for four plans — someone read `9px` as the
+        // bottom radius, found the fillets beside it, and deleted those instead of
+        // re-spelling a number that never needed changing.
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             // `${card.project ? s.proj : s.term}` — a substitution, not a
             // removal. Falls back to the project when there is no origin app to
@@ -501,6 +511,11 @@ struct SessionRow: View {
             .font(.system(size: 10.5))
             .foregroundStyle(Color(dimColour))
             .padding(.horizontal, 8)
+            // **Load-bearing, not a no-op to tidy away.** With any vertical padding
+            // this chip's box grows the header's line box and line 1 gains height,
+            // so rows stop sharing a baseline down the list — mutation-verified,
+            // `3` here reddens `theHeaderStaysOnOneBaselineWhetherOrNotDismissIsShown`.
+            // The `.firstTextBaseline` alignment on `headline` is the other half.
             .padding(.vertical, 0)
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(dimColour), lineWidth: 1))
             .contentShape(RoundedRectangle(cornerRadius: 6))
