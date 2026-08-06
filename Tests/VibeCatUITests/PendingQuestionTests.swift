@@ -112,6 +112,105 @@ private func question(id: String = "q1") -> VibeEvent {
             "a second buffered signal let await() return without waiting")
 }
 
+// MARK: - parking (Plan 9 Task 1)
+//
+// These live here rather than in the `ParkedQuestionTests.swift` the plan named,
+// and the reason is worth one line: every other assertion about this type's gate
+// discipline is in this file, including `lapsingTwiceDoesNotDoubleSignal`'s
+// wall-clock idiom that the first test below reuses. Splitting parking out would
+// put two halves of one type's contract in two files. `ParkedQuestionTests.swift`
+// takes Tasks 2–3's model- and island-level assertions instead.
+
+/// **The whole point of parking, and the one way to get it catastrophically
+/// wrong.** `park()` must not signal the gate. A `park()` written by copying
+/// `lapse()` would release the waiting hook — the agent is told to carry on, the
+/// island still draws the question, and every UI-level test still passes. The
+/// person then answers a question nobody is listening to.
+///
+/// Detected the way `lapsingTwiceDoesNotDoubleSignal` detects a leaked signal:
+/// an unsignalled `await()` must ride out its full deadline, so bound the wall
+/// clock from *below*. Nothing but a signal can make it return early — `expiry`
+/// is absolute, so even a waiter that starts late still returns at ~0.3s.
+@Test func parkingDoesNotReleaseTheWaitingHook() async throws {
+    let p = PendingQuestion(event: question(), deadline: 0.3)
+    let start = Date()
+    let waiter = Task.detached { p.await() }
+    try await Task.sleep(for: .milliseconds(20))
+    p.park()
+    #expect(p.isParked)
+    let reply = await waiter.value
+    #expect(reply == nil, "parking carries no answer")
+    #expect(Date().timeIntervalSince(start) > 0.25,
+            "park() signalled the gate, so the hook was released and the agent carried on")
+}
+
+/// The inverse, so the pair brackets the behaviour. Without this, a `park()`
+/// that simply did nothing at all would pass the test above — and `lapse()`
+/// losing its signal is a regression parking makes easy to introduce, since both
+/// now live beside each other.
+@Test func dismissingStillReleasesTheWaitingHookEvenAfterParking() async throws {
+    let p = PendingQuestion(event: question(), deadline: 5)
+    let start = Date()
+    let waiter = Task.detached { p.await() }
+    try await Task.sleep(for: .milliseconds(20))
+    p.park()
+    p.lapse()
+    #expect(await waiter.value == nil)
+    #expect(Date().timeIntervalSince(start) < 1.0,
+            "lapse() on a parked question left the waiter parked")
+}
+
+/// Parking is why a question is worth keeping, so it must stay answerable.
+@Test func aParkedQuestionCanStillBeResolved() {
+    let p = PendingQuestion(event: question(), deadline: 5)
+    p.park()
+    #expect(p.resolve(Reply(id: "q1", choice: "allow")))
+}
+
+/// **Parking does not pause the clock**, and this is the assertion that stops
+/// someone making it do so. The hook fixes its own wait against `expiry` before
+/// anyone can park anything and knows nothing about parking, so a parked
+/// question that stopped expiring would outlive the thread it belongs to: the
+/// island would keep offering an answer the socket had already abandoned.
+///
+/// Settled well before the deadline would let `settled ||` do the work, so this
+/// deliberately waits the clock out instead — the `instant >= expiry` branch is
+/// the one under test.
+@Test func aParkedQuestionStillExpires() {
+    let now = Date()
+    let p = PendingQuestion(event: question(), deadline: 5, now: now)
+    p.park()
+    #expect(!p.hasLapsed(at: now.addingTimeInterval(4)))
+    #expect(p.hasLapsed(at: now.addingTimeInterval(6)),
+            "parking stopped the expiry clock, so this question outlives its hook")
+}
+
+/// A question the hook has already given up on must not come back into the list.
+/// Two ways this arrives: the person dismissed it, or it timed out while the
+/// notch was collapsed. Either way `park()` after `settled` would redraw a
+/// question the agent has already moved past.
+@Test func aSettledQuestionCannotBeParked() {
+    let p = PendingQuestion(event: question(), deadline: 5)
+    p.lapse()
+    p.park()
+    #expect(!p.isParked, "a question that had already lapsed was parked back into the list")
+}
+
+/// `unpark()` is how tapping a row brings the question back to the front, and it
+/// has the same settled guard for the same reason.
+@Test func unparkingReturnsAQuestionToTheFrontButNotFromTheDead() {
+    let p = PendingQuestion(event: question(), deadline: 5)
+    p.park()
+    p.unpark()
+    #expect(!p.isParked)
+
+    let dead = PendingQuestion(event: question(), deadline: 5)
+    dead.park()
+    dead.lapse()
+    dead.unpark()
+    #expect(dead.hasLapsed(at: Date()), "unpark() revived a settled question")
+}
+
 /// aLapsedQuestionStopsBeingAnswerable only ever calls hasLapsed() after
 /// wall-clock time has already passed `expiry`, so `instant >= expiry` alone
 /// would satisfy it even with `settled ||` deleted. Settle minutes before

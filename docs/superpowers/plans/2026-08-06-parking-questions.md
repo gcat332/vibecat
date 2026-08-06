@@ -118,23 +118,31 @@ repo's most concurrency-sensitive object, and chose it anyway. The reason it is
 right: the point of putting a question in the session list is to choose among
 several. With one at a time the list gives a new location and no new capability.
 
-### B. Giving up on purpose: **a `Dismiss` in the session list**
+### B. Giving up on purpose: **a `Dismiss` on the session row's header**
 
 Not a second ESC press. The control carries the meaning (§10.2) and a hidden
 second-press is the opposite of that rule.
 
-**Where it lands:** in the question block's `.bh` header line, right-aligned, in
-`--dim` — quiet and present. The block is rendered inside the session list under
-its own row and is always visible, so "in the session list" and "in the block's
-header" are the same place; there is no expand step between them.
+**Where it lands: in `.rtop`** (`island-motion.html:351`) — the session row's own
+header, beside `.rstate`. Note `.rstate` carries `margin-left:auto`, so it is
+already the right-aligned end of that line; Task 5 decides which side of it the
+Dismiss sits on and the answer comes from the prototype's spacing, not from
+preference.
 
-Recorded because the owner's words were *"Dismiss ให้กดที่ session list"* and a
-later reader could reasonably ask whether that meant a control on the **row**,
-outside the block. It does not: one Dismiss, in the block that shows the question
-it dismisses, so the thing being given up on is on screen when you give up on it.
-Putting it on the row would let someone dismiss a question they had not read,
-which is the same failure `.truncationMode(.middle)` exists to prevent — being
-asked to decide about something you cannot see.
+**A first draft of this ruling put it inside the question block's `.bh` header
+and argued the row was the wrong place** — that someone could dismiss a question
+they had not read, the same failure `.truncationMode(.middle)` exists to prevent.
+**That argument does not hold and the record should say why rather than quietly
+dropping it.** The block renders inline beneath the header and is always visible;
+there is no expand step. So the question *is* on screen while the header's
+Dismiss is being pressed, and the concern it was guarding against cannot arise.
+
+**What the placement does create is a hit-region collision, and Task 6 owns it.**
+`.rtop` is also the jump target (ruling from the owner: *"จะ Jump แค่เวลากดที่
+หัวข้อของ session"*). So the header now contains both "jump to this terminal" and
+"give up on this question", and a `Dismiss` that let its tap propagate would jump
+*and* dismiss in one click. Task 6's `answeringInsideTheBlockDoesNotJump` gets a
+sibling: `dismissingFromTheHeaderDoesNotJump`.
 
 ---
 
@@ -466,10 +474,12 @@ Escape parks and only parks.
   `DestructiveGuard`; `QuestionModel`.
 - Produces: `QuestionBlock(question:, onAnswer:, onDismiss:)`.
 
-**`onDismiss` is ruling B's control** — right-aligned in the `.bh` header
-(`island-motion.html:371-372`), `--dim`. It is the only way to fail a question
-open on purpose once Task 4 makes Escape park, so it is not optional and it is
-not a follow-up.
+**`onDismiss` is *not* this view's** — ruling B puts the control on the session
+row's header (`.rtop`, `island-motion.html:351`), which is `SessionRow`'s, so the
+closure is threaded from there. `QuestionBlock` draws the question and its
+choices and nothing else. It is still Task 5's job to *build* the control, and it
+is the only way to fail a question open on purpose once Task 4 makes Escape park
+— so it is not optional and not a follow-up.
 
 **This is the visual task and the prototype is the authority.**
 `.rblock` `:370` — `margin-top:6px`, `rgba(255,255,255,.035)`, `border-radius:7px`,
@@ -538,8 +548,8 @@ of them does not exist.
 - Modify: `Sources/VibeCatUI/IslandGeometry.swift`
 - Test: `Tests/VibeCatUITests/Drawer/RowHitRegionTests.swift`
 
-**Interfaces:** consumes Task 5. Produces `SessionRow(… onJump:)` and the
-row's hit-region split.
+**Interfaces:** consumes Task 5. Produces `SessionRow(… onJump:, onDismiss:)`
+and the row's hit-region split.
 
 **The owner's rule:** answering never jumps; **jump fires only from the session's
 header**. In prototype terms that is `.rtop` (`:351`) — the project name, the
@@ -586,7 +596,21 @@ does not fight the existing drawer-open animation.
 }
 ```
 
-The pair is the point: either test alone is satisfied by a broken
+```swift
+/// Ruling B's control lives in the same header that jumps, so a tap that
+/// propagated would jump *and* give up on the question in one click — the worst
+/// possible pair of outcomes to combine, since one of them is irreversible for
+/// that question.
+@Test @MainActor func dismissingFromTheHeaderDoesNotJump() {
+    var jumped = false, dismissed = false
+    // …build a row with a parked question, onJump/onDismiss both recording…
+    // …invoke the Dismiss control's testing hook…
+    #expect(dismissed == true)
+    #expect(jumped == false, "dismissing a question also jumped to its terminal")
+}
+```
+
+The three together are the point: any one alone is satisfied by a broken
 implementation.
 
 - [ ] **Step 2: Run, watch both fail.** — [ ] **Step 3: Implement.**
