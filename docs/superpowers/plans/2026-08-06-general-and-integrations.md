@@ -32,12 +32,18 @@ dependencies. `SMAppService` (`ServiceManagement`) for launch at login.
   `#4A4A50`. Add them to `SettingsPalette` with their prototype line number.
 - **`--accent` means system blue in Settings**, not the island's state colour.
   §4.3 is inverted here and `SettingsPalette.systemBlue` is the token.
-- **Fail open (§2.3) is load-bearing and is not a preference.** See "The two
-  conflicts" below — do not implement either control until the owner has ruled.
-- **Any interval that becomes a deadline goes through `SocketClient.clamped`.**
-  It bounds `0.02…60` seconds. A `UserDefaults` plist is editable by anything
-  running as this user, so a value read back out of preferences is untrusted
-  input on exactly the same footing as one decoded off the wire.
+- **Fail open (§2.3) is load-bearing and is not a preference.** The prototype's
+  switch for it is **not built** — see the rulings below.
+- **Any interval that becomes a deadline goes through a named clamp in
+  `SocketClient`.** `clamped` bounds `0.02…60` for the *answer* deadline; this
+  plan adds `clampedDelivery` at `0.05…2.0` for the delivery deadline. A
+  `UserDefaults` plist is editable by anything running as this user, so a value
+  read back out of preferences is untrusted input on exactly the same footing as
+  one decoded off the wire.
+- **Preferences live in an explicit `UserDefaults` suite, not `.standard`.**
+  Measured: a binary with no bundle identifier gets a domain named after its
+  executable, so `.standard` in `vibecat-hook` is a different file from
+  `.standard` in the bundled app. See ruling 2.
 - **Every new preference field is added to `Preferences`, to `save`, **and** to
   `load`.** `Preferences`' own doc comment says this because three fields have
   already been persisted and never read.
@@ -47,70 +53,103 @@ dependencies. `SMAppService` (`ServiceManagement`) for launch at login.
   `IntegrationsPane`/`GeneralPane`'s `declaredInert` list (Task 7). A row that
   looks finished and does nothing is worse than one that names its owner.
 
-## The two conflicts, for the owner to rule on before Task 6
+## The two rulings, given 2026-08-06
 
-Raised here rather than discovered mid-implementation.
+Both were raised as open conflicts between the prototype and §2.3. The owner has
+ruled; this section records the rulings and the evidence behind them, so a later
+reader finds a decision rather than reconstructing one.
 
-**1. `Carry on if VibeCat isn't running` (`settings.html:293-295`) contradicts
-§2.3.** The prototype draws it as a switch, defaulting on, captioned *"Turning
-this off is not recommended."* But §2.3 is not a recommendation: *"A crashed or
-absent island must never hang a terminal."* Off, this switch makes the hook wait
-on an absent app — the one failure mode the whole design is built to make
-impossible, and the reason `HookRunner` returns the CLI's own default and exits
-`0` on every path.
+### 1. `Carry on if VibeCat isn't running` — **the row is removed entirely**
 
-Three ways out, and a recommendation:
+The prototype draws it at `settings.html:293-295` as a switch defaulting on,
+captioned *"A crashed island must never be able to hang your terminal. Turning
+this off is not recommended."*
 
-- **(a) Draw the row, no switch.** A `.pill.ok` reading `Always on` and the
-  caption rewritten to say why. Honest, and it keeps §14's row count.
-- **(b) Draw the switch, make it a no-op with the inertness declared.** Matches
-  the prototype pixel for pixel and lies to the user.
-- **(c) Draw the switch and wire it.** Matches the prototype and breaks §2.3.
+**Ruling: do not build the row, do not add a preference field. Fail open is
+unconditional.** Not the pill-reading-`Always on` variant that was offered —
+the owner asked for the row gone.
 
-**Recommended: (a)** — and read this paragraph before ruling, because it is the
-deciding fact and it is not obvious from the prototype's caption.
-
-**Fail open here means "hand the decision back to the terminal", not "allow
-it".** `HookRunner.run` returns `nil` on every failure path — dead socket, slow
-reply, crossed id, bad JSON (`HookRunner.swift:28-51`) — and `nil` means the hook
-prints nothing at all. With no `permissionDecision` on stdout, claude-code does
-what it did before VibeCat existed: it prompts in the terminal. Nothing is
-auto-approved and no destructive command slips past unattended.
+**The evidence, measured rather than reasoned.** Fail open here means "hand the
+decision back to the terminal", not "allow it". `HookRunner.run` returns `nil`
+on every failure path — dead socket, slow reply, crossed id, bad JSON
+(`HookRunner.swift:28-51`) — and `nil` means the hook prints nothing at all.
+With no `permissionDecision` on stdout, claude-code does what it did before
+VibeCat existed: it prompts in the terminal. Nothing is auto-approved.
 
 That kills the only argument for the switch. The plausible case for wanting it
 off is *"VibeCat is my gate on dangerous commands; if it crashes I don't want
-`rm -rf` waved through"* — which would be right if fail-open answered `allow`.
-It does not answer at all. So turning this off protects nothing; the only thing
-it can accomplish is hanging a terminal, which is the one outcome §2.3 exists to
-make impossible.
+`rm -rf` waved through"* — which would be right if fail open answered `allow`.
+It does not answer at all. So off protects nothing, and the only thing it can
+accomplish is hanging a terminal, which is the one outcome §2.3 exists to make
+impossible.
 
-**The prototype's caption is therefore half wrong**, and the divergence record
-should say so: *"A crashed island must never be able to hang your terminal"* is
-correct, and *"Turning this off is not recommended"* is not — there is nothing to
-recommend for or against, because the alternative has no benefit to trade
-against its cost.
+**The prototype's caption is half wrong and that is part of this record.** *"A
+crashed island must never be able to hang your terminal"* is correct. *"Turning
+this off is not recommended"* is not — there is no trade to recommend against,
+because the alternative has no benefit.
 
-The prototype is the authority on appearance; §2.3 is a Global Constraint, and
-where they collide the constraint wins and the divergence gets written down. That
-is this repo's own stated rule for a prototype divergence: a fix or a written
-decision, never a silent third thing.
+**So the `Reply channel` group has two rows here and three in the prototype.**
+That is a deliberate, written divergence, and it must be repeated in
+`IntegrationsPane`'s doc comment where an implementer will actually meet it —
+not only here. A reviewer diffing against the prototype will find a missing row
+and needs to find the reason in the same file.
 
-**2. `Hook reply timeout` (`settings.html:290-292`) exposes a deadline to a text
-field.** The prototype's field holds `300` with a `ms` suffix, which is the
-**delivery** deadline — the 300ms bound on reaching the app at all, not the
-`answerDeadline` a person answers within. Two problems: the hook is a separate
-short-lived process and does not read `Preferences` today, and any value out of
-a plist is untrusted. Wiring it means the hook reads the store at startup and
-the value goes through `SocketClient.clamped` before it becomes a `DispatchTime`.
-`clamped`'s floor of `0.02` (20ms) and ceiling of `60` are wrong for a delivery
-deadline the design fixes at 300ms — a 60-second delivery wait is §2.3 violated
-by arithmetic rather than by a switch.
+### 2. `Hook reply timeout` — **wired for real**
 
-**Recommended:** ship the field, persist it, clamp it to `0.05…2.0` seconds with
-its own named constant beside `clamped`, and **have the hook read it** — a
-delivery deadline a user can raise to 2s is defensible on a loaded machine, and
-2s is still bounded. If the owner would rather not have the hook touch
-preferences at all this becomes a declared-inert field, which is Task 7's list.
+**Ruling: build the field, persist it, clamp it, and have the hook read it.**
+
+The prototype's field (`settings.html:290-292`) holds `300` with a `ms` suffix,
+which is the **delivery** deadline — the bound on reaching the app at all, not
+the `answerDeadline` a person answers within.
+
+`SocketClient.clamped`'s `0.02…60` is the answer deadline's range and is wrong
+here: a 60-second delivery wait is §2.3 broken by arithmetic rather than by a
+switch. **This plan adds its own bound, `0.05…2.0` seconds**, as a named constant
+beside `clamped` in `SocketClient` — not a bare `min(max(...))` at the use site,
+because this repo's rule is that every interval becoming a deadline goes through
+one clamp and that rule is what stops the next one drifting.
+
+#### The measured hazard that makes this task more than a text field
+
+**A bare binary's `UserDefaults.standard` is not the app's domain.** Measured on
+this machine 2026-08-06, with a throwaway executable compiled by `swiftc` and run
+from a shell:
+
+```
+bundleIdentifier = (nil)
+executable       = domain
+standard read    = probe-domain          # wrote and read its own domain
+app-suite read   = (nil)                 # could not see com.gcat332.vibecat
+```
+
+It created `~/Library/Preferences/domain.plist` — **a domain named after the
+executable**. So `vibecat-hook` reading `UserDefaults.standard` would read
+`vibecat-hook.plist`, never the app's `com.gcat332.vibecat.plist`. It would find
+no key, fall back to the 300ms default, and **the field would look wired and do
+nothing** — precisely the failure mode Task 7's declared-inert list exists to
+prevent, arriving through the back door as an apparently-wired control.
+
+**The fix, also measured.** An explicit suite crosses the process boundary:
+
+```
+wrote via suiteName from a bare binary, read back = 0.42
+$ defaults read com.gcat332.vibecat
+{ "vibecat.hookReplyTimeout" = "0.42"; }
+```
+
+So `UserDefaults(suiteName: "com.gcat332.vibecat")` works from a bare binary and
+is visible to other processes.
+
+**And this is a pre-existing bug, not one this plan introduces.**
+`UserDefaultsPreferenceStore.init` defaults to `.standard`
+(`PreferenceStore.swift:26`), so **`swift run vibecat` already writes to
+`vibecat.plist` while the bundled app writes to `com.gcat332.vibecat.plist`** —
+two different files for the same preferences, which is why
+`~/Library/Preferences/com.gcat332.vibecat.plist` is 42 bytes after a week of
+development. Task 1 fixes this at the root by making the store's default an
+explicit suite, which repairs the app, the dev binary and the hook in one change.
+Nothing is migrated: the existing domain is effectively empty and there are no
+users.
 
 ---
 
@@ -139,7 +178,10 @@ preferences at all this becomes a declared-inert field, which is Task 7's list.
 | File | Change |
 |---|---|
 | `Sources/VibeCatCore/Preferences.swift` | fifteen new fields, with `save`/`load` |
-| `Sources/VibeCatCore/PreferenceStore.swift` | clamping for the two numeric ones |
+| `Sources/VibeCatCore/PreferenceStore.swift` | clamping for the numeric fields, **and the default domain moves from `.standard` to an explicit suite** |
+| `Sources/VibeCatTransport/SocketClient.swift` | `clampedDelivery`, and `deliveryDeadline` becomes an instance property |
+| `Sources/VibeCatHookKit/HookRunner.swift` | reads the delivery deadline out of preferences |
+| `Sources/vibecat-hook/main.swift` | builds the store and passes the deadline in |
 | `Sources/VibeCatUI/Settings/SettingsPalette.swift` | four new tokens |
 | `Sources/VibeCatUI/Settings/SettingsControls.swift` | `SettingsButton.Variant` (`.plain`/`.link`/`.danger`); `SettingsStatusPill` |
 | `Sources/VibeCatUI/Settings/SettingsPage.swift` | `ownerNote(for:)` loses `"general"` and `"integrations"` |
@@ -151,7 +193,7 @@ preferences at all this becomes a declared-inert field, which is Task 7's list.
 
 ---
 
-### Task 1: The fifteen preference fields
+### Task 1: The sixteen preference fields, and the domain they live in
 
 **Files:**
 - Modify: `Sources/VibeCatCore/Preferences.swift`
@@ -188,9 +230,16 @@ ever disagree:
 | `replyChannel` | `ReplyChannel` | `.hook` | `:286` (`aria-pressed` on `Hook`) |
 | `hookReplyTimeout` | `Double` | `0.300` | `:290` (`value="300"`, ms) |
 
-That is sixteen rows for fifteen fields plus one: `hookReplyTimeout` ships only
-if the owner rules for wiring it (see "The two conflicts"). Implement it either
-way — an unread preference is Task 7's declared-inert list, not a missing field.
+All sixteen ship. `hookReplyTimeout` is wired for real in Task 7 per ruling 2 —
+it is not a declared-inert field. There is **no** `failOpen` field: ruling 1
+removed that row, so no preference backs it.
+
+**Also in this task, because every later task depends on it:** change
+`UserDefaultsPreferenceStore.init`'s default from `defaults: UserDefaults = .standard`
+to an explicit suite for `com.gcat332.vibecat`. Ruling 2 has the measurement; the
+short version is that `.standard` resolves per-executable when there is no bundle
+identifier, so the app, `swift run vibecat` and `vibecat-hook` are three
+different files today.
 
 - [ ] **Step 1: Write the failing round-trip test**
 
@@ -747,7 +796,7 @@ in its own group at `:278-282`:
 |---|---|
 | `CLI Hooks` | one row per source, then `⊕ Add CLI Branch…` (`.btn.link`, `:548`), then a `.note` (`:549`) |
 | *(second group)* | Auto-configure new CLIs |
-| `Reply channel` `new` | Send answers (segmented Hook/Terminal/Off, `:286`) · Hook reply timeout (field + `ms`, `:290`) · Carry on if VibeCat isn't running (`:293`) |
+| `Reply channel` `new` | Send answers (segmented Hook/Terminal/Off, `:286`) · Hook reply timeout (field + `ms`, `:290`) — **two rows, not the prototype's three** |
 | `IDE Extensions` | VS Code (pill + `.btn.danger` Uninstall) · JetBrains (pill + `.btn` Install) · a `.note` — `:298-305` |
 | `Developer` | Custom Jump Rules (`.btn.link` `Open ↗`) · Socket `new` (mono path + `Reveal`) · Event log `new` (`Open…`) — `:308-319`, heading at `:308` |
 
@@ -767,10 +816,16 @@ have **no icon**, only a bold label; do not add one.
 `SocketPath.default` actually returns and record any difference rather than
 matching the prototype's string.
 
-**Do not implement `Carry on if VibeCat isn't running` or wire
-`Hook reply timeout` until the owner has ruled** on the two conflicts above.
-Build the rest of the group; leave the ruling's row for the same task once the
-answer is in.
+**`Carry on if VibeCat isn't running` (`:293-295`) is deliberately absent.**
+Ruling 1: fail open is unconditional, so there is no switch and no row. Put that
+sentence in `IntegrationsPane`'s own doc comment, with the prototype line number
+and a pointer to §2.3 — a reviewer diffing this pane against the prototype will
+find a row short and must find the reason here rather than filing it as a defect.
+It is the plan's job to make the divergence visible at the place someone meets
+it, which is this repo's own stated rule.
+
+**`Hook reply timeout` renders here and is wired in Task 7.** This task builds
+the field and the model's parse-and-clamp; Task 7 makes the hook read it.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -825,8 +880,13 @@ answer is in.
 - Modify: `Sources/VibeCatUI/AppModel.swift`
 - Modify: `Sources/VibeCatUI/Settings/GeneralPane.swift`
 - Modify: `Sources/VibeCatUI/Settings/IntegrationsPane.swift`
+- Modify: `Sources/VibeCatTransport/SocketClient.swift`
+- Modify: `Sources/VibeCatHookKit/HookRunner.swift`
+- Modify: `Sources/vibecat-hook/main.swift`
 - Test: `Tests/VibeCatUITests/AppModelTests.swift`
 - Test: `Tests/VibeCatUITests/Settings/InertControlsTests.swift`
+- Test: `Tests/VibeCatTransportTests/SocketClientTests.swift`
+- Test: `Tests/VibeCatHookKitTests/HookRunnerTests.swift`
 
 **Interfaces:**
 - Consumes: everything above.
@@ -843,6 +903,7 @@ answer is in.
 | `Confirm destructive answers` | `DestructiveGuard` — find its existing on/off input |
 | `Expand notch on hover` + `Hover duration` | `HoverMonitor` / Plan 6.3's reveal clocks |
 | `Auto-collapse on mouse leave` | the same |
+| `Hook reply timeout` | `SocketClient`'s delivery deadline, read by the hook — ruling 2 |
 | `Launch at Login` | `LoginItemControlling` from Task 5 |
 
 **Grep for each flag's current home before adding a second one.** Plan 6.1
@@ -850,6 +911,27 @@ shipped keyboard answering and the destructive guard; if either already reads a
 constant, this task replaces the constant with the preference — it does not
 introduce a parallel switch. Two sources of truth for "are number keys on" is
 strictly worse than one hardcoded `true`.
+
+**The hook reading preferences is new plumbing and gets its own steps.** Today
+`SocketClient` fixes the delivery deadline as a constant and `vibecat-hook`'s
+`main.swift` builds a client with no preferences at all. Three changes, smallest
+first:
+
+1. `SocketClient.clampedDelivery(_:) -> TimeInterval` bounding `0.05…2.0`,
+   beside the existing `clamped`, with a doc comment saying why the ranges
+   differ: one bounds how long a *person* may take, the other how long *IPC* may
+   take, and 60 seconds of IPC is §2.3 violated by arithmetic.
+2. `SocketClient` takes `deliveryDeadline` as an init parameter defaulting to the
+   current constant, so nothing that does not pass one changes behaviour.
+3. `vibecat-hook`'s `main.swift` builds a `UserDefaultsPreferenceStore` — which
+   after Task 1 points at the explicit suite — reads `hookReplyTimeout`, and
+   passes it through `clampedDelivery`.
+
+**The cost of step 3 is on the 300ms path and must be stated.** The hook is a
+short-lived process launched on every event; reading a plist adds work before the
+socket write. Measure it with `getrusage`, never `ps %cpu`, and record the number.
+If it is material, the answer is that the deadline is read once per process and
+the process handles one event — not that the feature is dropped.
 
 **What does not, and must say so:**
 
@@ -868,6 +950,33 @@ extension rows, custom jump rules, and the event log.
     let m = AppModel(/* the suite's existing fixture shape */)
     // …ingest an idle session, set `idleCleanup = .never`, advance `now` by a
     // year, call `prune(now:)`, and assert the session is still there.
+}
+
+/// **The test that would have caught the domain bug**, and the reason ruling 2
+/// has a measurement in it. A hook reading `.standard` finds nothing, falls back
+/// to 300ms, and looks wired — so asserting "the hook uses 300ms by default"
+/// passes either way and proves nothing. This writes a *non-default* value the
+/// way the app writes it, then reads it the way the hook reads it.
+@Test func theHookReadsTheDeadlineTheAppWroteRatherThanItsOwnDefault() {
+    let store = UserDefaultsPreferenceStore(defaults: <the explicit suite>, keyPrefix: Self.prefix)
+    var p = store.load()
+    p.hookReplyTimeout = 0.85
+    store.save(p)
+    // Built the way `vibecat-hook`'s `main.swift` builds it — same suite, same
+    // prefix, a separate store instance standing in for a separate process.
+    let asTheHookSeesIt = UserDefaultsPreferenceStore(defaults: <the explicit suite>,
+                                                      keyPrefix: Self.prefix).load()
+    #expect(asTheHookSeesIt.hookReplyTimeout == 0.85,
+            "the hook's store did not see what the app's store wrote")
+}
+
+/// `clampedDelivery` is a *different* range from `clamped`, and this is the
+/// assertion that fails if someone routes the delivery deadline through the
+/// answer clamp because both are "the deadline clamp".
+@Test func aDeliveryDeadlineIsBoundedMuchTighterThanAnAnswerDeadline() {
+    #expect(SocketClient.clampedDelivery(30) == 2.0)
+    #expect(SocketClient.clamped(30) == 30, "the answer clamp permits 30s and must keep doing so")
+    #expect(SocketClient.clampedDelivery(0.001) == 0.05)
 }
 
 /// The declared-inert list is the point of this task: it must name every row
@@ -974,13 +1083,27 @@ Named so the next reader files these as a schedule rather than a bug.
 - **Smart suppression** needs to know which terminal tab has focus, which is
   Automation-permission territory and belongs with jump.
 
+**Not out of scope but not present either:** `Carry on if VibeCat isn't running`.
+It is *removed by decision*, which is a different thing from deferred — nothing
+later will build it. Ruling 1 above is the record, and `IntegrationsPane`'s doc
+comment must repeat it.
+
+## Spec follow-up
+
+§14's Integrations line reads *"Reply channel, hook timeout, fail-open"*. After
+ruling 1 the third of those is not a control. Task 8 adds a dated §14 correction
+in §5.5's form saying so, and why: fail open returns no answer rather than
+`allow`, so a switch for it protects nothing and can only hang a terminal.
+
 ## Self-review
 
 **Spec coverage.** §14 General lists thirteen items; the table in Task 5 has
 thirteen rows. §14 Integrations lists eight items; Task 6's four groups cover
-all eight (`CLI hooks with per-source enable and install status`, `Add CLI
-branch`, `Auto-configure new CLIs`, `Reply channel, hook timeout, fail-open`,
-`IDE extensions`, `Custom jump rules`, `Socket`, `Event log`).
+seven of them (`CLI hooks with per-source enable and install status`, `Add CLI
+branch`, `Auto-configure new CLIs`, `Reply channel` and `hook timeout`, `IDE
+extensions`, `Custom jump rules`, `Socket`, `Event log`) and deliberately do not
+cover the eighth, `fail-open`, per ruling 1 — which is why the Spec follow-up
+above amends §14 rather than leaving the gap to read as an oversight.
 
 **Placeholders.** Two test bodies are deliberately left as derivations rather
 than code — `theTickCountIsTheOneAsked` and `idleCleanupSetToNeverPrunesNothingEver`
