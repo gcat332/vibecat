@@ -23,6 +23,7 @@ plan files twice; it is cheaper to keep it written down.
 | **6** | Jump and §16's AppleScript hint — everything else that was gated on keyboard input is 6.1 | §13, §16 | not written |
 | 7 | Generic adapter and custom sources — plus `SourceAdapter.icon`, so a source can point at its own icon file | §3 | **done** — [the plan](2026-08-05-generic-adapter.md), 6 tasks; 875 tests. Proved on hardware against **Codex CLI 0.145.0**, a CLI nobody wrote code for; found a main-thread hang reading an icon out of a TCC-protected directory. Carried findings below |
 | **8** | Matching motion cost to motion content | §9.1's rates | not written |
+| **9** | Parking a question in the session list — ESC sets it aside instead of giving up on it, and it renders as a `.rblock` under its own row | new; §11 + a §2.3 correction | **written, not started** — [the plan](2026-08-06-parking-questions.md), 8 tasks. Two owner decisions open: one parked question or one per session, and how a person gives up on purpose. Blocks 6.7's `hookReplyTimeout` field, which needs this plan's clamp |
 
 Everything that had no owner now has one. What follows is where each thing went
 and why, so a later reader does not have to reconstruct the reasoning.
