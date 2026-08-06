@@ -42,8 +42,10 @@ dependencies.
 - **Worst state wins (§4.2)** and **the session list is a view, not a state.**
   Parking must not change what the island reports. This is the invariant most at
   risk here and Task 3 has the assertion for it.
-- **Fail open (§2.3).** Every wait stays bounded. Parking extends how long a
-  person has, never to forever — see "Why not unbounded" below.
+- **Fail open (§2.3) stays true, and the two deadlines stay separate.**
+  **Delivery keeps its hard `300ms`** — that is what makes a crashed or absent
+  island harmless, together with socket EOF. The *answer* deadline is the
+  hand-back to the terminal (ruling C) and is the only one this plan moves.
 - **`Scripts/test.sh`**, not bare `swift test`.
 - **Concurrency reasoning goes next to the code.** `PendingQuestion` is the most
   thread-sensitive type in the repo: it is touched from `SocketServer`'s
@@ -84,29 +86,58 @@ on Escape and `:893` calls `appModel.dismissQuestion()`, which is
 `pending?.lapse()`. A person pressing ESC to get the panel out of the way loses
 the question. After this plan ESC parks, and giving up becomes explicit.
 
-## Why not unbounded ("รอเสมอ")
+## What the hook protocol actually allows — measured 2026-08-06
 
-The owner asked whether an empty timeout could mean wait forever. Three
-scenarios, and the third is why the answer is no:
+The owner asked whether the timeout could be removed so a question waits
+indefinitely, and whether a question could be answerable at the notch **and** in
+the terminal at once. Both were settled by measurement rather than by reasoning
+from §2.3, and the results changed this plan's design.
 
-| Situation | Is the hook released? |
+**Method.** A scratch project with a `PreToolUse` hook on `Bash` that logged its
+entry time, wrote a marker to stderr, slept 3s, logged its exit, and returned no
+decision. Driven with `claude -p 'Run exactly this with the Bash tool …'
+--allowedTools Bash` (Claude Code 2.1.223), twice — once with
+`--output-format json`, once plain — with every output line timestamped.
+
+| Question | Result |
 |---|---|
-| Island alive, person answers or dismisses | Yes — `resolve` / `lapse` signals the gate |
-| Island **crashes** while parked | Yes — the socket closes, `read()` returns `0`, and `SocketClient.readLine` falls through to `return nil` (`SocketClient.swift:202-204`) |
-| Island **wedged** — process alive, main actor deadlocked | **No.** No EOF, and the UI cannot process ESC |
+| Does the CLI wait for the hook? | **Yes.** Nothing appeared between `+3.06s` and `+17.02s` while the hook slept; the tool's output followed the hook's exit. |
+| Is the hook's stderr shown? | **No.** The marker reached neither stream, on `exit 0` or `exit 1`. |
+| Are the hook's stdout/stderr ttys? | No — pipes. Parent process `claude`. |
+| Can a question be retracted? | **No.** Payload keys are `hook_event_name`, `tool_name`, `tool_input`, `tool_use_id`, `transcript_path`, `prompt_id`, `session_id`, `permission_mode`, `cwd`, `effort`. Nothing cancels an in-flight ask. |
 
-A hung SwiftUI app is more likely than a crashed one, and in that case the
-deadline is the only thing that returns the terminal. `SocketClient.swift:96-99`
-already says this in its own words: an unbounded read expiry lets *"a peer that
-trickles at least one byte before every `SO_RCVTIMEO` window closes ride that
-forever — the unbounded wait §2.3 forbids outright."*
+**Unmeasured, and abandoned rather than chased.** Whether a hook can write to
+`/dev/tty` was **not** established: both attempts ran from a shell with no
+controlling terminal (`tty` → `not a tty`, `ps -o tty=` → `??`), so
+`/dev/tty write: FAILED` says nothing about a real Terminal session. Dropped on
+reasoning rather than on a result: Claude Code's TUI redraws continuously, so an
+unsolicited write would be overwritten or garble a frame. Labelled as reasoning.
 
-**So: minutes, with a real ceiling.** Task 7 raises the answer clamp to
-`0.05…60` **minutes** and an empty field means the ceiling, not infinity.
+### What follows
+
+**Only one party holds the decision at a time.** The CLI's prompt does not appear
+until the hook returns, so "answerable at the notch and in the terminal
+simultaneously" is not a preference to choose — it is unavailable. The only
+alternative would be typing into the terminal for the user, which §2.3's framing
+rejects outright: replying through the hook is exact *because* it is not simulated
+keystrokes.
+
+**So the deadline is not a safety net — it is the hand-back mechanism.** Without it
+the terminal never gets a prompt at all.
+
+**That inverts what an earlier draft of this section argued.** It claimed waiting
+forever was "identical to the CLI's own behaviour, which has no timeout." Wrong,
+and the correction is the useful part: the CLI's prompt also waits forever, but it
+is **visible** the whole time. A blocked hook is invisible — the terminal looks
+idle. Same duration, opposite discoverability.
+
+**And one line of the prototype's copy is false.** `settings.html:291` reads *"How
+long the hook waits before letting the agent carry on without you."* The agent does
+not carry on without you; measured, the CLI asks you itself. Task 7 fixes it.
 
 ---
 
-## The two rulings, given 2026-08-06
+## The three rulings, given 2026-08-06
 
 ### A. Scope: **one parked question per session**
 
@@ -144,6 +175,51 @@ Dismiss is being pressed, and the concern it was guarding against cannot arise.
 *and* dismiss in one click. Task 6's `answeringInsideTheBlockDoesNotJump` gets a
 sibling: `dismissingFromTheHeaderDoesNotJump`.
 
+### C. The hand-back deadline: **1 minute by default, still settable**
+
+Named for what it does rather than for its mechanism: the field is
+`handBackToTerminalAfter`, not `hookReplyTimeout`.
+
+**Default 1 minute, and the owner's reasoning is the right one:** *"ตอนแรกเข้าใจ
+ว่าจะตอบตรงไหนก็ได้ ถ้าได้แค่ทีเดียวให้แค่ 1 นาทีพอ"* — if the notch monopolises
+the decision, it should not monopolise it for long. A longer default was only on
+the table while both channels looked simultaneously available, which the
+measurements above ruled out.
+
+**Still settable in Settings**, which is the point of §14's row: range `0.5…60`
+minutes plus `Never`. `Never` means the notch holds the question for as long as the
+hook lives and the terminal is never prompted — available, not the default.
+
+### What the row shows after the hand-back
+
+**The row does not change.** Still amber, still `Needs you`, still showing the
+command — `island-motion.html:788-789`'s own vocabulary, with `metaLine`
+(`:816-821`) already naming the terminal. All of it is still true: the agent still
+needs the person, just somewhere else. No new state and no new colour, so §4.3 is
+untouched.
+
+**The block changes.** Choices and `Dismiss` disappear — the hook is gone, so there
+is nothing here left to answer or to give up on — and one line takes their place:
+`Waiting for you in iTerm2 ↗`. The command stays, per *never truncate away the
+thing being decided*: someone about to walk to a terminal still needs to know what
+they are approving. The only useful action left is jumping, which is already what
+the header does.
+
+It clears itself. Answering in the terminal runs the tool, `PostToolUse` fires, and
+the session leaves `.waiting`.
+
+**Task 2 shipped the opposite and needs amending**, which is recorded in its own
+section below: its `prune` *removes* a question whose hook has given up, and a
+removed question leaves nothing to draw this state from.
+
+### Ordering constraint
+
+**Task 5 must land before Task 7.** Task 5 is what renders a parked question at
+all; Task 7 is what lengthens how long one can be parked. In the other order a
+question can be invisible for up to an hour with nowhere to answer it. The plan is
+ordered correctly — this is written down because plan order gets reshuffled.
+
+
 ---
 
 ## File Structure
@@ -168,7 +244,8 @@ sibling: `dismissingFromTheHeaderDoesNotJump`.
 | `Sources/VibeCatUI/Drawer/SessionRow.swift` | hosts a `QuestionBlock`; the jump hit-region narrows to the header |
 | `Sources/VibeCatUI/Drawer/SessionListFace.swift` | rows grow, so the face's height stops being one constant |
 | `Sources/VibeCatUI/IslandGeometry.swift` | `DrawerFace.sessionList`'s `420` becomes a floor, not a fixed height |
-| `Sources/VibeCatTransport/SocketClient.swift` | the answer clamp's ceiling moves to 60 minutes |
+| `Sources/VibeCatTransport/SocketClient.swift` | `clampedAnswer` spans 30s–60min; `deadlineInstant(minutes:)` makes `Never` explicit |
+| `Sources/VibeCatCore/Preferences.swift` | `handBackToTerminalAfter: Double?` |
 | `docs/superpowers/specs/2026-07-31-vibecat-design.md` | a §11 section for parking, and a dated §2.3 correction |
 
 ---
@@ -284,6 +361,22 @@ git commit -m "feat: a question can be parked without releasing the hook waiting
   changed `onQuestion` contract.
 
 **Ruled in: one pending question per session** (ruling A).
+
+> **Amended after Task 2 shipped, by rulings B and C.** Two things in this section
+> are now wrong and the corrections live with the tasks that own them:
+>
+> 1. **Keyed by session is wrong** — one session can have several outstanding
+>    questions, because parallel tool calls each fire their own `PreToolUse` hook and
+>    subagents share the parent's `session_id`. Fixed in `576fe20`: keyed by question
+>    id, nothing displaced but an exact duplicate.
+> 2. **`prune` must stop removing a question whose hook has given up.** Ruling C's
+>    handed-back row draws its command from that question; removing it leaves nothing
+>    to draw. The rule becomes: `answer` removes, `Dismiss` removes, **a hand-back
+>    keeps** — and `hasLapsed(at:)` is what distinguishes the block's two states, so
+>    no new flag is needed on `PendingQuestion`. A kept-and-settled question is
+>    removed when its session leaves `.waiting`. Do this in Task 5, beside the view
+>    that depends on it, rather than as a lone `prune` edit whose reason lives
+>    elsewhere.
 
 **The current shape and what has to change.** `AppModel.swift:157` is
 `public private(set) var pending: PendingQuestion?`, and `:280-281` lapses the old
@@ -472,7 +565,29 @@ Escape parks and only parks.
   `blockHeader(_:detail:)` — extract them to be reachable rather than
   re-deriving the chrome; `ChoiceRow` (`:92` already has `onTapGesture`);
   `DestructiveGuard`; `QuestionModel`.
-- Produces: `QuestionBlock(question:, onAnswer:, onDismiss:)`.
+- Produces: `QuestionBlock(question:, onAnswer:)` with **two states**, and the
+  `prune` amendment ruling C requires.
+
+**The block has two states and one of them has no controls** (ruling C):
+
+| State | Test | Draws |
+|---|---|---|
+| answerable | `!question.hasLapsed(at: now)` | the command, the choices one per row, and the header's `Dismiss` |
+| handed back | `question.hasLapsed(at: now)` | the command, and one line — `Waiting for you in <terminal> ↗` |
+
+The command is in both, per *never truncate away the thing being decided*: someone
+about to walk to a terminal still needs to know what they are approving. Nothing
+else is: with the hook gone there is nothing here to answer or to give up on.
+
+**The terminal's name comes from the row's own `metaLine`** — the prototype already
+prints it (`island-motion.html:816-821`, `SESSIONS[0].term` is `'iTerm2'`), so read
+it from the session rather than inventing a second source.
+
+**Also this task: stop `prune` removing a handed-back question.** Task 2 shipped
+`prune` dropping anything `hasLapsed`, which deletes exactly what the second state
+draws from. Change it to remove a settled question when its session leaves
+`.waiting` instead, and keep the guarded notify — `aPruneThatDropsNoQuestionDoesNotNotify`
+already pins that and must stay green.
 
 **`onDismiss` is *not* this view's** — ruling B puts the control on the session
 row's header (`.rtop`, `island-motion.html:351`), which is `SessionRow`'s, so the
@@ -620,56 +735,86 @@ implementation.
 
 ---
 
-### Task 7: The answer deadline in minutes
+### Task 7: The hand-back deadline, in minutes
 
 **Files:**
 - Modify: `Sources/VibeCatTransport/SocketClient.swift`
+- Modify: `Sources/VibeCatCore/Preferences.swift`
 - Test: `Tests/VibeCatTransportTests/SocketClientTests.swift`
 
-**Interfaces:** produces a changed `clamped` range. Consumed by Plan 6.7's
-`hookReplyTimeout` field, which is why that field was held back until this plan.
+**Interfaces:** produces `SocketClient.clampedAnswer` over a new range, and the
+`handBackToTerminalAfter` preference Plan 6.7's Settings row binds to — which is
+why that row was held back until this plan.
 
-**What changes:** `SocketClient.clamped` bounds `0.02…60` **seconds** today
-(`:47`). Parking means a question can sit for as long as a person is away, so the
-ceiling becomes **60 minutes** — `0.05…3600` seconds. The floor rises from `0.02`
-to `0.05` for the same reason 6.7's delivery clamp does: 20ms is not a deadline
-anyone chose.
+**Must not start before Task 5** (see the ordering constraint above).
 
-**The delivery deadline does not change.** It stays `300ms` and it is what makes
-a crashed island harmless. Two deadlines bounding two different things is §2.3's
-own structure; this task moves one of them and must not blur them.
+**What this deadline is, in the words the measurements earned.** It is not a
+timeout guarding against a hang — a crashed island is already handled by the 300ms
+delivery deadline and by socket EOF. It is **the hand-back**: the only mechanism by
+which the terminal ever gets a prompt, because measured, the CLI shows nothing of
+its own while a hook is blocked. Name it for that:
 
-**Check the saturation hazard explicitly.** CLAUDE.md records that *"an absurd
-value saturates a `DispatchTime` into `.distantFuture`, parking a thread
-forever."* 3600 seconds is far from that boundary, but the check belongs in the
-test rather than in a reader's confidence.
+| | |
+|---|---|
+| Preference | `handBackToTerminalAfter: Double?` — minutes; `nil` is `Never` |
+| Default | **1 minute** (ruling C) |
+| Range | `0.5…60` minutes, plus `Never` |
+| Clamp | `SocketClient.clampedAnswer`, bounding `30…3600` seconds |
+| Unchanged | the **delivery** deadline stays `300ms` |
 
-- [ ] **Step 1: Write the failing test**
+**`Double?` rather than a sentinel.** `Never` is not a duration and spelling it as
+a magic large number is how `IdleCleanup` in Plan 6.7 avoided the same trap. `nil`
+maps to `.distantFuture` at the one place a `DispatchTime` is built, explicitly,
+rather than by arithmetic that saturates — CLAUDE.md records that an absurd
+interval saturating into `.distantFuture` is a way to park a thread by accident,
+and doing it on purpose in one named place is the opposite of that bug.
+
+- [ ] **Step 1: Write the failing tests**
 
 ```swift
-/// The new ceiling, and that it is still a ceiling.
-@Test func theAnswerDeadlineReachesAnHourAndStopsThere() {
-    #expect(SocketClient.clamped(3600) == 3600)
-    #expect(SocketClient.clamped(3601) == 3600)
-    #expect(SocketClient.clamped(86_400) == 3600, "a day-long deadline was honoured")
-    #expect(SocketClient.clamped(0.001) == 0.05)
+/// The new range, and that it is still a range. `clamped`'s old ceiling was 60
+/// *seconds*; a hand-back measured in minutes needs an hour of headroom and still
+/// needs a floor no smaller than "long enough for a person to read a sentence".
+@Test func theHandBackDeadlineSpansHalfAMinuteToAnHour() {
+    #expect(SocketClient.clampedAnswer(30) == 30)
+    #expect(SocketClient.clampedAnswer(3600) == 3600)
+    #expect(SocketClient.clampedAnswer(3601) == 3600)
+    #expect(SocketClient.clampedAnswer(86_400) == 3600, "a day-long hand-back was honoured")
+    #expect(SocketClient.clampedAnswer(0.001) == 30)
 }
 
-/// An hour, converted the way the socket converts it, is still a real instant
-/// and not `.distantFuture` — the saturation CLAUDE.md warns about.
-@Test func anHourLongDeadlineIsAFiniteDispatchTime() {
-    let t = DispatchTime.now() + SocketClient.clamped(3600)
-    #expect(t < .distantFuture)
+/// The delivery deadline is a different bound and must not move with it. A single
+/// clamp reused for both is the mistake this test exists to catch — 3600s of
+/// *delivery* is §2.3 broken by arithmetic rather than by a switch.
+@Test func theDeliveryDeadlineDidNotMoveWithIt() {
+    #expect(SocketClient.defaultDeliveryDeadline == 0.300)
+    #expect(SocketClient.clampedDelivery(3600) < 3.0)
+}
+
+/// `Never` is finite arithmetic's absence, not its extreme. Built in one named
+/// place so nothing computes its way there by overflow.
+@Test func neverBecomesDistantFutureExplicitlyAndNothingElseDoes() {
+    #expect(SocketClient.deadlineInstant(minutes: nil) == .distantFuture)
+    #expect(SocketClient.deadlineInstant(minutes: 60) < .distantFuture)
 }
 ```
 
-- [ ] **Step 2: Run, watch fail.** — [ ] **Step 3: Implement.**
+- [ ] **Step 2: Run, watch fail.**
+
+- [ ] **Step 3: Implement**, and fix the copy while the reason is in hand. The
+      prototype's caption (`settings.html:291`) says the agent will *"carry on
+      without you"*, which the measurements show is false — it asks you itself.
+      Plan 6.7's row takes: **"How long the notch holds the question before the
+      terminal asks you instead."** Record it as a written prototype divergence in
+      the pane's own doc comment, with the line number.
+
 - [ ] **Step 4: Run the whole suite.** Every existing test asserting the `60`
-      ceiling will fail; each one is either updated to `3600` or is asserting
-      something this plan deliberately changed. **Read each before editing it** —
-      a test that was pinning "a deadline cannot be absurd" still needs to pin
-      that, at the new bound.
+      ceiling fails. **Read each before editing it** — one that was pinning "a
+      deadline cannot be absurd" still needs to pin that, at the new bound. A test
+      updated without being read is how a guard silently loses its point.
+
 - [ ] **Step 5: Dispatch `concurrency-auditor`.**
+
 - [ ] **Step 6: Commit**
 
 ---
